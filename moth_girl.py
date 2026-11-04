@@ -487,6 +487,7 @@ class App(Gtk.Application):
             'wifi': lambda ssid: self.ev(lambda b: b.world('wifi_on', ssid=ssid) if ssid else b.world('wifi_off')),
             'dnd': lambda on: self.ev(lambda b: b.set_sleep(on)),
             'music': lambda on: self.ev(lambda b: b.world('music', playing=on)),
+            'beat': lambda v: self.ev(lambda b: b.world('beat', level=v)),
             'idle': lambda kind: self.ev(lambda b: b.idle_event(kind)),
             'palette': self.on_palette,
             'caps': self.on_caps,

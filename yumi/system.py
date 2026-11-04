@@ -182,6 +182,32 @@ class World:
         playing = line.strip() == 'Playing'
         if self.changed('music', playing):
             self.emit('music', playing)
+            self.cava_run(playing)
+
+    def cava_run(self, on):
+        """while music plays, cava's bass bars drive her dance: emit('beat', 0..1)"""
+        proc, self.cava = getattr(self, 'cava', None), None
+        if proc:
+            proc.terminate()
+        if not on or not shutil.which('cava'):
+            return
+        cfg = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'yumi-cava.conf'
+        cfg.write_text('[general]\nframerate=30\nbars=6\n[input]\nmethod=pulse\nsource=auto\n'
+                       '[output]\nmethod=raw\ndata_format=ascii\nascii_max_range=100\n'
+                       'bar_delimiter=59\nframe_delimiter=10\n')
+        self.cava = proc = subprocess.Popen(['cava', '-p', str(cfg)], stdout=subprocess.PIPE,
+                                            stderr=subprocess.DEVNULL, text=True, env=ENV)
+
+        def read():
+            for line in proc.stdout:
+                try:
+                    bars = [int(v) for v in line.split(';') if v.strip()]
+                except ValueError:
+                    continue
+                if bars:
+                    self.emit('beat', max(bars[:2]) / 100)
+            # shortcut: no restart if cava dies mid-song, she falls back to the sine sway
+        threading.Thread(target=read, daemon=True).start()
 
     # --- wallpaper
     def watch_wallpaper(self):

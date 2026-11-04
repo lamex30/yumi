@@ -228,6 +228,7 @@ class Brain(Extras):
         self.stay = False
         self.sleeping = False
         self.music = False
+        self.beat = 0.0                 # bass level from cava, 0..1
         self.busy = False
         self.progress = None            # (fraction, label)
         self.pile = None                # 'recent' / 'shelf'
@@ -333,7 +334,7 @@ class Brain(Extras):
             y += round(2 * math.sin(self.now * 2.4)) * self.S
         if self.music and self.mode == 'docked' and not self.sleeping:
             x += round(1.5 * math.sin(self.now * 2 * math.pi * 0.9)) * self.S
-            y -= round(abs(math.sin(self.now * 2 * math.pi * 0.9))) * self.S
+            y -= round(4 * self.beat ** 2 if self.beat > 0.05 else abs(math.sin(self.now * 2 * math.pi * 0.9))) * self.S
         return x, y
 
     def origin(self):
@@ -560,7 +561,11 @@ class Brain(Extras):
 
     def world(self, event, **kw):
         """system events: charger_on/off, battery_low, wifi_on/off, download, screenshot, music"""
+        if event == 'beat':
+            self.beat = max(kw['level'], self.beat * 0.8)     # up at once, down over a few frames
+            return
         if event == 'music':
+            self.beat = 0.0
             playing = kw.get('playing', False)
             if playing and not self.music:
                 self.say('music')
