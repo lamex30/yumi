@@ -144,7 +144,7 @@ class Moth:
         if b.pointer:
             d = math.hypot(b.pointer[0] - self.x, b.pointer[1] - self.y)
             speed = 0.3 + 0.7 * min(1.0, d / (160 * S))
-        if b.busy or b.music:
+        if b.busy or b.beat > 0.05:
             speed *= 1.6
         self.tm += dt * speed
         self.under = False
@@ -198,7 +198,7 @@ class Moth:
         if self.state in ('land', 'head', 'sleep'):
             per = 1.4 if self.state == 'sleep' else 0.6
             return names.index('rest0') + int(now / per) % 2
-        fps = 16 if (self.b.busy or self.b.music) else 10
+        fps = 16 if (self.b.busy or self.b.beat > 0.05) else 10
         return [0, 1, 2, 1][int(now * fps) % 4]
 
 
@@ -227,8 +227,11 @@ class Brain(Extras):
         self.out = False
         self.stay = False
         self.sleeping = False
-        self.music = False
-        self.beat = 0.0                 # bass level from cava, 0..1
+        self.music = False              # a player says 'Playing'; only decides whether cava listens
+        self.beat = 0.0                 # bass level from cava, 0..1: all of her dance follows it
+        self.beat_avg = 0.0             # the same, slowly
+        self.beat_since = None          # since when the average has been up
+        self.beat_said = False
         self.busy = False
         self.progress = None            # (fraction, label)
         self.pile = None                # 'recent' / 'shelf'
@@ -332,9 +335,9 @@ class Brain(Extras):
             y += self.yoff.x
         if self.mode == 'air' and self.pose()[0] in ('hover', 'shy'):
             y += round(2 * math.sin(self.now * 2.4)) * self.S
-        if self.music and self.mode == 'docked' and not self.sleeping:
-            x += round(1.5 * math.sin(self.now * 2 * math.pi * 0.9)) * self.S
-            y -= round(4 * self.beat ** 2 if self.beat > 0.05 else abs(math.sin(self.now * 2 * math.pi * 0.9))) * self.S
+        if self.beat > 0.05 and self.mode == 'docked' and not self.sleeping:
+            x += round(2 * self.beat * math.sin(self.now * 2 * math.pi * 0.9)) * self.S
+            y -= round(4 * self.beat ** 2) * self.S
         return x, y
 
     def origin(self):
@@ -563,13 +566,19 @@ class Brain(Extras):
         """system events: charger_on/off, battery_low, wifi_on/off, download, screenshot, music"""
         if event == 'beat':
             self.beat = max(kw['level'], self.beat * 0.8)     # up at once, down over a few frames
+            self.beat_avg += (kw['level'] - self.beat_avg) * 0.02
+            if self.beat_avg < 0.15:
+                self.beat_since = None
+            elif self.beat_since is None:
+                self.beat_since = self.now
+            elif not self.beat_said and self.now - self.beat_since > 6:
+                self.beat_said = self.say('music')    # only once the rhythm has held for a while
             return
         if event == 'music':
-            self.beat = 0.0
-            playing = kw.get('playing', False)
-            if playing and not self.music:
-                self.say('music')
-            self.music = playing
+            self.beat = self.beat_avg = 0.0
+            self.beat_since = None
+            self.beat_said = False
+            self.music = kw.get('playing', False)
             return
         self.say(event, **kw)
 
@@ -1193,7 +1202,7 @@ class Brain(Extras):
         ops = []
         cfg = self.meta.poses.get(pose, {})
         wings = 'rest' if pose == 'stand' else cfg.get('wings', 'none')
-        if self.music and wings == 'rest':
+        if self.beat > 0.15 and wings == 'rest':
             wings = 'flutter'
         wf = {'flap': SEQ[int(t * 16) % 8], 'flutter': SEQ[int(t * 8) % 8],
               'rest': SEQ[int(t * 8 / 2.5) % 8]}.get(wings)
@@ -1224,7 +1233,7 @@ class Brain(Extras):
             ops.append(('spr', 'prop:eyedropper', 0, bx - 2 * S, by + 108 * S, 1.0, 0.3, 11, 50))
         ops += self.hat_ops('hat', bx, by)
         ant = cfg.get('antennae', 'normal') if pose != 'stand' else 'normal'
-        speed = 2 if self.music else 4
+        speed = 2 if self.beat > 0.05 else 4
         af = SEQ[int(t * 8 / speed) % 8]
         for n, droop in (('antenna_left', 0.5), ('antenna_right', -0.5)):
             if ant == 'droop':
