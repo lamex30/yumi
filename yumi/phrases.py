@@ -93,8 +93,6 @@ LINES = {
                   ("Blanket mode.", 'sleeping'), ("Nap time. Shh.", 'sleeping')],
         'wake': [("Mmh? I'm awake. I'm awake.", 'surprised'), ("Five more minutes... okay, fine.", None),
                  ("Huh? Oh, hi.", 'surprised'), ("I wasn't sleeping. Just resting my eyes.", 'wink')],
-        'music': [("Oh, this is a good one.", 'happy'), ("I can't sit still to this.", 'happy'),
-                  ("Okay, this has a nice beat.", 'wink'), ("Who's playing this? I like it.", 'happy')],
         'charger_on': [("Charging. Yum.", 'happy'), ("Power! Thank you.", 'happy'),
                        ("Plugged in, cozy.", None)],
         'charger_off': [("Unplugged... I'll be careful.", None), ("Running on battery now.", None),
@@ -184,8 +182,6 @@ LINES = {
                   ("Режим пледика.", 'sleeping'), ("Тихий час. Тшш.", 'sleeping')],
         'wake': [("Мм? Я не сплю. Не сплю.", 'surprised'), ("Ещё пять минуточек... ладно.", None),
                  ("А? О, привет.", 'surprised'), ("Я не спала. Просто глазки отдыхали.", 'wink')],
-        'music': [("О, а это классная.", 'happy'), ("Под такое невозможно сидеть спокойно.", 'happy'),
-                  ("Хороший ритм, мне нравится.", 'wink'), ("Что это играет? Мне нравится.", 'happy')],
         'charger_on': [("Заряжаемся. Ням.", 'happy'), ("Энергия! Спасибо.", 'happy'),
                        ("Подключили, уютно.", None)],
         'charger_off': [("Отключили... буду экономной.", None), ("Теперь на батарейке.", None),
@@ -215,7 +211,7 @@ LINES = {
 KIND = {  # which rate limit an event falls under; everything else is an "action"
     'charger_on': 'system', 'charger_off': 'system', 'battery_low': 'system',
     'wifi_on': 'system', 'wifi_off': 'system', 'download': 'system', 'screenshot': 'system',
-    'music': 'system', 'chatter': 'chatter',
+    'chatter': 'chatter',
 }
 
 

@@ -229,9 +229,6 @@ class Brain(Extras):
         self.sleeping = False
         self.music = False              # a player says 'Playing'; only decides whether cava listens
         self.beat = 0.0                 # bass level from cava, 0..1: all of her dance follows it
-        self.beat_avg = 0.0             # the same, slowly
-        self.beat_since = None          # since when the average has been up
-        self.beat_said = False
         self.busy = False
         self.progress = None            # (fraction, label)
         self.pile = None                # 'recent' / 'shelf'
@@ -563,21 +560,12 @@ class Brain(Extras):
     sleep_since = 0.0
 
     def world(self, event, **kw):
-        """system events: charger_on/off, battery_low, wifi_on/off, download, screenshot, music"""
+        """system events: charger_on/off, battery_low, wifi_on/off, download, screenshot (music: no words, only her dance)"""
         if event == 'beat':
             self.beat = max(kw['level'], self.beat * 0.8)     # up at once, down over a few frames
-            self.beat_avg += (kw['level'] - self.beat_avg) * 0.02
-            if self.beat_avg < 0.15:
-                self.beat_since = None
-            elif self.beat_since is None:
-                self.beat_since = self.now
-            elif not self.beat_said and self.now - self.beat_since > 6:
-                self.beat_said = self.say('music')    # only once the rhythm has held for a while
             return
         if event == 'music':
-            self.beat = self.beat_avg = 0.0
-            self.beat_since = None
-            self.beat_said = False
+            self.beat = 0.0
             self.music = kw.get('playing', False)
             return
         self.say(event, **kw)
