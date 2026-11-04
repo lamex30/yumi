@@ -1,0 +1,1 @@
+{"at_body": [0, 0], "size": [117, 79], "faces": ["happy", "surprised", "shy", "talkA", "talkO", "annoyed", "sleeping", "wink", "worried"], "note": "draw over body.png at (0,0). Only rows<64 full head, rows 64..78 face region only, so no chin/hair seam. Body palette."}

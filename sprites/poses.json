@@ -1,0 +1,149 @@
+{
+ "note": "dx,dy = where standing body-local (0,0) lands in this frame; attach rig parts with the same offsets as on the standing body",
+ "poses": {
+  "held": {
+   "frames": [
+    {
+     "img": "held/held0.png",
+     "dx": 11,
+     "dy": -1
+    },
+    {
+     "img": "held/held1.png",
+     "dx": 7,
+     "dy": -1
+    },
+    {
+     "img": "held/held2.png",
+     "dx": 5,
+     "dy": -4
+    }
+   ],
+   "order": [
+    0,
+    1,
+    2,
+    1
+   ],
+   "fps": 4,
+   "wings": "flutter",
+   "antennae": "normal"
+  },
+  "sit": {
+   "frames": [
+    {
+     "img": "sit/body0.png",
+     "dx": 1,
+     "dy": 1
+    },
+    {
+     "img": "sit/body1.png",
+     "dx": 1,
+     "dy": 1
+    },
+    {
+     "img": "sit/body2.png",
+     "dx": 1,
+     "dy": 1
+    }
+   ],
+   "order": [
+    0,
+    1,
+    2,
+    1
+   ],
+   "fps": 4,
+   "wings": "rest",
+   "antennae": "normal",
+   "heads": {
+    "closed": "sit/head_closed.png",
+    "yawn": "sit/head_yawn.png",
+    "oh": "sit/head_oh.png"
+   }
+  },
+  "hover": {
+   "frames": [
+    {
+     "img": "hover/n0.png",
+     "dx": 39,
+     "dy": -1
+    },
+    {
+     "img": "hover/n1.png",
+     "dx": 39,
+     "dy": -1
+    },
+    {
+     "img": "hover/n2.png",
+     "dx": 40,
+     "dy": -1
+    }
+   ],
+   "order": [
+    0,
+    1,
+    2,
+    1
+   ],
+   "fps": 4,
+   "wings": "flap",
+   "antennae": "normal"
+  },
+  "shy": {
+   "frames": [
+    {
+     "img": "hover/s0.png",
+     "dx": 39,
+     "dy": -1
+    },
+    {
+     "img": "hover/s1.png",
+     "dx": 39,
+     "dy": -1
+    },
+    {
+     "img": "hover/s2.png",
+     "dx": 37,
+     "dy": -2
+    }
+   ],
+   "order": [
+    0,
+    1,
+    2,
+    1
+   ],
+   "fps": 4,
+   "wings": "flap",
+   "antennae": "normal"
+  },
+  "sleep": {
+   "frames": [
+    {
+     "img": "sleep/sleep0.png",
+     "dx": 0,
+     "dy": -2
+    },
+    {
+     "img": "sleep/sleep1.png",
+     "dx": -1,
+     "dy": -2
+    },
+    {
+     "img": "sleep/sleep2.png",
+     "dx": -3,
+     "dy": -3
+    }
+   ],
+   "order": [
+    0,
+    1,
+    2
+   ],
+   "fps": 1,
+   "wings": "none",
+   "antennae": "droop"
+  }
+ }
+}

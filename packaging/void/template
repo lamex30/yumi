@@ -1,0 +1,16 @@
+# Template file for 'yumi-moth'
+pkgname=yumi-moth
+version=1.0.0
+revision=1
+depends="python3 python3-gobject python3-cairo gtk4 gtk4-layer-shell"
+short_desc="Sleepy pixel-art moth girl who lives at the bottom of your Wayland screen"
+maintainer="lamex30 <https://github.com/lamex30>"
+license="MIT"
+homepage="https://github.com/lamex30/yumi"
+distfiles="https://github.com/lamex30/yumi/archive/refs/tags/v${version}.tar.gz"
+checksum=SKIP
+
+do_install() {
+	PREFIX=/usr DESTDIR="${DESTDIR}" sh install.sh
+	vlicense LICENSE
+}

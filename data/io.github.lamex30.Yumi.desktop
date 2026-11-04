@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Yumi
+GenericName=Desktop companion
+Comment=A sleepy pixel-art moth girl who lives at the bottom of your screen
+Comment[ru]=Сонная пиксельная девочка-мотылёк, которая живёт у нижнего края экрана
+Exec=yumi
+Icon=io.github.lamex30.Yumi
+Terminal=false
+Categories=Utility;Accessories;
+Keywords=assistant;companion;pet;pixel;moth;timer;color;picker;
+StartupNotify=false

@@ -1,0 +1,5 @@
+[
+  {"label": "Terminal", "label_ru": "Терминал", "icon": "gear", "command": "foot"},
+  {"label": "Notes", "label_ru": "Заметки", "icon": "doc", "command": "gnome-text-editor"},
+  {"label": "Play / pause", "label_ru": "Пауза", "icon": "play", "command": "playerctl play-pause"}
+]

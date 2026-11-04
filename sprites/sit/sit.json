@@ -1,0 +1,28 @@
+{
+ "bodies": [
+  "body0.png",
+  "body1.png",
+  "body2.png"
+ ],
+ "swing_order": [
+  0,
+  1,
+  2,
+  1
+ ],
+ "fps": 4,
+ "heads": {
+  "closed": "head_closed.png",
+  "yawn": "head_yawn.png",
+  "oh": "head_oh.png"
+ },
+ "head_at": [
+  0,
+  0
+ ],
+ "size": [
+  138,
+  218
+ ],
+ "note": "draw head over body at (0,0); hybrid mask: full head above row 78, face-only rows 78..89 (no seam)"
+}

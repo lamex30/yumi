@@ -1,0 +1,42 @@
+#!/bin/sh
+# Yumi, a sleepy pixel-art moth girl for Wayland desktops.
+#   yumi [--toggle|--pipette|--home|--recent|--sleep|--monitor|--quit|--version|--help]
+# Flags go straight to the running Yumi over D-Bus (fast) and start her if she is not running.
+DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"   # @DIR@ (make install puts the real path here)
+APP=io.github.lamex30.Yumi
+OBJ=/io/github/lamex30/Yumi
+unset WAYLAND_SOCKET
+
+case "$1" in
+    --toggle|--pipette|--home|--recent|--sleep|--monitor|--quit)
+        gdbus call --session --dest "$APP" --object-path "$OBJ" \
+            --method org.gtk.Actions.Activate "${1#--}" "[]" "{}" >/dev/null 2>&1 && exit 0
+        [ "$1" = --quit ] && exit 0
+        ;;
+    --version|-v)
+        exec python3 -c "import sys; sys.path.insert(0, '$DIR'); import yumi; print('yumi', yumi.__version__)"
+        ;;
+    --help|-h)
+        sed -n '2,4p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0
+        ;;
+esac
+
+# gtk4-layer-shell has to be loaded before libwayland-client, so it is preloaded.
+LIB="$YUMI_LAYER_SHELL_LIB"
+if [ -z "$LIB" ] && command -v ldconfig >/dev/null 2>&1; then
+    LIB="$(ldconfig -p 2>/dev/null | awk '/libgtk4-layer-shell\.so/ {print $NF; exit}')"
+fi
+if [ -z "$LIB" ]; then
+    for f in /usr/lib/libgtk4-layer-shell.so* /usr/lib64/libgtk4-layer-shell.so* \
+             /usr/lib/*-linux-gnu*/libgtk4-layer-shell.so* /usr/local/lib*/libgtk4-layer-shell.so* \
+             /run/current-system/sw/lib/libgtk4-layer-shell.so*; do
+        [ -e "$f" ] && LIB="$f" && break
+    done
+fi
+if [ -z "$LIB" ]; then
+    echo "yumi: gtk4-layer-shell is not installed (see the README for your distro)." >&2
+    exit 1
+fi
+
+LD_PRELOAD="$LIB${LD_PRELOAD:+:$LD_PRELOAD}" exec python3 "$DIR/moth_girl.py" "$@"
