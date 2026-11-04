@@ -40,6 +40,8 @@ English · [Русский](README.ru.md)
   to drink water if you ask her to.
 - **Seasonal outfits** with hats she made holes in for her antennae.
 - **Several screens.** Carry her over to another one.
+- **Her voice.** Her words type out with little 8-bit blips, like a game character talking
+  (Settings → Sound → Voice: volume or off).
 - English and Russian, picked from your system language.
 
 <img src="docs/colors.png" alt="Yumi on teal, rose, amber and blue wallpapers, recolored to each" width="100%">
@@ -98,8 +100,10 @@ Void `template` in [`packaging/`](packaging).
 
 ### 3. Start her with your session and give her a hotkey
 
-`yumi --toggle` pops her out, hides her or wakes her up. Other flags: `--pipette`, `--recent`,
-`--sleep` (Do Not Disturb), `--home`, `--monitor`, `--quit`.
+`yumi` starts her in the background: you can close the terminal, she stays. `yumi --toggle` pops
+her out, hides her or wakes her up. Other flags: `--pipette`, `--recent`, `--sleep` (Do Not
+Disturb), `--home`, `--monitor`, `--quit`, and `--foreground` to keep her attached to the
+terminal (handy for debugging).
 
 <details open>
 <summary><b>sway</b> (<code>~/.config/sway/config</code>)</summary>
@@ -173,15 +177,16 @@ Add **Yumi** to the autostart apps in the system settings, then add a custom sho
 | Press and hold, then drag | picks her up by the scruff |
 | Let go near the bottom edge | she hides there, anywhere along the edge |
 | Let go anywhere else | she floats there, flapping, until you move her |
-| Middle-click her (or Settings → Stay out) | she stops hiding; again to let her hide |
+| Middle-click her (or Settings → Her → Stay out) | she stops hiding; again to let her hide |
 | Double-click her | she goes back to the bottom-right corner |
 | Stroke her head (move the pointer back and forth over it) | she blushes; hearts, sparkles behind the pointer |
 | DND | Do Not Disturb on; she naps in a blanket and stays quiet |
 
-Settings also have: interface and speech language, system reactions, idle chatter, health
-breaks (every 20 / 30 / 45 / 60 min: water, eyes, stretch), napping when you are away, outfit,
-which screen she lives on, the first-run tour again, and the timer sound (her bell or any
-audio file).
+Settings come in groups: **Her** (stay out, system reactions, idle chatter, napping when you
+are away, health breaks every 20 / 30 / 45 / 60 min: water, eyes, stretch), **Sound** (her
+voice volume, the timer sound: her bell or any audio file), **Look** (wallpaper colors or a
+color by hand, outfit, which screen she lives on) and **Language**. The first-run tour can be
+replayed from there too.
 
 ## Her colors
 
@@ -213,7 +218,7 @@ clock drop dnd`. Commands run with `sh -c`.
 
 ## Outfits
 
-Settings → Outfit: **auto** follows the calendar (Halloween Oct 24 – Nov 2, New Year Dec 15 –
+Settings → Look → Outfit: **auto** follows the calendar (Halloween Oct 24 – Nov 2, New Year Dec 15 –
 Jan 10, Valentine's Day Feb 12–15, March 8 Mar 6–9), or pick one, or **none**.
 
 An outfit is a folder in `sprites/outfits/<name>/`. Any PNG with the same path and size as a
@@ -242,6 +247,7 @@ unlike her hair).
 | `~/.config/yumi/actions.json` | your round buttons |
 | `~/.config/yumi/palette.json` | optional colors from your theming script |
 | `~/.local/state/yumi/state.json` | where she sits, her shelf, picked colors |
+| `~/.local/state/yumi/yumi.log` | what she printed (errors go here when she runs in the background) |
 
 `YUMI_SCALE=2 yumi` draws her twice as big (integer pixel scale).
 
@@ -252,6 +258,8 @@ unlike her hair).
 - **"this desktop has no wlr-layer-shell"**: you are on GNOME or X11; those are not supported yet.
 - **Wallpaper colors say "not available yet"**: your wallpaper tool is not one she knows. Write
   the hue to `~/.config/yumi/palette.json`, or open an issue saying which tool you use.
+- **She does not appear**: run `yumi --foreground` to see what she says, or look into
+  `~/.local/state/yumi/yumi.log`.
 - **She does not nap when you are away**: install `swayidle`. If your compositor lacks the idle
   protocol, the setting turns into "not available yet".
 
@@ -264,6 +272,7 @@ catches the pointer.
 - `yumi/brain.py`: all of her behaviour, pure Python (draw ops out, no GTK)
 - `yumi/extras.py`: gaze, petting, napping, health breaks, tour, outfits, custom buttons
 - `yumi/phrases.py`: her lines in English and Russian
+- `yumi/voice.py`: her 8-bit voice
 - `yumi/jobs.py`: convert / compress commands and the job queue
 - `yumi/files.py`: recent files, downloads, screenshots
 - `yumi/system.py`: power, Wi-Fi, Do Not Disturb, music, idle, color picker

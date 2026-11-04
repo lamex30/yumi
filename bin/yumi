@@ -2,6 +2,7 @@
 # Yumi, a sleepy pixel-art moth girl for Wayland desktops.
 #   yumi [--toggle|--pipette|--home|--recent|--sleep|--monitor|--quit|--version|--help]
 # Flags go straight to the running Yumi over D-Bus (fast) and start her if she is not running.
+# She runs on her own (closing the terminal does not close her); --foreground keeps her attached.
 DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"   # @DIR@ (make install puts the real path here)
 APP=io.github.lamex30.Yumi
 OBJ=/io/github/lamex30/Yumi
@@ -17,10 +18,15 @@ case "$1" in
         exec python3 -c "import sys; sys.path.insert(0, '$DIR'); import yumi; print('yumi', yumi.__version__)"
         ;;
     --help|-h)
-        sed -n '2,4p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'
         exit 0
         ;;
 esac
+FG=
+if [ "$1" = --foreground ] || [ "$1" = -f ]; then
+    FG=1
+    shift
+fi
 
 # gtk4-layer-shell has to be loaded before libwayland-client, so it is preloaded.
 LIB="$YUMI_LAYER_SHELL_LIB"
@@ -39,4 +45,36 @@ if [ -z "$LIB" ]; then
     exit 1
 fi
 
-LD_PRELOAD="$LIB${LD_PRELOAD:+:$LD_PRELOAD}" exec python3 "$DIR/moth_girl.py" "$@"
+export LD_PRELOAD="$LIB${LD_PRELOAD:+:$LD_PRELOAD}"
+if [ -n "$FG" ]; then
+    exec python3 "$DIR/moth_girl.py" "$@"
+fi
+
+# On her own: a new session, so closing the terminal (or its SIGHUP) does not take her along.
+LOGDIR="${XDG_STATE_HOME:-$HOME/.local/state}/yumi"
+LOG="$LOGDIR/yumi.log"
+mkdir -p "$LOGDIR"
+[ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt 1000000 ] && mv -f "$LOG" "$LOG.old"
+SIZE=0
+[ -f "$LOG" ] && SIZE=$(wc -c < "$LOG")
+if command -v setsid >/dev/null 2>&1; then
+    nohup setsid python3 "$DIR/moth_girl.py" "$@" </dev/null >>"$LOG" 2>&1 &
+else
+    nohup python3 "$DIR/moth_girl.py" "$@" </dev/null >>"$LOG" 2>&1 &
+fi
+PID=$!
+# wait a moment: if she could not start, say why here instead of only in the log
+i=0
+while [ $i -lt 15 ] && kill -0 "$PID" 2>/dev/null; do
+    sleep 0.1
+    i=$((i + 1))
+done
+if ! kill -0 "$PID" 2>/dev/null; then
+    wait "$PID"
+    st=$?
+    if [ "$st" -ne 0 ]; then
+        tail -c +$((SIZE + 1)) "$LOG" | tail -n 8 >&2
+        exit "$st"
+    fi
+fi
+exit 0

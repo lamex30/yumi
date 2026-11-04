@@ -75,6 +75,24 @@ def grow(r, d):
     return (r[0] - d, r[1] - d, r[2] + 2 * d, r[3] + 2 * d)
 
 
+TYPE_CPS = 28                # letters per second while her words type out
+
+
+def reveal_times(text):
+    """(when each letter of `text` appears, s after she starts; the time it is all out):
+    a little pause after commas, a longer one after a sentence, like someone talking"""
+    t, out = 0.0, []
+    for i, ch in enumerate(text):
+        out.append(t)
+        t += 1.0 / TYPE_CPS
+        nxt = text[i + 1] if i + 1 < len(text) else ' '
+        if ch in '.!?…' and nxt == ' ':
+            t += 0.26
+        elif ch in ',;:—' and nxt == ' ':
+            t += 0.12
+    return out, (out[-1] if out else 0.0) + 0.05
+
+
 class Moth:
     """the tiny moth that marks where Yumi hides"""
 
@@ -222,6 +240,7 @@ class Brain(Extras):
         self.face = None
         self.face_until = 0.0
         self.talk_until = 0.0
+        self.bubble_n = 0
         self.blink_until = 0.0
         self.next_blink = now + 3
         self.pointer = None
@@ -356,14 +375,29 @@ class Brain(Extras):
         if not line:
             return False
         text, face = line
-        dur = 2.6 + 0.055 * len(text)
-        self.bubble = {'text': text, 'until': self.now + dur}
-        self.talk_until = self.now + min(dur * 0.55, 0.08 * len(text))
+        text = ' '.join(text.split())
+        times, typed = reveal_times(text)
+        dur = typed + 2.2 + 0.04 * len(text)
+        self.bubble_n += 1
+        self.bubble = {'text': text, 'until': self.now + dur, 'start': self.now, 'times': times,
+                       'id': self.bubble_n}
+        self.talk_until = self.now + typed
+        vol = self.settings.get('voice_vol', 50)
+        if vol and not self.sleeping:
+            blips = [t for t, ch in zip(times, text) if ch.isalnum()]
+            self.requests.append(('voice', blips, self.bubble_n,
+                                  1 if text.rstrip().endswith('?') else 0, vol / 100.0))
         if face:
             self.set_face(face, dur)
         if self.mode == 'docked' and not self.out and not self.sleeping:
             self.pop(True, temporary=True)
         return True
+
+    def say_sample(self):
+        """a few words in her voice, so the volume can be heard while it is changed"""
+        self.bubble = None
+        if not self.say('voice_test'):
+            self.say('hello')
 
     def set_face(self, face, dur=2.0):
         self.face = face
@@ -433,7 +467,8 @@ class Brain(Extras):
     def cycles(self):
         """settings that step through a short list when clicked"""
         return {'ui_lang': ['en', 'ru'], 'speech_lang': ['en', 'ru'],
-                'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names}
+                'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names,
+                'voice_vol': [0, 25, 50, 75, 100]}
 
     outfit_names = []                 # outfit folders found in sprites/outfits (set by the app)
 
@@ -443,6 +478,8 @@ class Brain(Extras):
             return (val or 'en').upper()
         if arg == 'breaks':
             return t('off') if not val else f'{val} {t("min")}'
+        if arg == 'voice_vol':
+            return t('off') if not val else f'{val}%'
         if arg == 'outfit':
             return t('o_' + str(val)) if f'o_{val}' in UI['en'] else str(val).title()
         return str(val)
@@ -747,26 +784,37 @@ class Brain(Extras):
                 rows.append(('home', None, t('home')))
             rows.append(('quit', None, t('quit')))
         elif kind == 'settings':
-            s = self.settings
-            rows = [('set', 'ui_lang', t('ui_lang')), ('set', 'speech_lang', t('speech_lang')),
-                    ('set', 'reactions', t('reactions')), ('set', 'chatter', t('chatter')),
-                    ('set', 'pinned', t('pinned')), ('set', 'recolor', t('follow'))]
-            if not s.get('recolor', True) or 'recolor' in self.unavailable:
-                rows.append(('swatches', None, ''))
-            rows += [('set', 'breaks', t('breaks')), ('set', 'idle_nap', t('idle_nap')),
-                     ('set', 'outfit', t('outfit'))]
-            if self.monitors > 1:
-                rows.append(('monitor', None, t('monitor')))
-            rows.append(('tour_again', None, t('tour_again')))
-            rows.append(('sound_pick', None, t('timer_sound')))
-            if s.get('timer_sound'):
-                rows.append(('sound_reset', None, t('sound_reset')))
-            rows.append(('sound_test', None, t('sound_test')))
+            # the settings come in a few small groups
+            rows = [('menu', 'set_her', t('cat_her')), ('menu', 'set_sound', t('cat_sound')),
+                    ('menu', 'set_look', t('cat_look')), ('menu', 'set_lang', t('cat_lang')),
+                    ('tour_again', None, t('tour_again'))]
             home_x = self.clamp_x(self.W - EDGE_MARGIN * self.S - self.meta.bw * self.S / 2)
             if self.mode != 'docked' or abs(self.dock_x - home_x) > 4:
                 rows.append(('home', None, t('home')))
             rows.append(('quit', None, t('quit')))
             rows.append(('menu', 'main', t('back')))
+        elif kind == 'set_her':
+            rows = [('set', 'pinned', t('pinned')), ('set', 'reactions', t('reactions')),
+                    ('set', 'chatter', t('chatter')), ('set', 'idle_nap', t('idle_nap')),
+                    ('set', 'breaks', t('breaks')), ('menu', 'settings', t('back'))]
+        elif kind == 'set_sound':
+            s = self.settings
+            rows = [('set', 'voice_vol', t('voice')), ('sound_pick', None, t('timer_sound'))]
+            if s.get('timer_sound'):
+                rows.append(('sound_reset', None, t('sound_reset')))
+            rows += [('sound_test', None, t('sound_test')), ('menu', 'settings', t('back'))]
+        elif kind == 'set_look':
+            s = self.settings
+            rows = [('set', 'recolor', t('follow'))]
+            if not s.get('recolor', True) or 'recolor' in self.unavailable:
+                rows.append(('swatches', None, ''))
+            rows.append(('set', 'outfit', t('outfit')))
+            if self.monitors > 1:
+                rows.append(('monitor', None, t('monitor')))
+            rows.append(('menu', 'settings', t('back')))
+        elif kind == 'set_lang':
+            rows = [('set', 'ui_lang', t('ui_lang')), ('set', 'speech_lang', t('speech_lang')),
+                    ('menu', 'settings', t('back'))]
         elif kind == 'files':
             paths = data['paths']
             kinds = {J.kind_of(p) for p in paths}
@@ -875,7 +923,9 @@ class Brain(Extras):
             self.requests.append(('save_settings',))
             if arg == 'recolor':
                 self.requests.append(('recolor',))
-            self.open_menu('settings', data)
+            if arg == 'voice_vol' and s[arg]:
+                self.say_sample()
+            self.open_menu(self.menu['kind'] if self.menu else 'settings', data)
         elif action == 'monitor':
             self.requests.append(('monitor_next',))
         elif action == 'sound_pick':
@@ -884,7 +934,7 @@ class Brain(Extras):
             self.settings['timer_sound'] = None
             self.requests.append(('save_settings',))
             self.requests.append(('sound', 'timer'))
-            self.open_menu('settings', data)
+            self.open_menu('set_sound', data)
         elif action == 'sound_test':
             self.requests.append(('sound', 'timer'))
         elif action == 'hue':
@@ -1302,7 +1352,9 @@ class Brain(Extras):
         if action == 'pile':
             return 'box' if arg == 'recent' else 'shelf'
         if action == 'menu':
-            return {'settings': 'gear', 'convert': 'convert', 'compress': 'compress'}.get(arg, 'back')
+            return {'settings': 'gear', 'convert': 'convert', 'compress': 'compress',
+                    'set_her': 'heart', 'set_sound': 'note', 'set_look': 'image',
+                    'set_lang': 'doc'}.get(arg, 'back')
         if action == 'job':
             return 'next'
         return self.ICON_FOR.get(action)
@@ -1368,8 +1420,10 @@ class Brain(Extras):
                 ops.append(('panel', *r, 'row_hot'))
             color = 'red' if action == 'quit' else 'muted' if (
                 action in ('menu', 'close') and arg in ('main', 'files', None)) or (
+                action == 'menu' and arg == 'settings' and kind != 'main') or (
                 action == 'set' and arg in self.unavailable) else 'fg'
-            ic = self.row_icon(action, arg)
+            ic = 'back' if action == 'menu' and arg == 'settings' and kind != 'main' else \
+                self.row_icon(action, arg)
             if ic:
                 ops.append(('icon', ic, r[0] + 3 * P, ry + (rh - 7 * P) / 2, 'accent' if hot else color))
             th = self.text_size(label)[1]
@@ -1503,8 +1557,16 @@ class Brain(Extras):
         ops = [('panel', x, y, w, h, 'bubble')]
         if not side:
             ops.append(('tail', tx, y + h if down else y, 'down' if down else 'up'))
+        # her words type out letter by letter (the box already has its final size)
+        times = self.bubble.get('times')
+        shown = len(text) if not times else sum(1 for t in times if t <= self.now - self.bubble['start'])
         for n, l in enumerate(lines):
-            ops.append(('text', x + 6 * P, y + 4 * P + n * lh, l, 'ink'))
+            if shown <= 0:
+                break
+            part = l[:shown]
+            if part:
+                ops.append(('text', x + 6 * P, y + 4 * P + n * lh, part, 'ink'))
+            shown -= len(l) + 1
         self.hits['bubble'] = (x, y, w, h)
         return ops
 

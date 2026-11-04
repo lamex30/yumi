@@ -34,7 +34,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from yumi import config, files, jobs, pixfont, pixui, system  # noqa: E402
+from yumi import config, files, jobs, pixfont, pixui, system, voice  # noqa: E402
 from yumi.brain import UI_PX, Brain  # noqa: E402
 from yumi.phrases import Speech  # noqa: E402
 from yumi.sprites import Meta, palette_delta, palette_from_hue, recolor_bgra, ui_colors  # noqa: E402
@@ -460,6 +460,9 @@ class App(Gtk.Application):
         self.windows = []
         self.active = None
         self.sound_src = None
+        self.voice_proc = None          # the player saying her current line
+        self.failed = False             # this desktop cannot show her
+        self.voice_id = None            # which bubble it belongs to
         self.load_gen = 0               # sprite reloads: only the newest one is used
         self.outfit_want = None         # the outfit she wears or is changing into
         self.sound_procs = []
@@ -528,6 +531,7 @@ class App(Gtk.Application):
             sys.stderr.write('yumi: this desktop has no wlr-layer-shell (GNOME and X11 are not '
                              'supported yet). She lives on sway, Hyprland, niri, river, Wayfire, '
                              'labwc, KDE Plasma, COSMIC...\n')
+            self.failed = True
             self.quit()
             return
         if not self.windows:
@@ -639,6 +643,8 @@ class App(Gtk.Application):
         b = self.brain
         b.update(time.monotonic())
         self.handle_requests()
+        if self.voice_proc and (not b.bubble or b.bubble.get('id') != self.voice_id):
+            self.hush()                              # the bubble went away: so does her voice
         self.ops = b.scene()
         for w in self.windows:
             if w is self.active:
@@ -693,6 +699,8 @@ class App(Gtk.Application):
                 self.play_timer_sound()
             elif kind == 'sound_stop':
                 self.stop_timer_sound()
+            elif kind == 'voice':
+                self.speak(r[1], r[2], r[3], r[4] if len(r) > 4 else 0.5)
             elif kind == 'pick_sound':
                 self.pick_sound()
             elif kind == 'save':
@@ -725,6 +733,36 @@ class App(Gtk.Application):
             self.sound_procs.append(system.play_file(path))
             return False
         self.sound_src = GLib.timeout_add(int(min(gap, 8.0) * 1000), again)
+
+    # ---- her voice: 8-bit blips while the words type out
+    def speak(self, blips, bid, end_pitch, volume=0.5):
+        self.hush()
+        self.voice_id = bid
+        if not blips:
+            return
+        path = config.CACHE_DIR / f'voice{bid % 3}.wav'
+
+        def work():
+            try:
+                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                voice.render(blips, path, seed=bid, end_pitch=end_pitch, volume=volume)
+            except OSError:
+                return
+            GLib.idle_add(lambda: self.voice_start(path, bid) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def voice_start(self, path, bid):
+        b = self.brain
+        if bid == self.voice_id and b.bubble and b.bubble.get('id') == bid:
+            self.voice_proc = system.play_file(path)
+
+    def hush(self):
+        p, self.voice_proc = self.voice_proc, None
+        try:
+            if p:
+                p.terminate()
+        except (OSError, AttributeError):
+            pass
 
     def stop_timer_sound(self):
         """Stop pressed: no second chime, and the one playing is cut off"""
@@ -762,7 +800,7 @@ class App(Gtk.Application):
                 self.settings['timer_sound'] = f.get_path()
                 self.settings.save()
                 self.play_timer_sound()
-                self.ev(lambda b: b.open_menu('settings', None) if b.menu else None)
+                self.ev(lambda b: b.open_menu('set_sound', None) if b.menu else None)
         dialog.open(None, None, done)
 
     # ---- jobs
@@ -865,7 +903,8 @@ def main(argv):
         return 0
     if action:
         GLib.idle_add(lambda: app.activate_action(action, None) and False)
-    return app.run([argv[0]])
+    rc = app.run([argv[0]])
+    return 1 if app.failed else rc
 
 
 if __name__ == '__main__':
