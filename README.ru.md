@@ -97,6 +97,10 @@ yumi
 Можно запускать и прямо из папки: `./bin/yumi`. Удалить: `./install.sh --uninstall`.
 Для сборщиков пакетов в [`packaging/`](packaging) лежат `PKGBUILD` и `template` для Void.
 
+**NixOS:** `nix run github:lamex30/yumi` — попробовать; чтобы установить, добавь flake во входы и
+положи `inputs.yumi.packages.${system}.default` в `environment.systemPackages` (или возьми
+`overlays.default` и `pkgs.yumi-moth`). Зависимости и gtk4-layer-shell подключены.
+
 ### 3. Автозапуск и горячая клавиша
 
 `yumi` запускает её в фоне: терминал можно закрыть, она останется. `yumi --toggle` достаёт её,

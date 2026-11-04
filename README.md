@@ -69,6 +69,7 @@ that one thing, and the settings say "not available yet" where it matters.
 | Void | `sudo xbps-install -S python3-gobject python3-cairo gtk4 gtk4-layer-shell` |
 | Fedora | `sudo dnf install python3-gobject python3-cairo gtk4 gtk4-layer-shell` |
 | openSUSE Tumbleweed | `sudo zypper in python3-gobject python3-gobject-cairo typelib-1_0-Gtk-4_0 typelib-1_0-Gtk4LayerShell-1_0` |
+| NixOS | no step needed, see below (`nix run github:lamex30/yumi`) |
 | Debian 13+, Ubuntu (when the package exists) | `sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-gtk4layershell-1.0` |
 
 Optional, for the extras (install what you like):
@@ -97,6 +98,10 @@ yumi
 You can also run her straight from the folder: `./bin/yumi`. `./install.sh --uninstall` removes
 her again. Packagers: `PREFIX=/usr DESTDIR="$pkgdir" ./install.sh`; there is a `PKGBUILD` and a
 Void `template` in [`packaging/`](packaging).
+
+**NixOS:** `nix run github:lamex30/yumi` tries her out; to install, add the flake as an input and
+put `inputs.yumi.packages.${system}.default` in `environment.systemPackages` (or use
+`overlays.default` for `pkgs.yumi-moth`). The dependencies and gtk4-layer-shell are wired in.
 
 ### 3. Start her with your session and give her a hotkey
 
