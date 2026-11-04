@@ -65,7 +65,7 @@
 
 | Дистрибутив | Команда |
 | --- | --- |
-| Arch, Manjaro, EndeavourOS | `sudo pacman -S --needed python-gobject python-cairo gtk4 gtk4-layer-shell` |
+| Arch, CachyOS, EndeavourOS | `sudo pacman -S --needed python-gobject python-cairo gtk4 gtk4-layer-shell` |
 | Void | `sudo xbps-install -S python3-gobject python3-cairo gtk4 gtk4-layer-shell` |
 | Fedora | `sudo dnf install python3-gobject python3-cairo gtk4 gtk4-layer-shell` |
 | openSUSE Tumbleweed | `sudo zypper in python3-gobject python3-gobject-cairo typelib-1_0-Gtk-4_0 typelib-1_0-Gtk4LayerShell-1_0` |
