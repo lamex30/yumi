@@ -687,6 +687,8 @@ class App(Gtk.Application):
                 system.pick_color(lambda hexc: self.ev(lambda b: b.pipette_done(hexc)),
                                   (self.effective_palette() or {}).get('accent'))
             elif kind == 'dnd':
+                if not r[1]:
+                    b.nap = False          # you asked her to wake: the nap guard must not ignore it
                 self.world.set_dnd(r[1])
                 b.set_sleep(r[1])          # the notification daemon will confirm; act now
             elif kind == 'copy':
