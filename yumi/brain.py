@@ -789,7 +789,7 @@ class Brain(Extras):
             # the settings come in a few small groups
             rows = [('menu', 'set_her', t('cat_her')), ('menu', 'set_sound', t('cat_sound')),
                     ('menu', 'set_look', t('cat_look')), ('menu', 'set_lang', t('cat_lang')),
-                    ('tour_again', None, t('tour_again'))]
+                    ('tour_again', None, t('tour_again')), ('restart', None, t('restart'))]
             home_x = self.clamp_x(self.W - EDGE_MARGIN * self.S - self.meta.bw * self.S / 2)
             if self.mode != 'docked' or abs(self.dock_x - home_x) > 4:
                 rows.append(('home', None, t('home')))
@@ -908,6 +908,8 @@ class Brain(Extras):
             self.go_home()
         elif action == 'quit':
             self.requests.append(('quit',))
+        elif action == 'restart':
+            self.requests.append(('restart',))
         elif action == 'set':
             s = self.settings
             if arg in self.unavailable:
@@ -1346,7 +1348,7 @@ class Brain(Extras):
         return base + '…' + tail
 
     # ---- menus
-    ICON_FOR = {'pipette': 'drop', 'sleep': 'dnd', 'wake': 'dnd', 'home': 'home', 'quit': 'quit',
+    ICON_FOR = {'pipette': 'drop', 'sleep': 'dnd', 'wake': 'dnd', 'home': 'home', 'quit': 'quit', 'restart': 'restart',
                 'sound_pick': 'note', 'sound_test': 'play', 'sound_reset': 'back',
                 'tour_again': 'star', 'monitor': 'home', 'open': 'other', 'shelf': 'star', 'unshelf': 'star_on', 'close': 'back'}
 

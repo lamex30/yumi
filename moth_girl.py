@@ -18,6 +18,8 @@ Env: YUMI_SCALE (integer pixel scale, overrides settings).
 import math
 import os
 import random
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -713,6 +715,21 @@ class App(Gtk.Application):
             elif kind == 'quit':
                 self.state.save()
                 self.quit()
+            elif kind == 'restart':
+                self.state.save()
+                self.restart()
+
+    def restart(self):
+        """start a fresh Yumi a moment from now (the app id is single-instance, so after we are gone)"""
+        here = Path(__file__).resolve().parent
+        exe = next((str(p) for p in (here / 'bin' / 'yumi', here.parent.parent / 'bin' / 'yumi')
+                    if p.exists()), shutil.which('yumi'))
+        if exe:
+            subprocess.Popen(['sh', '-c', 'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; exec "$0"',
+                              exe, str(os.getpid())], start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        self.quit()
 
     # ---- timer sound: her 8-bit chime, or a file chosen in the settings
     def play_timer_sound(self):
