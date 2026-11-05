@@ -101,7 +101,8 @@ Void `template` in [`packaging/`](packaging).
 
 **NixOS:** `nix run github:lamex30/yumi` tries her out; to install, add the flake as an input and
 put `inputs.yumi.packages.${system}.default` in `environment.systemPackages` (or use
-`overlays.default` for `pkgs.yumi-moth`). The dependencies and gtk4-layer-shell are wired in.
+`overlays.default` for `pkgs.yumi-moth`). The dependencies and gtk4-layer-shell are wired in. On an older NixOS, add
+`inputs.yumi.inputs.nixpkgs.follows = "nixpkgs";` so she uses the same libraries as your system.
 
 ### 3. Start her with your session and give her a hotkey
 

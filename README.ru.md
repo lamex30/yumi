@@ -99,7 +99,8 @@ yumi
 
 **NixOS:** `nix run github:lamex30/yumi` — попробовать; чтобы установить, добавь flake во входы и
 положи `inputs.yumi.packages.${system}.default` в `environment.systemPackages` (или возьми
-`overlays.default` и `pkgs.yumi-moth`). Зависимости и gtk4-layer-shell подключены.
+`overlays.default` и `pkgs.yumi-moth`). Зависимости и gtk4-layer-shell подключены. На более старой NixOS добавь
+`inputs.yumi.inputs.nixpkgs.follows = "nixpkgs";`, чтобы она использовала те же библиотеки, что и система.
 
 ### 3. Автозапуск и горячая клавиша
 
