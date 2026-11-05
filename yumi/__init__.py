@@ -1,2 +1,2 @@
 """Yumi, a sleepy pixel-art moth girl for Wayland desktops (GTK4 + gtk4-layer-shell)."""
-__version__ = '1.2.0'
+__version__ = '1.3.0'

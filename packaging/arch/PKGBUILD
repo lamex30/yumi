@@ -1,6 +1,6 @@
 # Maintainer: lamex30 <https://github.com/lamex30>
 pkgname=yumi-moth
-pkgver=1.2.0
+pkgver=1.3.0
 pkgrel=1
 pkgdesc="A sleepy pixel-art moth girl who lives at the bottom of your Wayland screen"
 arch=('any')
