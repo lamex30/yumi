@@ -25,7 +25,11 @@ import threading
 import time
 from pathlib import Path
 
-import gi
+# gtk4-layer-shell is already loaded; the tools she starts must not inherit it (see bin/yumi)
+os.environ['LD_PRELOAD'] = ':'.join(p for p in os.environ.get('LD_PRELOAD', '').split(':')
+                                    if 'gtk4-layer-shell' not in p)
+
+import gi  # noqa: E402
 gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('Gtk4LayerShell', '1.0')
