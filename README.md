@@ -32,7 +32,7 @@ English · [Русский](README.ru.md)
   when it ends.
 - **Color picker.** Click anywhere on the screen; the hex code is copied and kept in her history.
 - **Do Not Disturb.** She naps in a blanket and switches your notification daemon to DND
-  (swaync, mako, dunst).
+  (KDE Plasma, swaync, mako, dunst).
 - **Takes your wallpaper's colors** (hair, eyes, clothes, wings, her bubbles) and changes with it.
 - **Feels alive.** Her eyes follow the pointer, she blushes when you pet her head (sparkles
   trail your pointer), reacts to the
@@ -83,7 +83,7 @@ Optional, for the extras (install what you like):
 | `swayidle` | dozing off when you are away |
 | `playerctl` | reacting to music |
 | `networkmanager` (`nmcli`) | Wi-Fi reactions |
-| `swaync`, `mako` or `dunst` | Do Not Disturb |
+| `swaync`, `mako` or `dunst` | Do Not Disturb (KDE Plasma needs nothing extra) |
 | `pipewire` (`pw-play`), `paplay`, `aplay` or `ffplay` | the timer bell |
 
 ### 2. Yumi herself

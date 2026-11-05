@@ -237,12 +237,13 @@ class World:
 
 
 class Notifier:
-    """Do Not Disturb of the notification daemon that is running: swaync, mako or dunst.
-    Calls seen(bool) when it changes; set(bool) switches it."""
+    """Do Not Disturb of the notification daemon that is running: one with inhibitions
+    (KDE Plasma), swaync, mako or dunst. Calls seen(bool) when it changes; set(bool) switches it."""
 
     def __init__(self, seen):
         self.seen = seen
         self.kind = None
+        self.cookie = 0
         if stream(['swaync-client', '-swb'], self.swaync_line):
             self.kind = 'swaync'
         threading.Thread(target=self.poll, daemon=True).start()
@@ -255,7 +256,20 @@ class Notifier:
         self.kind = 'swaync'
         self.seen(dnd)
 
+    def call(self, iface, method, args, reply):
+        """call the running notification daemon (never starts one); the reply tuple, or None"""
+        try:
+            return Gio.bus_get_sync(Gio.BusType.SESSION, None).call_sync(
+                'org.freedesktop.Notifications', '/org/freedesktop/Notifications', iface, method, args,
+                GLib.VariantType(reply), Gio.DBusCallFlags.NO_AUTO_START, 1000, None).unpack()
+        except GLib.Error:
+            return None
+
     def which(self):
+        # first: swaync-client may be installed on a Plasma desktop, this asks the daemon that is running
+        caps = self.call('org.freedesktop.Notifications', 'GetCapabilities', None, '(as)')
+        if caps and 'inhibitions' in caps[0]:
+            return 'inhibit'
         if self.kind == 'swaync':
             return 'swaync'
         if shutil.which('makoctl') and wallpaper._procs('mako'):
@@ -267,15 +281,29 @@ class Notifier:
     def poll(self):
         while True:
             kind = self.which()
-            if kind == 'mako':
+            if kind == 'inhibit':
+                got = self.call('org.freedesktop.DBus.Properties', 'Get',
+                                GLib.Variant('(ss)', ('org.freedesktop.Notifications', 'Inhibited')), '(v)')
+                if got:
+                    self.seen(got[0])
+            elif kind == 'mako':
                 self.seen('do-not-disturb' in run('makoctl', 'mode').split())
             elif kind == 'dunst':
                 self.seen(run('dunstctl', 'is-paused').strip() == 'true')
-            time.sleep(3 if kind in ('mako', 'dunst') else 15)
+            time.sleep(3 if kind in ('inhibit', 'mako', 'dunst') else 15)
 
     def set(self, on):
         kind = self.which()
-        if kind == 'swaync':
+        if kind == 'inhibit':
+            # held by this process: the daemon drops it by itself if she quits or crashes
+            if self.cookie:
+                self.call('org.freedesktop.Notifications', 'UnInhibit', GLib.Variant('(u)', (self.cookie,)), '()')
+                self.cookie = 0
+            if on:
+                got = self.call('org.freedesktop.Notifications', 'Inhibit',
+                                GLib.Variant('(ssa{sv})', ('io.github.lamex30.Yumi', 'Yumi is napping', {})), '(u)')
+                self.cookie = got[0] if got else 0
+        elif kind == 'swaync':
             spawn('swaync-client', '--dnd-on' if on else '--dnd-off', '--skip-wait')
         elif kind == 'mako':
             spawn('makoctl', 'mode', '-a' if on else '-r', 'do-not-disturb')
