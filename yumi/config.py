@@ -1,6 +1,8 @@
 """Paths, settings, persistent state and interface strings (no GTK here)."""
+import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
@@ -27,6 +29,8 @@ DEFAULT_SETTINGS = {
     'breaks': 0,              # health reminders every N minutes (0 = off)
     'idle_nap': True,         # she dozes off when you have been away for a while
     'outfit': 'auto',         # auto (by date) / off / a folder name in sprites/outfits
+    'ring': [],               # order of her round buttons ([] = the default order)
+    'ring_off': [],           # the buttons switched off
 }
 DEFAULT_STATE = {
     'mode': 'docked',         # docked / air
@@ -80,7 +84,7 @@ def load_settings():
     return st
 
 
-MAX_ACTIONS = 4
+RING_SLOTS = 10            # places on her ring in the button editor
 
 
 def load_actions(path=None):
@@ -89,15 +93,47 @@ def load_actions(path=None):
     path = Path(path) if path else CONFIG_DIR / 'actions.json'
     try:
         data = json.loads(path.read_text())
-    except (OSError, ValueError):
+        if not isinstance(data, list):
+            raise ValueError
+    except OSError:
+        return []
+    except ValueError:                    # the editor would overwrite a file with a typo in it
+        try:
+            path.replace(path.with_name(path.name + '.bad'))
+        except OSError:
+            pass
         return []
     out = []
-    for a in data if isinstance(data, list) else []:
+    for a in data:
         if isinstance(a, dict) and a.get('command'):
             out.append({'label': str(a.get('label') or a['command'])[:18],
                         'label_ru': str(a.get('label_ru') or a.get('label') or a['command'])[:18],
                         'icon': str(a.get('icon') or 'star'), 'command': str(a['command'])})
-    return out[:MAX_ACTIONS]
+    return out
+
+
+def save_actions(actions, path=None):
+    path = Path(path) if path else CONFIG_DIR / 'actions.json'
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix('.tmp')
+        tmp.write_text(json.dumps(actions, indent=1, ensure_ascii=False))
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
+def keep_icon(src):
+    """a copy of the chosen picture in the config, so it outlives the original file"""
+    src = Path(src)
+    try:
+        # shortcut: copies stay behind when a button is deleted (two buttons may share one), they are tiny
+        out = CONFIG_DIR / 'icons' / (hashlib.sha1(src.read_bytes()).hexdigest()[:16] + src.suffix)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, out)
+        return str(out)
+    except OSError:
+        return str(src)
 
 
 def outfit_for(today=None):
@@ -147,6 +183,9 @@ UI = {
         'breaks': 'Health breaks', 'idle_nap': 'Nap when idle', 'outfit': 'Outfit',
         'voice': 'Voice', 'cat_her': 'Her', 'cat_sound': 'Sound', 'cat_look': 'Look', 'cat_lang': 'Language', 'n_a': 'not available yet', 'o_auto': 'auto', 'o_off': 'none', 'o_halloween': 'Halloween', 'o_newyear': 'New Year',
         'o_valentine': 'Valentine', 'o_spring': 'March 8', 'min': 'min', 'monitor': 'Screen',
+        'cat_ring': 'Buttons', 'ring_done': 'Done', 'ring_new': 'New button', 'ring_change': 'Edit button', 'ring_save': 'Save',
+        'ring_cmd': 'Command', 'ring_name': 'Button name', 'ring_icon': 'Icon', 'ring_file': 'Your own picture...',
+        'ring_add': 'Add', 'images': 'Pictures',
         'restart': 'Restart', 'tour_again': 'Show the tour', 'tour_next': 'Next', 'tour_skip': 'Skip', 'tour_done': 'Got it!',
         'tour_title': 'Hello!',
         'tour1': "Hi! I'm Yumi. I live at the bottom edge of your screen. Let me show you around.",
@@ -177,6 +216,9 @@ UI = {
         'breaks': 'Перерывы', 'idle_nap': 'Дремать без тебя', 'outfit': 'Наряд',
         'voice': 'Голосок', 'cat_her': 'Поведение', 'cat_sound': 'Звук', 'cat_look': 'Внешний вид', 'cat_lang': 'Язык', 'n_a': 'пока недоступно', 'o_auto': 'авто', 'o_off': 'нет', 'o_halloween': 'Хэллоуин', 'o_newyear': 'Новый год',
         'o_valentine': 'Валентинка', 'o_spring': '8 Марта', 'min': 'мин', 'monitor': 'Экран',
+        'cat_ring': 'Кнопки', 'ring_done': 'Готово', 'ring_new': 'Новая кнопка', 'ring_change': 'Изменить кнопку', 'ring_save': 'Сохранить',
+        'ring_cmd': 'Команда', 'ring_name': 'Название кнопки', 'ring_icon': 'Иконка', 'ring_file': 'Своя картинка...',
+        'ring_add': 'Добавить', 'images': 'Картинки',
         'restart': 'Перезапустить', 'tour_again': 'Показать знакомство', 'tour_next': 'Дальше', 'tour_skip': 'Пропустить', 'tour_done': 'Поняла!',
         'tour_title': 'Привет!',
         'tour1': 'Привет! Я Юми. Я живу у нижнего края твоего экрана. Давай я всё покажу.',

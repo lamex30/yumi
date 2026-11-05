@@ -12,7 +12,7 @@ import random
 from pathlib import Path
 
 from . import jobs as J
-from .config import UI, tr
+from .config import RING_SLOTS, UI, tr
 from .extras import Extras
 from .sprites import ARCHIVES, DOCS, KIND_COLOR, SWATCHES, swatch_hex
 
@@ -585,6 +585,9 @@ class Brain(Extras):
     # ------------------------------------------------------------------ pointer
     def motion(self, x, y):
         self.pointer = (x, y)
+        if self.ring_drag:
+            self.ring_drag_to(x, y)
+            return
         if self.mode == 'held':
             if self.last_ptr:
                 dt = max(1e-3, self.now - self.last_ptr[2])
@@ -619,6 +622,9 @@ class Brain(Extras):
             self.timer_apply()
             self.kb_hover = False
         on = self.what_at(x, y)
+        if self.form and not (on and on.startswith('btn:')):
+            on = None                                 # the form is modal: she stays put under it
+        self.ring_grab(on, button)
         if n >= 2 and on == 'her' and button == 1:
             self.click_at = None
             self.press = None
@@ -632,6 +638,9 @@ class Brain(Extras):
         p, self.press = self.press, None
         if self.mode == 'held':
             self.drop_her(x, y)
+            return
+        if self.ring_drag:
+            self.ring_drop()
             return
         if not p:
             return
@@ -805,6 +814,7 @@ class Brain(Extras):
             # the settings come in a few small groups
             rows = [('menu', 'set_her', t('cat_her')), ('menu', 'set_sound', t('cat_sound')),
                     ('menu', 'set_look', t('cat_look')), ('menu', 'set_lang', t('cat_lang')),
+                    ('ring_edit', None, t('cat_ring')),
                     ('tour_again', None, t('tour_again')), ('restart', None, t('restart'))]
             home_x = self.clamp_x(self.W - EDGE_MARGIN * self.S - self.meta.bw * self.S / 2)
             if self.mode != 'docked' or abs(self.dock_x - home_x) > 4:
@@ -1113,7 +1123,7 @@ class Brain(Extras):
         if self.bubble and now > self.bubble['until']:
             self.bubble = None
         # pile / menu close when the pointer has been away a while
-        if (self.pile or self.menu or self.radial) and not self.file_drag:
+        if (self.pile or self.menu or self.radial) and not self.file_drag and not self.ring_edit:
             ptr_in = self.pointer is not None and self.over_anything(*self.pointer)
             if ptr_in:
                 self.away_since = None
@@ -1195,6 +1205,8 @@ class Brain(Extras):
         ops += bops + rops if self.bubble_under else rops + bops
         if self.progress:
             ops += self.progress_ops()
+        if self.form and shown:
+            ops += self.form_ops()
         return ops
 
     def rig_part(self, name, frame, bx, by, angle=0.0):
@@ -1366,7 +1378,7 @@ class Brain(Extras):
     # ---- menus
     ICON_FOR = {'pipette': 'drop', 'sleep': 'dnd', 'wake': 'dnd', 'home': 'home', 'quit': 'quit', 'restart': 'restart',
                 'sound_pick': 'note', 'sound_test': 'play', 'sound_reset': 'back',
-                'tour_again': 'star', 'monitor': 'home', 'open': 'other', 'shelf': 'star', 'unshelf': 'star_on', 'close': 'back'}
+                'tour_again': 'star', 'ring_edit': 'pencil', 'monitor': 'home', 'open': 'other', 'shelf': 'star', 'unshelf': 'star_on', 'close': 'back'}
 
     def row_icon(self, action, arg):
         if action == 'pile':
@@ -1530,7 +1542,7 @@ class Brain(Extras):
             by += bh + gap
         return ops
 
-    RING_ACTIONS = ('pile', 'pipette', 'timer', 'sleep', 'wake', 'menu')
+    RING_ACTIONS = ('pile', 'pipette', 'timer', 'sleep', 'wake', 'menu', 'ring_tile', 'ring_add')
 
     # ---- speech
     def bubble_ops(self):
@@ -1625,15 +1637,6 @@ class Brain(Extras):
                 ('bar', x + 6 * P, y + h - 7 * P, w - 12 * P, frac)]
 
     # ------------------------------------------------------------------ the ring menu
-    def radial_items(self):
-        t = lambda k: tr(self.settings, k)
-        items = [('pile', 'recent', 'box', t('recent')), ('pile', 'shelf', 'shelf', t('shelf')),
-                 ('pipette', None, 'drop', t('pipette')), ('timer', None, 'clock', t('timer')),
-                 ('wake', None, 'dnd', t('wake')) if self.sleeping else ('sleep', None, 'dnd', t('sleep'))]
-        items += self.custom_items()
-        items.append(('menu', 'settings', 'gear', t('settings')))
-        return items
-
     def open_radial(self):
         if self.pile:
             self.leave_box()
@@ -1645,6 +1648,9 @@ class Brain(Extras):
         self.away_since = None
 
     def close_radial(self):
+        self.ring_edit = False
+        self.ring_drag = None
+        self.form = None
         if self.radial:
             self.radial = False
             self.radial_t.to(0, 20.0, 1.0)
@@ -1661,7 +1667,13 @@ class Brain(Extras):
         S, P = self.S, self.P
         ops = []
         items = self.radial_items()
+        if self.ring_edit:                            # all of them, then the free places
+            table = self.ring_table()
+            items = [table[i] for i in self.ring_ids(table)]
+            items += [None] * (RING_SLOTS - len(items))
         n = len(items)
+        self.ring_slots = []
+        dragged = []
         _p, _i, _k, ix, iy, bx, by, w, h = self.origin()
         cx = bx + self.meta.bw * S / 2
         cy = by + 105 * S
@@ -1679,7 +1691,7 @@ class Brain(Extras):
         # lift the whole arc if it would run off the bottom edge and squeeze the last buttons together
         cy = min(cy, self.H - d / 2 - lh - 4 * P - max(math.sin(start + k * step) * R for k in range(n)))
         t = self.radial_t.x
-        for k, (action, arg, icon, label) in enumerate(items):
+        for k, item in enumerate(items):
             a = start + k * step
             dx, dy = math.cos(a) * R, math.sin(a) * R
             if not left:
@@ -1690,6 +1702,14 @@ class Brain(Extras):
             px = cx + dx * u - d / 2
             py = cy + dy * u - d / 2
             py = min(max(py, 4 * P), self.H - d - lh - 4 * P)
+            if self.ring_edit:
+                self.ring_slots.append((px + d / 2, py + d / 2))
+                if item and item[4] == self.ring_drag and self.ring_moved and self.pointer:
+                    dragged = self.ring_tile_ops(item, self.pointer[0] - d / 2, self.pointer[1] - d / 2, d)
+                else:
+                    ops += self.ring_tile_ops(item, px, py, d)
+                continue
+            action, arg, icon, label, _id = item
             tw, th = self.text_size(label)
             px = min(max(px, tw / 2 - d / 2 + 4 * P), self.W - d / 2 - tw / 2 - 4 * P)
             circ = (px, py, d, d)
@@ -1697,14 +1717,17 @@ class Brain(Extras):
             lab = (lx, ly, tw, th)
             hot = self.pointer is not None and (inside(circ, *self.pointer) or inside(lab, *self.pointer))
             ops.append(('circle', px, py, d, hot))
-            ops.append(('icon', icon, px + (d - 7 * P) / 2, py + (d - 7 * P) / 2 - P / 2,
-                        'red' if action == 'quit' else 'paper' if hot else 'fg'))
+            ops.append(self.ring_icon_op(icon, px, py, d, 'red' if action == 'quit' else 'paper' if hot else 'fg'))
             if u > 0.6:
                 # plain white letters with a hard one-pixel shadow, no plate under them
                 ops.append(('text', lx + P, ly + P, label, 'shadow'))
                 ops.append(('text', lx, ly, label, 'acc_hi' if hot else 'red' if action == 'quit' else 'white'))
                 self.buttons.append((lab, action, arg))
             self.buttons.append((circ, action, arg))
+        # a stable sort: labels over the neighbouring buttons, what you click in the editor over the labels
+        ops.sort(key=lambda o: 1 if o[0] == 'text' else 2 if self.ring_edit and o[0] not in ('group', 'hollow') else 0)
+        if self.ring_edit:
+            ops += self.ring_done_ops(cx, cy, R, left) + dragged
         if self.buttons:
             xs = [b[0][0] for b in self.buttons] + [ix]
             ys = [b[0][1] for b in self.buttons] + [iy]
@@ -1792,9 +1815,12 @@ class Brain(Extras):
             self.pop(True)
         return True
 
-    def key(self, name):
-        """keys while the timer has the keyboard (pointer over it, or after a click on the digits):
-        digits overwrite the digit under the cursor, arrows move it, Enter applies, Esc cancels"""
+    def key(self, name, text=''):
+        """keys for the button form while it is open; else while the timer has the keyboard (pointer over it,
+        or after a click on the digits): digits overwrite the digit under the cursor, arrows move it,
+        Enter applies, Esc cancels"""
+        if self.form:
+            return self.form_key(name, text)
         if not self.kb_hover:
             return False
         tm = self.timer

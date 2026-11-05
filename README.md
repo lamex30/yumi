@@ -22,8 +22,8 @@ English · [Русский](README.ru.md)
 
 - **Lives at the bottom edge.** While she hides, a tiny moth flutters where she sleeps. Touch it
   (or press your hotkey) and she pops out.
-- **Round menu.** Click her: Recent, Shelf, Pipette, Timer, Do Not Disturb, Settings, plus up to
-  four buttons of your own.
+- **Round menu.** Click her: Recent, Shelf, Pipette, Timer, Do Not Disturb, Settings, plus buttons
+  of your own. Rearrange them, switch them off or add new ones in Settings → Buttons.
 - **Recent files and a shelf.** A box lands under her and your latest files spill out. Click to
   open, drag a card into any app, keep favourites on her shelf.
 - **Convert and compress.** Drop files on her: PNG ↔ JPG ↔ WebP, video → MP4 / WebM / GIF / MP3,
@@ -209,8 +209,13 @@ the settings.
 
 ## Her own buttons
 
-Copy [`actions.example.json`](actions.example.json) to `~/.config/yumi/actions.json` (up to 4).
-Each entry becomes a round button in her menu:
+**Settings → Buttons** opens the editor right on her ring. Drag a button to move it. Built-in buttons
+have a switch and cannot be deleted (Settings has no switch either: it can only move). Your own buttons
+have a minus; click one to edit it. A hollow circle with a plus is a free place that adds a new one
+(command, name, an icon from the list or your own picture).
+
+Your buttons live in `~/.config/yumi/actions.json`, which you can also edit by hand; `icon` is a name
+from the list or an absolute path to a picture:
 
 ```json
 [
@@ -219,8 +224,7 @@ Each entry becomes a round button in her menu:
 ]
 ```
 
-Icons: `convert compress star image video audio doc archive other gear home box shelf note play
-clock drop dnd`. Commands run with `sh -c`.
+Commands run with `sh -c`.
 
 ## Outfits
 

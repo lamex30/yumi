@@ -9,7 +9,7 @@ actions 'custom', 'tour_next', 'tour_skip', 'tour_again' through extras_do.
 import math
 import random
 
-from .config import MAX_ACTIONS, load_actions, tr
+from .config import RING_SLOTS, load_actions, tr
 from .pixui import ICONS
 
 PET_WINDOW = 1.6        # s: strokes counted within this long
@@ -19,6 +19,17 @@ PET_RUN = 8             # px a stroke must go one way before turning back counts
 SPARK_LIFE = 0.8
 BREAK_KINDS = ('water', 'eyes', 'stretch')
 TOUR_STEPS = 5
+# id: action, arg, icon, label; the settings button can move but not go: nothing else opens them
+RING_BUILTIN = {'recent': ('pile', 'recent', 'box', 'recent'), 'shelf': ('pile', 'shelf', 'shelf', 'shelf'),
+                'pipette': ('pipette', None, 'drop', 'pipette'), 'timer': ('timer', None, 'clock', 'timer'),
+                'sleep': ('sleep', None, 'dnd', 'sleep'), 'settings': ('menu', 'settings', 'gear', 'settings')}
+RING_ALPHA = 0.55
+RING_ALPHA_OFF = 0.22
+FORM_NAME_MAX = 18
+
+
+def inside_rect(r, p):
+    return r[0] <= p[0] <= r[0] + r[2] and r[1] <= p[1] <= r[1] + r[3]
 
 
 class Extras:
@@ -36,6 +47,11 @@ class Extras:
         self.break_next, self.break_i = None, 0
         self.tour = None
         self.custom = load_actions()
+        self.ring_edit = False           # the button editor is open on the ring
+        self.ring_drag = None            # id of the button pressed there...
+        self.ring_moved = False          # ...and whether it has been pulled away yet
+        self.ring_slots = []             # centers of the ring's places, refreshed every scene()
+        self.form = None                 # the new / edit button form: see form_open
 
     # ---------------------------------------------------------------- eyes, petting
     def head_rect(self):
@@ -294,6 +310,40 @@ class Extras:
                 self.requests.append(('run', self.custom[arg]['command']))
                 self.set_face('happy', 1.5)
             return True
+        if action == 'ring_edit':
+            self.ring_edit = True
+            self.open_radial()
+            return True
+        if action == 'ring_done':
+            self.close_radial()
+            self.open_menu('settings')
+            return True
+        if action == 'ring_add':
+            self.form_open()
+            return True
+        if action == 'ring_del':
+            self.ring_delete(arg)
+            return True
+        if action == 'ring_on':
+            self.ring_switch(arg)
+            return True
+        if action == 'form_field':
+            self.form.update(field=arg, pos=len(self.form[arg]))
+            return True
+        if action == 'form_icon':
+            self.form['icon'] = arg
+            return True
+        if action == 'form_pick':
+            self.requests.append(('form_pick',))
+            return True
+        if action == 'form_cancel':
+            self.form = None
+            return True
+        if action == 'form_save':
+            self.form_save()
+            return True
+        if action == 'ring_tile':        # handled from the press and the release: ring_grab, ring_drop
+            return True
         if action == 'tour_next':
             if self.tour:
                 self.tour['step'] += 1
@@ -318,5 +368,301 @@ class Extras:
 
     def custom_items(self):
         ru = self.settings.get('ui_lang') == 'ru'
-        return [('custom', i, a['icon'] if a['icon'] in ICONS else 'star', a['label_ru'] if ru else a['label'])
-                for i, a in enumerate(self.custom[:MAX_ACTIONS])]
+        return [('custom', i, a['icon'] if a['icon'] in ICONS or a['icon'].startswith('/') and self.exists(a['icon'])
+                 else 'star', a['label_ru'] if ru else a['label'], 'cmd:' + a['command'])
+                for i, a in enumerate(self.custom)]
+
+    # ---------------------------------------------------------------- her round buttons
+    def ring_table(self):
+        """id: (action, arg, icon, label, id) of every button, the settings one last"""
+        t = lambda k: tr(self.settings, k)
+        out = {i: (a, g, ic, t(lbl), i) for i, (a, g, ic, lbl) in RING_BUILTIN.items() if i != 'settings'}
+        if self.sleeping:
+            out['sleep'] = ('wake', None, 'dnd', t('wake'), 'sleep')
+        out.update((it[4], it) for it in self.custom_items())
+        a, g, ic, lbl = RING_BUILTIN['settings']
+        out['settings'] = (a, g, ic, t(lbl), 'settings')
+        return out
+
+    def ring_ids(self, table=None):
+        table = table or self.ring_table()
+        saved = self.settings.get('ring') or []
+        return [i for i in saved if i in table] + [i for i in table if i not in saved]
+
+    def ring_shown(self, i):
+        # only the built-in ones switch off; asleep, the wake button stays: it is the way back
+        off = i in (self.settings.get('ring_off') or []) and i in RING_BUILTIN and i != 'settings'
+        return not off or (i == 'sleep' and self.sleeping)
+
+    def radial_items(self):
+        table = self.ring_table()
+        return [table[i] for i in self.ring_ids(table) if self.ring_shown(i)]
+
+    def ring_switch(self, i):
+        off = list(self.settings.get('ring_off') or [])
+        if i in off:
+            off.remove(i)
+        else:
+            off.append(i)
+        self.settings['ring_off'] = off
+        self.requests.append(('save_settings',))
+
+    def ring_delete(self, i):
+        self.custom = [a for a in self.custom if 'cmd:' + a['command'] != i]
+        self.requests.append(('save_actions',))
+
+    def ring_add(self, command, label, icon, old=None):
+        """from the button window: `old` is the command of the button being edited, which keeps
+        its place; a command that another button already has replaces that button"""
+        prev = next((a for a in self.custom if a['command'] == old), None)
+        entry = dict(prev or {})
+        entry.update({'icon': icon, 'command': command})
+        if entry.get('label') == entry.get('label_ru'):              # one name for both languages
+            entry.update(label=label, label_ru=label)
+        else:                                                        # the other language's name stays
+            entry['label_ru' if self.settings.get('ui_lang') == 'ru' else 'label'] = label
+        at = self.custom.index(prev) if prev else None
+        if prev:
+            self.custom[at] = None
+        self.custom = [a for a in self.custom if a and a['command'] != command]
+        if prev:
+            self.custom.insert(min(at, len(self.custom)), entry)
+            ring = self.settings.get('ring') or []
+            if 'cmd:' + command not in ring:
+                self.settings['ring'] = ['cmd:' + command if i == 'cmd:' + old else i for i in ring]
+                self.requests.append(('save_settings',))
+        else:
+            self.custom.append(entry)
+        self.requests.append(('save_actions',))
+
+    def ring_grab(self, on, button):
+        if button == 1 and on and on.startswith('btn:') and int(on[4:]) < len(self.buttons):
+            _r, action, arg = self.buttons[int(on[4:])]
+            if action == 'ring_tile':
+                self.ring_drag = arg
+                self.ring_moved = False
+
+    def ring_drag_to(self, x, y):
+        """the others make way as soon as the pointer is nearer another place; free places
+        stay at the end, like the empty tiles in Android's editor"""
+        p = self.press
+        if not self.ring_moved and p and math.hypot(x - p['x'], y - p['y']) < 6 * self.S:
+            return                               # still a click
+        self.ring_moved = True
+        ids = self.ring_ids()
+        if self.ring_drag not in ids or len(self.ring_slots) < len(ids):
+            return
+        k = min(range(len(ids)), key=lambda n: math.hypot(self.ring_slots[n][0] - x, self.ring_slots[n][1] - y))
+        ids.remove(self.ring_drag)
+        ids.insert(k, self.ring_drag)
+        self.settings['ring'] = ids
+
+    def ring_drop(self):
+        i, self.ring_drag = self.ring_drag, None
+        if self.ring_moved:
+            self.requests.append(('save_settings',))
+        elif i.startswith('cmd:'):               # a click on your own button: edit it
+            self.form_open(i[4:])
+
+    def ring_icon_op(self, icon, px, py, d, color):
+        P = self.P
+        if icon.startswith('/'):
+            return ('thumb', icon, px + 3 * P, py + 3 * P, d - 6 * P, d - 6 * P)
+        return ('icon', icon, px + (d - 7 * P) / 2, py + (d - 7 * P) / 2 - P / 2, color)
+
+    def ring_tile_ops(self, item, px, py, d):
+        """one place on the ring in the editor: a see-through button in a white outline with a
+        switch (built-in) or a minus (yours) on it, or a hollow circle with a plus"""
+        P = self.P
+        circ = (px, py, d, d)
+        hot = self.pointer is not None and inside_rect(circ, self.pointer)
+        if item is None:
+            self.buttons.append((circ, 'ring_add', None))
+            return [('hollow', px, py, d),
+                    ('icon', 'plus', px + (d - 7 * P) / 2, py + (d - 7 * P) / 2, 'acc_hi' if hot else 'white')]
+        _a, _g, icon, label, i = item
+        on = i not in (self.settings.get('ring_off') or []) or i not in RING_BUILTIN
+        ops = [('group', RING_ALPHA if on else RING_ALPHA_OFF,
+                [('circle', px, py, d, hot), self.ring_icon_op(icon, px, py, d, 'fg')]),
+               ('hollow', px, py, d)]
+        tw, _th = self.text_size(label)
+        lx, ly = px + d / 2 - tw / 2, py + d + P
+        ops += [('text', lx + P, ly + P, label, 'shadow'), ('text', lx, ly, label, 'white' if on else 'muted')]
+        if not (i == self.ring_drag and self.ring_moved):      # first in the list: hit before the tile
+            if i.startswith('cmd:'):
+                b = 9 * P
+                mx, my = px + d - b + P, py - P
+                minus = (mx - P, my - P, b + 2 * P, b + 2 * P)
+                over = self.pointer is not None and inside_rect(minus, self.pointer)
+                ops += [('circle', mx, my, b, over), ('rect', mx + 2 * P, my + 4 * P, 5 * P, P, 'white', 1.0)]
+                self.buttons.append((minus, 'ring_del', i))
+            elif i != 'settings':
+                sx, sy = px + d - 11 * P, py - 3 * P
+                ops.append(('switch', sx, sy, on))
+                self.buttons.append(((sx - P, sy - P, 16 * P, 9 * P), 'ring_on', i))
+        self.buttons.append((circ, 'ring_tile', i))
+        return ops
+
+    # ---------------------------------------------------------------- the button form
+    def form_open(self, command=None):
+        """a new button, or with `command` the one that runs it"""
+        old = next((a for a in self.custom if a['command'] == command), None) or {}
+        icon = old.get('icon', 'star')
+        cmd = old.get('command', '')
+        self.form = {'old': command, 'cmd': cmd, 'pos': len(cmd), 'field': 'cmd',
+                     'name': old.get('label_ru' if self.settings.get('ui_lang') == 'ru' else 'label', ''),
+                     'icon': icon if icon in ICONS or icon.startswith('/') and self.exists(icon) else 'star'}
+
+    def form_can_save(self):
+        return bool(self.form['cmd'].strip() and self.form['name'].strip())
+
+    def form_save(self):
+        f = self.form
+        if self.form_can_save():
+            self.ring_add(f['cmd'].strip(), f['name'].strip(), f['icon'], old=f['old'])
+            self.form = None
+
+    def form_text(self, text):
+        """typed or pasted at the caret"""
+        f = self.form
+        text = ' '.join(text.splitlines())
+        val = f[f['field']]
+        if f['field'] == 'name':
+            text = text[:max(0, FORM_NAME_MAX - len(val))]
+        f[f['field']] = val[:f['pos']] + text + val[f['pos']:]
+        f['pos'] += len(text)
+
+    def form_key(self, name, text):
+        """all keys go here while it is open: Tab, Enter, Esc, editing keys, letters"""
+        f = self.form
+        val, pos = f[f['field']], f['pos']
+        if name == 'Escape':
+            self.form = None
+        elif name in ('Return', 'KP_Enter'):
+            self.form_save()
+        elif name in ('Tab', 'ISO_Left_Tab'):
+            field = 'name' if f['field'] == 'cmd' else 'cmd'
+            f.update(field=field, pos=len(f[field]))
+        elif name == 'BackSpace':
+            if pos:
+                f[f['field']] = val[:pos - 1] + val[pos:]
+                f['pos'] = pos - 1
+        elif name == 'Delete':
+            f[f['field']] = val[:pos] + val[pos + 1:]
+        elif name == 'Left':
+            f['pos'] = max(0, pos - 1)
+        elif name == 'Right':
+            f['pos'] = min(len(val), pos + 1)
+        elif name == 'Home':
+            f['pos'] = 0
+        elif name == 'End':
+            f['pos'] = len(val)
+        elif text:
+            self.form_text(text)
+        return True
+
+    def form_field_ops(self, field, x, y, w):
+        """a text line, scrolled so that the caret is always in it"""
+        P = self.P
+        f = self.form
+        h = 13 * P
+        r = (x, y, w, h)
+        active = f['field'] == field
+        val = f[field]
+        room = w - 8 * P
+        ops = [('panel', *r, 'inset')]
+        pos = f['pos'] if active else len(val)
+        start = 0
+        while start < pos and self.text_size(val[start:pos])[0] > room:
+            start += 1
+        shown = val[start:]
+        while shown and self.text_size(shown)[0] > room:
+            shown = shown[:-1]
+        tx, ty = x + 4 * P, y + (h - self.text_size('Ag')[1]) / 2
+        if shown:
+            ops.append(('text', tx, ty, shown, 'fg'))
+        if active and int(self.now * 2) % 2 == 0:
+            before = val[start:pos]
+            cx = tx + (self.text_size(before)[0] - P if before else 0)
+            ops.append(('rect', cx, y + 2 * P, P, 9 * P, 'acc_hi', 1.0))
+        self.buttons.append((r, 'form_field', field))
+        return ops
+
+    def form_ops(self):
+        """pieces of her other menus: panel, fields, a grid of icons, buttons; it takes every click"""
+        P = self.P
+        t = lambda k: tr(self.settings, k)
+        f = self.form
+        self.buttons = []
+        names = list(ICONS)
+        cols, cell = 12, 11 * P
+        rows = (len(names) + cols - 1) // cols
+        lh = self.text_size('Ag')[1]
+        bh = 15 * P
+        w = cols * cell + 14 * P
+        h = 5 * P + lh + 2 * P + 2 * (lh + 13 * P + 2 * P) + lh + rows * cell + 3 * P + bh + 3 * P + bh + 5 * P
+        ring = self.hits.get('radial')
+        if ring:
+            x = ring[0] - w - 4 * P if self.ring_left else ring[0] + ring[2] + 4 * P
+            y = ring[1]
+        else:
+            x, y = self.menu_pos(w, h)
+        x = min(max(x, 4 * P), self.W - w - 4 * P)
+        y = min(max(y, 4 * P), self.H - h - 4 * P)
+        inner = w - 14 * P
+        lx = x + 7 * P
+        ops = [('panel', x, y, w, h, 'window'),
+               ('text', lx, y + 5 * P, t('ring_change' if f['old'] else 'ring_new'), 'muted')]
+        self.hits['form'] = (x, y, w, h)
+        ry = y + 5 * P + lh + 2 * P
+        for field, key in (('cmd', 'ring_cmd'), ('name', 'ring_name')):
+            ops.append(('text', lx, ry, t(key), 'acc_hi' if f['field'] == field else 'fg'))
+            ry += lh
+            ops += self.form_field_ops(field, lx, ry, inner)
+            ry += 13 * P + 2 * P
+        ops.append(('text', lx, ry, t('ring_icon'), 'fg'))
+        ry += lh
+        for k, name in enumerate(names):
+            r = (lx + (k % cols) * cell, ry + (k // cols) * cell, cell, cell)
+            hot = self.pointer is not None and inside_rect(r, self.pointer)
+            if name == f['icon']:
+                ops.append(('panel', *r, 'tab_on'))
+            elif hot:
+                ops.append(('panel', *r, 'row_hot'))
+            ops.append(('icon', name, r[0] + 2 * P, r[1] + 2 * P, 'paper' if name == f['icon'] or hot else 'fg'))
+            self.buttons.append((r, 'form_icon', name))
+        ry += rows * cell + 3 * P
+
+        def button(rx, label, action, rw=None, on=True):
+            tw, th = self.text_size(label)
+            r = (rx, ry, rw or tw + 12 * P, bh)
+            hot = on and self.pointer is not None and inside_rect(r, self.pointer)
+            ops.append(('panel', *r, 'button_hot' if hot else 'button' if on else 'tab'))
+            ops.append(('text', r[0] + (r[2] - tw) / 2, r[1] + (r[3] - P - th) / 2, label, 'fg' if on else 'muted'))
+            if on:
+                self.buttons.append((r, action, None))
+            return r
+
+        r = button(lx, t('ring_file'), 'form_pick')
+        if f['icon'].startswith('/'):
+            ops.append(('thumb', f['icon'], r[0] + r[2] + 4 * P, ry, bh, bh))
+        ry += bh + 3 * P
+        half = (inner - 4 * P) / 2
+        button(lx, t('cancel'), 'form_cancel', half)
+        button(lx + half + 4 * P, t('ring_save' if f['old'] else 'ring_add'), 'form_save', half, self.form_can_save())
+        return ops
+
+    def ring_done_ops(self, cx, cy, R, left):
+        """the way out of the editor, inside the arc: it stays open while you are elsewhere"""
+        P = self.P
+        label = tr(self.settings, 'ring_done')
+        tw, th = self.text_size(label)
+        w, h = tw + 12 * P, 15 * P
+        x = cx + (-R if left else R) * 0.62 - w / 2
+        x = min(max(x, 4 * P), self.W - w - 4 * P)
+        y = min(max(cy - h / 2, 4 * P), self.H - h - 4 * P)
+        r = (x, y, w, h)
+        hot = self.pointer is not None and inside_rect(r, self.pointer)
+        self.buttons.append((r, 'ring_done', None))
+        return [('panel', *r, 'button_hot' if hot else 'button'),
+                ('text', x + (w - tw) / 2, y + (h - P - th) / 2, label, 'fg')]

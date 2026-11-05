@@ -199,7 +199,12 @@ class Painter:
                 else:
                     cr.paint()
                 cr.restore()
-            elif k in ('panel', 'tail', 'switch', 'bar', 'icon', 'circle'):
+            elif k == 'group':                         # drawn whole, then see-through as one
+                cr.push_group()
+                self.draw_ops(cr, op[2], surf)
+                cr.pop_group_to_source()
+                cr.paint_with_alpha(op[1])
+            elif k in ('panel', 'tail', 'switch', 'bar', 'icon', 'circle', 'hollow'):
                 self.rects(cr, pixui.expand(op, P))
             elif k == 'rect':
                 _, x, y, w, h, fill, a = op
@@ -307,9 +312,10 @@ class Overlay(Gtk.ApplicationWindow):
         self.area.add_controller(wheel)
 
         keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)   # before GTK takes Tab for its own focus moves
         keys.connect('key-pressed', self.on_key)
         self.add_controller(keys)
-        self.keyboard = False
+        self.keyboard = LayerShell.KeyboardMode.NONE
 
         drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
         drop.connect('enter', self.on_dnd_motion)
@@ -324,6 +330,7 @@ class Overlay(Gtk.ApplicationWindow):
     def cancel_press(b):
         b.press = None
         b.click_at = None
+        b.ring_drag = None
 
     def on_pressed(self, g, n, x, y):
         button = g.get_current_button()
@@ -346,18 +353,23 @@ class Overlay(Gtk.ApplicationWindow):
         self.app.kick()
         return used
 
-    def on_key(self, _c, keyval, _code, _state):
+    def on_key(self, _c, keyval, _code, state):
         name = Gdk.keyval_name(keyval) or ''
-        used = self.app.brain.key(name)
+        command = state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK)
+        if self.app.brain.form and command and name in ('v', 'V', 'Cyrillic_em', 'Cyrillic_EM'):
+            self.app.form_paste()
+            return True
+        # shortcut: letters come straight from the layout, no input method (CJK, compose); add Gtk.IMContext if asked
+        u = Gdk.keyval_to_unicode(keyval)
+        used = self.app.brain.key(name, chr(u) if u >= 32 and u != 127 and not command else '')
         self.app.kick()
         return used
 
-    def set_keyboard(self, on):
-        """the keyboard comes to her only while the pointer is over the timer"""
-        if on != self.keyboard:
-            self.keyboard = on
-            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.ON_DEMAND if on
-                                         else LayerShell.KeyboardMode.NONE)
+    def set_keyboard(self, mode):
+        """the keyboard comes to her only while the pointer is over the timer or a button form is open"""
+        if mode != self.keyboard:
+            self.keyboard = mode
+            LayerShell.set_keyboard_mode(self, mode)
 
     def on_drag_prepare(self, src, x, y):
         b = self.app.brain
@@ -459,7 +471,6 @@ window.moth-girl, window.moth-girl.background, window.moth-girl.csd {
 window.moth-girl drawingarea { background: none; }
 '''
 
-
 class App(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
@@ -473,6 +484,7 @@ class App(Gtk.Application):
         self.outfit_want = None         # the outfit she wears or is changing into
         self.sound_procs = []
         self.pending = []
+        self.form_picking = False       # the file dialog of the button form is open
         for name in ACTIONS:
             a = Gio.SimpleAction.new(name, None)
             a.connect('activate', self.on_action, name)
@@ -657,7 +669,8 @@ class App(Gtk.Application):
             if w is self.active:
                 w.area.queue_draw()
                 w.update_input()
-                w.set_keyboard(b.kb_hover)
+                w.set_keyboard(LayerShell.KeyboardMode.EXCLUSIVE if b.form and not self.form_picking else
+                               LayerShell.KeyboardMode.ON_DEMAND if b.kb_hover else LayerShell.KeyboardMode.NONE)
             elif b.mode == 'held' or w.drew:
                 w.area.queue_draw()                 # carried across / one last clear
         fps = b.fps()
@@ -712,6 +725,10 @@ class App(Gtk.Application):
                 self.speak(r[1], r[2], r[3], r[4] if len(r) > 4 else 0.5)
             elif kind == 'pick_sound':
                 self.pick_sound()
+            elif kind == 'form_pick':
+                self.form_pick()
+            elif kind == 'save_actions':
+                config.save_actions(b.custom)
             elif kind == 'save':
                 self.state.save()
             elif kind == 'save_settings':
@@ -826,6 +843,41 @@ class App(Gtk.Application):
                 self.play_timer_sound()
                 self.ev(lambda b: b.open_menu('set_sound', None) if b.menu else None)
         dialog.open(None, None, done)
+
+    # ---- a picture for a button: the system's file dialog, like the timer sound
+    def form_pick(self):
+        self.form_picking = True               # the dialog needs the keyboard she holds
+        flt = Gtk.FileFilter()
+        flt.set_name(config.tr(self.settings, 'images'))
+        flt.add_pixbuf_formats()
+        store = Gio.ListStore.new(Gtk.FileFilter)
+        store.append(flt)
+
+        def done(dlg, res):
+            self.form_picking = False
+            try:
+                path = dlg.open_finish(res).get_path()
+                GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 32, 32, True)
+            except GLib.Error as e:            # cancelled, or not a picture she can read
+                bad = not e.matches(Gtk.dialog_error_quark(), Gtk.DialogError.DISMISSED)
+                self.ev(lambda b: b.set_face('worried', 1.5) if bad else None)
+                return
+            except TypeError:                  # not a local file
+                self.ev(lambda b: b.set_face('worried', 1.5))
+                return
+            icon = config.keep_icon(path)
+            self.ev(lambda b: b.form.update(icon=icon) if b.form else None)
+        Gtk.FileDialog(title=config.tr(self.settings, 'ring_icon'), filters=store, default_filter=flt).open(None, None, done)
+
+    def form_paste(self):
+        def done(cb, res):
+            try:
+                text = cb.read_text_finish(res)
+            except GLib.Error:
+                return
+            if text:
+                self.ev(lambda b: b.form_text(text) if b.form else None)
+        Gdk.Display.get_default().get_clipboard().read_text_async(None, done)
 
     # ---- jobs
     def job_label(self):
