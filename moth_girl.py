@@ -352,7 +352,7 @@ class Overlay(Gtk.ApplicationWindow):
         """the keyboard comes to her only while the pointer is over the timer"""
         if on != self.keyboard:
             self.keyboard = on
-            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.EXCLUSIVE if on
+            LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.ON_DEMAND if on
                                          else LayerShell.KeyboardMode.NONE)
 
     def on_drag_prepare(self, src, x, y):

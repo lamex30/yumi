@@ -4,6 +4,7 @@ Everything here is optional: whatever tool is missing just means she does not re
 Long-running commands are followed in threads and restarted if they die (or given up on if
 they keep dying right away); results are handed to the GTK main loop with GLib.idle_add.
 """
+import ctypes
 import json
 import os
 import re
@@ -42,6 +43,10 @@ def main(fn, *args):
     GLib.idle_add(lambda: fn(*args) and False)
 
 
+def _die_with_parent():
+    ctypes.CDLL(None).prctl(1, 15)       # PR_SET_PDEATHSIG, SIGTERM: no orphans when yumi dies
+
+
 def stream(cmd, on_line, on_dead=None):
     """follow a command's output line by line; restart it when it ends. If it keeps dying
     within seconds (the compositor lacks what it needs), give up and call on_dead().
@@ -55,7 +60,8 @@ def stream(cmd, on_line, on_dead=None):
             t0 = time.monotonic()
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                        text=True, env=ENV)
+                                        text=True, env=ENV,
+                                        preexec_fn=_die_with_parent)
                 for line in proc.stdout:
                     on_line(line.strip())
                 proc.wait()
