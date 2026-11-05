@@ -311,9 +311,11 @@ class Brain(Extras):
             # the middle a few times, like a pendulum.
             s = self.swing.x
             return 'held', 0 if s < -0.3 else 2 if s > 0.3 else 1
-        if self.pile:
+        if self.pile and not self.sleeping:
             return 'sit', [0, 1, 2, 1][int(t * 4) % 4]
         if self.sleeping and self.mode == 'docked':
+            if self.peek:
+                return 'sleep', 1                # half-open eyes, she stays in Do Not Disturb
             return 'sleep', min(2, int(max(0.0, t - self.sleep_since) / 1.2))
         if self.mode == 'air':
             p = 'hover' if self.menu else 'shy'
@@ -415,7 +417,7 @@ class Brain(Extras):
 
     # ------------------------------------------------------------------ showing / hiding
     def pop(self, out, temporary=False):
-        if self.mode != 'docked':
+        if self.mode != 'docked' or self.sleeping:   # asleep, tick() decides how far she peeks out
             return
         if out:
             self.hide_at = None
@@ -429,12 +431,18 @@ class Brain(Extras):
             self.stay = False
             self.yoff.to(self.hidden_off(), 22.0, 1.0)
 
+    def in_use(self):
+        return bool(self.pile or self.menu or self.radial or self.file_drag or self.dnd_over
+                    or self.pipette or self.kb_hover or self.timer and self.timer.get('pending'))
+
+    def peeks(self):
+        """asleep, but you are using her"""
+        return self.in_use() or (self.pointer is not None and inside(self.hits.get('her'), *self.pointer))
+
     def wants_out(self):
         if self.mode != 'docked':
             return True
-        if self.pile or self.menu or self.radial or self.file_drag or self.dnd_over or self.stay \
-                or self.settings.get('pinned') or self.tour \
-                or self.pipette or self.kb_hover or self.timer and self.timer.get('pending'):
+        if self.in_use() or self.stay or self.settings.get('pinned') or self.tour:
             return True
         if self.bubble and self.now < self.bubble['until']:
             return True
@@ -447,8 +455,11 @@ class Brain(Extras):
 
     def toggle(self):
         """Super+Z"""
-        if self.sleeping:
+        if self.nap:
             self.requests.append(('dnd', False))
+            return
+        if self.sleeping:
+            self.toggle_radial()
             return
         if self.mode != 'docked':
             self.go_home()
@@ -558,6 +569,7 @@ class Brain(Extras):
             self.say('nap_wake' if nap else 'wake')
 
     sleep_since = 0.0
+    peek = False
 
     def world(self, event, **kw):
         """system events: charger_on/off, battery_low, wifi_on/off, download, screenshot (music: no words, only her dance)"""
@@ -732,7 +744,11 @@ class Brain(Extras):
             room = CARD_W * P + 12 * P
             lo = bw / 2 + (room if side == 'left' else 0) + 8 * S
             hi = self.W - bw / 2 - (room if side == 'right' else 0) - 8 * S
-            self.pile_cx = min(max(self.x.x, lo), max(lo, hi))
+            cx = self.x.x
+            if self.sleeping:          # she sleeps on: the box lands beside her, not under her
+                gap = (self.meta.size['sleep:0'][0] * S + bw) / 2
+                cx += -gap if side == 'left' else gap
+            self.pile_cx = min(max(cx, lo), max(lo, hi))
             self.pile_side = side
         self.pile = which
         self.pull.clear()
@@ -1029,7 +1045,7 @@ class Brain(Extras):
         paths = [str(p) for p in paths if p]
         if not paths:
             return False
-        if self.sleeping:
+        if self.nap:
             self.requests.append(('dnd', False))
         self.menu_for_files(paths)
         if len(paths) == 1:
@@ -1069,7 +1085,7 @@ class Brain(Extras):
             self.held_v *= math.exp(-dt * 9)
             self.swing.to(max(-1.0, min(1.0, -self.held_v / 500.0)), 7.0, 0.1)
             moving |= self.swing.step(dt)
-        if self.pile:
+        if self.pile and not self.sleeping:
             sx, sy = self.seat()
             if abs(self.x.t - sx) > 0.5 or abs(self.y.t - sy) > 0.5:
                 self.x.to(sx, 11.0, 0.75)
@@ -1081,7 +1097,7 @@ class Brain(Extras):
         # single click waits for a possible double click
         if self.click_at and now >= self.click_at:
             self.click_at = None
-            if self.sleeping:
+            if self.nap:
                 self.requests.append(('dnd', False))
             else:
                 self.toggle_radial()
@@ -1118,8 +1134,8 @@ class Brain(Extras):
                 self.hide_at = None
                 self.pop(False)
         if self.sleeping and self.mode == 'docked':
-            over = self.pointer is not None and inside(self.hits.get('her'), *self.pointer)
-            target = 0 if over else self.hidden_off()
+            self.peek = self.peeks()             # here: scene() clears the hits pose() would need
+            target = 0 if self.peek else self.hidden_off()
             if abs(self.yoff.t - target) > 0.5:
                 self.yoff.to(target, 10.0, 1.0)
         # small talk
@@ -1660,6 +1676,8 @@ class Brain(Extras):
         step = (end - start) / max(1, n - 1)
         R = max(175 * S, (n - 1) * 68 * S / abs(end - start))      # more buttons: a wider arc
         cy = by + 70 * S
+        # lift the whole arc if it would run off the bottom edge and squeeze the last buttons together
+        cy = min(cy, self.H - d / 2 - lh - 4 * P - max(math.sin(start + k * step) * R for k in range(n)))
         t = self.radial_t.x
         for k, (action, arg, icon, label) in enumerate(items):
             a = start + k * step
@@ -1759,7 +1777,7 @@ class Brain(Extras):
         x, y = self.pointer
         if not any(inside(self.hits.get(k), x, y) for k in ('her', 'moth', 'timer')):
             return False
-        if self.sleeping:
+        if self.nap:
             return False
         v = int(round(self.timer_seconds()))
         up = dy < 0

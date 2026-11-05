@@ -107,7 +107,7 @@ put `inputs.yumi.packages.${system}.default` in `environment.systemPackages` (or
 ### 3. Start her with your session and give her a hotkey
 
 `yumi` starts her in the background: you can close the terminal, she stays. `yumi --toggle` pops
-her out, hides her or wakes her up. Other flags: `--pipette`, `--recent`, `--sleep` (Do Not
+her out, hides her, or in Do Not Disturb opens her menu. Other flags: `--pipette`, `--recent`, `--sleep` (Do Not
 Disturb), `--home`, `--monitor`, `--quit`, and `--foreground` to keep her attached to the
 terminal (handy for debugging).
 
@@ -186,7 +186,7 @@ Add **Yumi** to the autostart apps in the system settings, then add a custom sho
 | Middle-click her (or Settings → Her → Stay out) | she stops hiding; again to let her hide |
 | Double-click her | she goes back to the bottom-right corner |
 | Stroke her head (move the pointer back and forth over it) | she blushes; hearts, sparkles behind the pointer |
-| DND | Do Not Disturb on; she naps in a blanket and stays quiet |
+| DND | Do Not Disturb on; she naps in a blanket and stays quiet. Hover or use her and she half-opens her eyes, DND stays on. Wake is in her menu |
 
 Settings come in groups: **Her** (stay out, system reactions, idle chatter, napping when you
 are away, health breaks every 20 / 30 / 45 / 60 min: water, eyes, stretch), **Sound** (her
