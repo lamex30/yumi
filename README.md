@@ -295,9 +295,12 @@ turns until you quit her. To set the ears up:
 ```
 
 vosk goes into its own small venv; the microphone is read with whatever the desktop has
-(`parecord`, `pw-record` or `arecord`). Ollama must be running (`ollama serve`, the model pulled).
-The answer model is picked in **Settings → Her mind → Answer model** (it cycles through the
-installed ones); where Ollama lives lives in `~/.config/yumi/settings.json` as `ollama_url`.
+(`parecord`, `pw-record` or `arecord`). If she hears you wrong, there is a sharper ear:
+**Settings → Language → Hearing accuracy → Sharp** — a big model (~1.8 GB, downloaded once
+on the first listen) understands speech noticeably better than the small one; the price
+is memory and a longer first listen. The answer model is picked in **Settings → Her mind →
+Answer model** (it cycles through the installed ones); where Ollama lives lives in
+`~/.config/yumi/settings.json` as `ollama_url`.
 
 **The time and the weather.** «Который час» and «what time is it» she answers by herself,
 no mind involved — she just reads the clock. «Какая погода» and «what's the weather» make her
@@ -305,7 +308,9 @@ peek at [wttr.in](https://wttr.in) (this one small look needs the internet; ever
 stays offline as before); with a place in the phrase («какая погода в Москве») she looks there,
 otherwise out of her own window — the city where you are, recognized from your network.
 
-**The wake word.** Say «Yumi» and she is all ears at once, no buttons. Said with a phrase
+**The wake word.** Say «Yumi» and she is all ears at once, no buttons — the name may come
+behind a filler word («well, Yumi») and a half-heard mush of syllables counts too, so she
+catches it properly at first try more often than not. Said with a phrase
 («Yumi, what's the news today») she waits for the phrase to end and the question goes to her
 whole; a pause after the name — she asks "Yes? What is it?" right away and listens on. The idle
 waiting goes on while enabled (off in **Settings → Language → Wake on «Yumi»**) and it is not an

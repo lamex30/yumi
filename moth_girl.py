@@ -854,7 +854,8 @@ class App(Gtk.Application):
             if not b.listening:
                 return
             self.hush()                     # still sounding after the wait: she gives way to you
-            text = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs)
+            text = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs,
+                               size=self.settings.get('stt_size', 'small'))
             GLib.idle_add(lambda: self.ev(lambda b: b.heard(text)) and False)
         threading.Thread(target=work, daemon=True).start()
 
@@ -882,7 +883,8 @@ class App(Gtk.Application):
                 if not self.wake_on or busy:
                     continue            # not while she sleeps, answers or listens on request
                 res = ears.wake(lang=self.settings.get('speech_lang', 'en'),
-                                word=self.settings.get('wake_word', 'юми'), secs=20)
+                                word=self.settings.get('wake_word', 'юми'), secs=60,
+                                size=self.settings.get('stt_size', 'small'))
                 if not self.wake_on or not res or not res.get('woke'):
                     continue            # quiet, called off or the ears are away
                 tail = res.get('text') or ''

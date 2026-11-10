@@ -491,6 +491,7 @@ class Brain(Extras):
         return {'ui_lang': ['en', 'ru'], 'speech_lang': ['en', 'ru'],
                 'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names,
                 'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts'],
+                'stt_size': ['small', 'big'],
                 'chat_model': self.chat_models or [self.settings.get('chat_model')]}
 
     outfit_names = []                 # outfit folders found in sprites/outfits (set by the app)
@@ -505,6 +506,8 @@ class Brain(Extras):
             return t('off') if not val else f'{val}%'
         if arg == 'voice_kind':
             return t('v_' + str(val)) if f'v_{val}' in UI['en'] else str(val)
+        if arg == 'stt_size':
+            return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
         if arg == 'outfit':
             return t('o_' + str(val)) if f'o_{val}' in UI['en'] else str(val).title()
         if arg == 'chat_model':
@@ -859,7 +862,8 @@ class Brain(Extras):
             rows.append(('menu', 'settings', t('back')))
         elif kind == 'set_lang':
             rows = [('set', 'ui_lang', t('ui_lang')), ('set', 'speech_lang', t('speech_lang')),
-                    ('set', 'wake_ears', t('wake_ears')), ('menu', 'settings', t('back'))]
+                    ('set', 'wake_ears', t('wake_ears')), ('set', 'stt_size', t('stt_size')),
+                    ('menu', 'settings', t('back'))]
         elif kind == 'set_chat':
             if not self.chat_models and 'chat_model' not in self.unavailable:
                 self.requests.append(('chat_models',))

@@ -11,6 +11,10 @@ A click on her mic button starts a listen; vosk hears the end of the phrase, or
 secs pass, or another click asks /stop. /wake is the same microphone held on longer:
 vosk waits for the wake word (юми), and the moment it passes by the app gets the
 phrase that follows — nothing is recognized twice.
+
+Two sizes per language: the small one (~45 MB) is quick and always on, the big one
+(~1.8 GB here and there) hears at least twice as well; the app asks for it with
+size=big in the settings (Hearing accuracy / her Hearing accuracy).
 """
 import argparse
 import atexit
@@ -30,11 +34,13 @@ from pathlib import Path
 HOME = Path(os.environ.get('YUMI_STT_HOME') or Path.home() / '.local/share/yumi/stt')
 STATE = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'yumi' / 'stt' / 'port.json'
 RATE = 16000                            # the small models want 16 kHz mono s16
-MODELS = {                              # lang: (zip on alphacephei.com, folder inside it)
-    'ru': ('vosk-model-small-ru-0.22', 'vosk-model-small-ru-0.22'),
-    'en': ('vosk-model-small-en-us-0.15', 'vosk-model-small-en-us-0.15'),
+MODELS = {                              # lang: size: (zip on alphacephei.com, folder inside it)
+    'ru': {'small': ('vosk-model-small-ru-0.22', 'vosk-model-small-ru-0.22'),
+           'big': ('vosk-model-ru-0.42', 'vosk-model-ru-0.42')},
+    'en': {'small': ('vosk-model-small-en-us-0.15', 'vosk-model-small-en-us-0.15'),
+           'big': ('vosk-model-en-us-0.22', 'vosk-model-en-us-0.22')},
 }
-VERSION = 3                             # bumped when the protocol changes: stale twins are restarted
+VERSION = 4                             # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 # which command reads the mic, raw s16 mono RATE. pw-record before parecord: on some
 # desktops parecord connects and then stays silent, so arecord gets the last word.
@@ -76,31 +82,36 @@ def variants(word):
 
 
 def near(a, b):
-    """True when the two words differ by at most one letter (the hearsay of Vosk)"""
+    """True when the two words differ by at most a couple of letters (the hearsay of
+    Vosk): one letter forgiven to short words, two to the long ones where one slips in anyway"""
     if a == b:
         return True
-    if abs(len(a) - len(b)) > 1:
+    lim = 2 if min(len(a), len(b)) >= 6 else 1
+    if abs(len(a) - len(b)) > lim:
         return False
-    # a plain edit distance, cut short: one substitution, insertion or deletion is fine
+    # a plain edit distance, cut short: a substitution, insertion or deletion is fine
     prev = list(range(len(b) + 1))
     for i, ca in enumerate(a, 1):
         cur = [i]
         for j, cb in enumerate(b, 1):
             cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
-            if min(cur) > 1 and min(prev) > 1:
+            if min(cur) > lim and min(prev) > lim:
                 return False
         prev = cur
-    return prev[-1] <= 1
+    return prev[-1] <= lim
 
 
 def wake_at(text, spellings):
-    """the place of the wake word in the phrase, or -1; only whole words count
-    and only as the first or alone: «юмизнает» must not wake her"""
-    toks = [t.strip('.,!?"«»…:;()[]-—') for t in text.lower().replace('ё', 'е').split()]
-    for i, t in enumerate(toks):
-        if len(t) > 1 and i == 0 and any(near(t, s) for s in spellings):
-            return i
-    return -1
+    """what came after the wake word in the phrase, or None; only whole words count
+    and only near the start («юми» or behind a filler «ну, юми»; glued hear-say like
+    «ю и ми» counts too): «юмизнает» must not wake her"""
+    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
+            for t in text.split()]
+    toks = [t for t in toks if t]
+    for i, n in ((0, 3), (0, 2), (0, 1), (1, 2), (1, 1)):   # the fullest hear-say first
+        if i + n <= len(toks) and any(near(''.join(toks[i:i + n]), s) for s in spellings):
+            return ' '.join(toks[i + n:])
+    return None
 
 
 class Ears:
@@ -114,28 +125,32 @@ class Ears:
         self.kind = None                # what the lock holds now: 'listen' or 'wake'
         self.lock = threading.Lock()
 
-    def model(self, lang):
-        """the recognizer's factory: the model folder, downloaded on the first need"""
+    def model(self, lang, size='small'):
+        """the recognizer's factory: the model folder, downloaded on the first need;
+        one model per language is kept in mind — a size switch lets the old one go"""
         from vosk import Model
         with self.lock:
-            if lang in self.models:
-                return self.models[lang]
-            zip_name, folder = MODELS.get(lang, MODELS['ru'])
+            key = (lang, size if size in MODELS.get(lang, MODELS['ru']) else 'small')
+            if key in self.models:
+                return self.models[key]
+            zip_name, folder = MODELS[key[0]][key[1]]
             path = HOME / folder
             if not path.exists():
                 download(zip_name, folder)
             m = Model(str(path))
-            self.models[lang] = m
+            for other in [k for k in self.models if k[0] == lang and k != key]:
+                del self.models[other]      # a big model is many: one per language at a time
+            self.models[key] = m
             return m
 
-    def listen(self, lang, secs, quiet):
+    def listen(self, lang, secs, quiet, size='small'):
         """hear one phrase: the recognized text ('' when there was nothing)"""
         from vosk import KaldiRecognizer
         import selectors
         name, cmd = recorder_cmd()
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
-        model = self.model(lang)
+        model = self.model(lang, size)
         with self.lock:                     # one listen at a time
             if self.busy:
                 return None                 # the app never does this, but just in case
@@ -185,7 +200,7 @@ class Ears:
                 proc.terminate()
                 self.busy = False
 
-    def wake(self, lang, word, secs):
+    def wake(self, lang, word, secs, size='small'):
         """wait for the wake word, keeping the microphone on:
         {'woke': True, 'text': the phrase after it} — the name was heard, the rest came
         {'woke': True, 'text': ''} — the name alone, a phrase may still come
@@ -196,7 +211,7 @@ class Ears:
         name, cmd = recorder_cmd()
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
-        model = self.model(lang)
+        model = self.model(lang, size)
         spellings = variants(' '.join(str(word).split()).lower() or 'юми')
         with self.lock:                     # one microphone at a time
             if self.busy:
@@ -254,15 +269,17 @@ class Ears:
                         return {'woke': True, 'text': ''}
                     if not words.strip():
                         continue
-                    i = wake_at(words, spellings)
-                    if not woken and i >= 0:
+                    hit = wake_at(words, spellings)
+                    if not woken and hit is not None:
                         woken = True                # she hears her name: keep on recording
                         since = time.monotonic()
                     if not woken or not ended:
                         continue    # not her name yet, or the phrase is still forming
-                    said = ' '.join(words.split()[i + 1:]) if i >= 0 else words
-                    if said.strip():
-                        return {'woke': True, 'text': ' '.join(said.split())}
+                    said = hit if hit is not None else words
+                    # (the name passed by in an earlier phrase: the whole utterance is the tail)
+                    said = ' '.join(said.split())
+                    if said:
+                        return {'woke': True, 'text': said}
                     since = time.monotonic()        # the name alone: a pause for what follows
                 if woken:
                     return {'woke': True, 'text': ''}   # the name was heard, the sound went on
@@ -324,8 +341,9 @@ class Handler(BaseHTTPRequestHandler):
                 secs = 20.0
             lang = (q.get('lang') or ['ru'])[0]
             word = ' '.join((q.get('word') or ['юми'])[0].split()) or 'юми'
+            size = (q.get('size') or ['small'])[0]
             try:
-                res = self.ears.wake(lang, word, secs)
+                res = self.ears.wake(lang, word, secs, size=size)
             except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
                 self.ears.error = str(e)
                 return self._json({'error': str(e)}, 500)
@@ -341,8 +359,9 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             secs = 7.0
         lang = (q.get('lang') or ['ru'])[0]
+        size = (q.get('size') or ['small'])[0]
         try:
-            text = self.ears.listen(lang, secs, quiet=min(6.0, secs))
+            text = self.ears.listen(lang, secs, quiet=min(6.0, secs), size=size)
         except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
             self.ears.error = str(e)
             return self._json({'error': str(e)}, 500)

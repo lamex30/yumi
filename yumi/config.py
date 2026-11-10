@@ -36,6 +36,7 @@ DEFAULT_SETTINGS = {
     'ollama_url': 'http://127.0.0.1:11434',   # where her local Ollama lives
     'wake_ears': True,        # she starts listening the moment you say the wake word
     'wake_word': 'юми',       # the wake word itself (say it, then the question)
+    'stt_size': 'small',      # her hearing: small (45 MB) / big (a sharper ~1.8 GB model)
 }
 DEFAULT_STATE = {
     'mode': 'docked',         # docked / air
@@ -196,7 +197,8 @@ UI = {
         'tour_title': 'Hello!',
         'listen': 'Listen', 'cat_chat': 'Her mind', 'chat_model': 'Answer model',
         'chat_refresh': 'Find the model',
-        'wake_ears': 'Wake on «Yumi»',
+        'wake_ears': 'Wake on «Yumi»', 'stt_size': 'Hearing accuracy', 'e_small': 'Lite',
+        'e_big': 'Sharp (downloads ~1.8 GB)',
         'tour1': "Hi! I'm Yumi. I live at the bottom edge of your screen. Let me show you around.",
         'tour2': 'Click me and round buttons appear: files, shelf, pipette, timer, Do Not Disturb and settings.',
         'tour3': 'Scroll the wheel over me for a timer. Click its digits to type a time.',
@@ -233,7 +235,8 @@ UI = {
         'tour_title': 'Привет!',
         'listen': 'Послушать', 'cat_chat': 'Её мозги', 'chat_model': 'Модель ответов',
         'chat_refresh': 'Найти модель',
-        'wake_ears': 'Будить по «Юми»',
+        'wake_ears': 'Будить по «Юми»', 'stt_size': 'Точность ушей', 'e_small': 'Лёгкая',
+        'e_big': 'Точная (скачает ~1.8 ГБ)',
         'tour1': 'Привет! Я Юми. Я живу у нижнего края твоего экрана. Давай я всё покажу.',
         'tour2': 'Нажми на меня, и вокруг появятся кружочки: файлы, полка, пипетка, таймер, «Не мешать» и настройки.',
         'tour3': 'Покрути колёсико над мной, и появится таймер. Кликни по цифрам, чтобы вписать время.',
