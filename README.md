@@ -43,6 +43,9 @@ English · [Русский](README.ru.md)
 - **Her voice.** Her words type out with little 8-bit blips, like a game character talking
   (Settings → Sound → Voice: volume or off) — or she can speak out loud with a real offline
   voice ([Silero](https://github.com/snakers4/silero-models), see "Her real voice" below).
+- **She listens and answers.** The mic button on her ring: a local offline Vosk hears your
+  phrase, a local Ollama answers it (the model is picked in the settings), she says the answer
+  out loud — see "She listens and answers" below.
 - English and Russian, picked from your system language.
 
 <img src="docs/colors.png" alt="Yumi on teal, rose, amber and blue wallpapers, recolored to each" width="100%">
@@ -87,6 +90,7 @@ Optional, for the extras (install what you like):
 | `swaync`, `mako` or `dunst` | Do Not Disturb (KDE Plasma needs nothing extra) |
 | `pipewire` (`pw-play`), `paplay`, `aplay` or `ffplay` | the timer bell |
 | `tools/tts_setup.sh` (a venv with torch, ~450 MB) | her real voice: a local Silero TTS |
+| `tools/stt_setup.sh` (a small venv with vosk) | her ears: local speech recognition |
 
 ### 2. Yumi herself
 
@@ -273,6 +277,25 @@ voices warm up in the background; after that she answers at once, and her lines 
 `pitch` is 1.0 as recorded, 1.2 a proper squeak. After editing the file, restart the voice:
 `pkill -f yumi/tts_daemon.py`. Without the setup she simply keeps her blips.
 
+## She listens and answers
+
+The mic button on her ring (**Listen**) makes her hear you: click it, say a phrase, click again to
+stop waiting. A local [Vosk](https://github.com/alphacep/vosk-api) recognizes the speech fully
+offline — the small Russian model (~45 MB, English too) downloads itself on the first listen.
+What she hears shows in her bubble, then a local [Ollama](https://ollama.com) answers (by default
+`lakomoor/vikhr-llama-3.2-1b-instruct:1b`); she repeats the answer in her bubble and with her voice
+(see "Her real voice" above — with Silero she speaks Russian aloud). She remembers her last five
+turns until you quit her. To set the ears up:
+
+```sh
+./tools/stt_setup.sh
+```
+
+vosk goes into its own small venv; the microphone is read with whatever the desktop has
+(`parecord`, `pw-record` or `arecord`). Ollama must be running (`ollama serve`, the model pulled).
+The answer model is picked in **Settings → Her mind → Answer model** (it cycles through the
+installed ones); where Ollama lives lives in `~/.config/yumi/settings.json` as `ollama_url`.
+
 ## Files
 
 | Path | What |
@@ -281,6 +304,7 @@ voices warm up in the background; after that she answers at once, and her lines 
 | `~/.config/yumi/actions.json` | your round buttons |
 | `~/.config/yumi/palette.json` | optional colors from your theming script |
 | `~/.cache/yumi/tts/` | her real voice: the daemon's port and her cached lines |
+| `~/.cache/yumi/stt/` | her ears: the daemon's port |
 | `~/.local/state/yumi/state.json` | where she sits, her shelf, picked colors |
 | `~/.local/state/yumi/yumi.log` | what she printed (errors go here when she runs in the background) |
 

@@ -259,6 +259,10 @@ class Brain(Extras):
         self.drops = []
         self.next_chatter_check = now + 30
         self.moth = Moth(self)
+        self.chat_history = []          # what you asked and what she answered, the last few turns
+        self.listening = False          # the mic button was pressed: she is waiting for a phrase
+        self.thinking = False           # the question is away at Ollama
+        self.chat_models = []           # installed Ollama models, for the settings row
         self.radial = False             # the ring of round buttons around her
         self.radial_t = Spring(0)
         self.timer = None               # see timer_* below
@@ -377,8 +381,13 @@ class Brain(Extras):
         line = self.speech.say(event, out=self.visible(), asleep=self.sleeping, **fmt)
         if not line:
             return False
-        text, face = line
-        text = ' '.join(text.split())
+        return self.say_text(line[0], face=line[1])
+
+    def say_text(self, text, face=None, voice=True):
+        """her own words (a chat reply too) in the usual bubble, typed out and voiced"""
+        text = ' '.join(str(text).split())
+        if not text:
+            return False
         times, typed = reveal_times(text)
         dur = typed + 2.2 + 0.04 * len(text)
         self.bubble_n += 1
@@ -386,7 +395,7 @@ class Brain(Extras):
                        'id': self.bubble_n}
         self.talk_until = self.now + typed
         vol = self.settings.get('voice_vol', 50)
-        if vol and not self.sleeping:
+        if voice and vol and not self.sleeping:
             blips = [t for t, ch in zip(times, text) if ch.isalnum()]
             self.requests.append(('voice', blips, self.bubble_n,
                                   1 if text.rstrip().endswith('?') else 0, vol / 100.0, text))
@@ -480,7 +489,8 @@ class Brain(Extras):
         """settings that step through a short list when clicked"""
         return {'ui_lang': ['en', 'ru'], 'speech_lang': ['en', 'ru'],
                 'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names,
-                'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts']}
+                'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts'],
+                'chat_model': self.chat_models or [self.settings.get('chat_model')]}
 
     outfit_names = []                 # outfit folders found in sprites/outfits (set by the app)
 
@@ -496,6 +506,9 @@ class Brain(Extras):
             return t('v_' + str(val)) if f'v_{val}' in UI['en'] else str(val)
         if arg == 'outfit':
             return t('o_' + str(val)) if f'o_{val}' in UI['en'] else str(val).title()
+        if arg == 'chat_model':
+            name = str(val or '').split('/')[-1].split(':')[0]   # the short, human part
+            return name or t('n_a')
         return str(val)
 
     def toggle_pin(self):
@@ -816,7 +829,7 @@ class Brain(Extras):
             # the settings come in a few small groups
             rows = [('menu', 'set_her', t('cat_her')), ('menu', 'set_sound', t('cat_sound')),
                     ('menu', 'set_look', t('cat_look')), ('menu', 'set_lang', t('cat_lang')),
-                    ('ring_edit', None, t('cat_ring')),
+                    ('menu', 'set_chat', t('cat_chat')), ('ring_edit', None, t('cat_ring')),
                     ('tour_again', None, t('tour_again')), ('restart', None, t('restart'))]
             home_x = self.clamp_x(self.W - EDGE_MARGIN * self.S - self.meta.bw * self.S / 2)
             if self.mode != 'docked' or abs(self.dock_x - home_x) > 4:
@@ -846,6 +859,13 @@ class Brain(Extras):
         elif kind == 'set_lang':
             rows = [('set', 'ui_lang', t('ui_lang')), ('set', 'speech_lang', t('speech_lang')),
                     ('menu', 'settings', t('back'))]
+        elif kind == 'set_chat':
+            if not self.chat_models and 'chat_model' not in self.unavailable:
+                self.requests.append(('chat_models',))
+            rows = [('set', 'chat_model', t('chat_model'))]
+            if self.chat_models:        # the list may have grown stale: a way to look again
+                rows.append(('chat_refresh', None, t('chat_refresh')))
+            rows.append(('menu', 'settings', t('back')))
         elif kind == 'files':
             paths = data['paths']
             kinds = {J.kind_of(p) for p in paths}
@@ -925,6 +945,15 @@ class Brain(Extras):
         elif action == 'chip':
             self.requests.append(('copy', arg))
             self.say('copied', hex=arg)
+        elif action == 'listen':
+            self.menu = None
+            self.close_radial()
+            if self.listening:          # one more click: she stops waiting for the phrase
+                self.listening = False
+                self.requests.append(('listen_stop',))
+            elif self.say('listening'):
+                self.listening = True
+                self.requests.append(('listen', 7))
         elif action == 'sleep':
             self.menu = None
             self.close_radial()
@@ -970,6 +999,8 @@ class Brain(Extras):
             self.open_menu('set_sound', data)
         elif action == 'sound_test':
             self.requests.append(('sound', 'timer'))
+        elif action == 'chat_refresh':
+            self.requests.append(('chat_models',))
         elif action == 'hue':
             self.settings['hue'] = arg
             self.requests.append(('save_settings',))
@@ -1024,6 +1055,51 @@ class Brain(Extras):
             self.menu = None
 
     # ------------------------------------------------------------------ pipette, drops, jobs
+    def start_pipette(self):
+        self.pipette = True
+        self.say('pipette_start')
+        self.requests.append(('pipette',))
+
+    # ------------------------------------------------------------------ her ears and her chat
+    def heard(self, text):
+        """the microphone gave its best: text is the phrase, '' for silence, None for no ears"""
+        if not self.listening:
+            return
+        self.listening = False
+        if text is None:                # the ears are not set up (tools/stt_setup.sh)
+            self.say('ears_fail')
+            return
+        text = ' '.join(str(text or '').split())
+        if not text:
+            self.say('heard_nothing')
+            return
+        self.chat_history.append({'role': 'user', 'content': text})
+        del self.chat_history[:-10]     # she remembers her last five turns
+        self.say_text(text, voice=False)   # back to you, quietly: you just said it
+        self.thinking = True
+        self.requests.append(('chat_ask', list(self.chat_history)))
+
+    def replied(self, reply):
+        """Ollama answered (reply is '' when it did not work out)"""
+        self.thinking = False
+        reply = ' '.join(str(reply or '').split())
+        if not reply:
+            self.chat_history.pop()     # the question got no answer: do not confuse her later
+            self.say('chat_fail')
+            return
+        self.chat_history.append({'role': 'assistant', 'content': reply})
+        self.say_text(reply)
+
+    def chat_models_loaded(self, names):
+        """the installed Ollama models, for the settings row; empty when Ollama is away"""
+        self.chat_models = [n for n in names or [] if n]
+        if self.chat_models:
+            self.unavailable.discard('chat_model')
+        else:
+            self.unavailable.add('chat_model')
+        if (self.menu or {}).get('kind') == 'set_chat':
+            self.open_menu('set_chat', self.menu.get('data'))
+
     def start_pipette(self):
         self.pipette = True
         self.say('pipette_start')

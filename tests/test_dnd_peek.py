@@ -35,7 +35,7 @@ b.toggle()
 assert not b.radial and not b.peeks()
 b.dnd_drop(['/tmp/x.png'], 0, 0)  # a dropped file does not wake her either
 assert not wakes(b) and b.menu
-assert ('wake', None, 'dnd') == b.radial_items()[4][:3]
+assert ('wake', None, 'dnd') == b.radial_items()[5][:3]
 
 b = asleep()                      # the file box does not get her up either
 x = b.x.t

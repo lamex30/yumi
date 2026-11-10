@@ -40,7 +40,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from yumi import config, files, jobs, pixfont, pixui, system, tts, voice  # noqa: E402
+from yumi import chat, config, ears, files, jobs, pixfont, pixui, system, tts, voice  # noqa: E402
 from yumi.brain import UI_PX, Brain  # noqa: E402
 from yumi.phrases import Speech  # noqa: E402
 from yumi.sprites import Meta, palette_delta, palette_from_hue, recolor_bgra, ui_colors  # noqa: E402
@@ -523,6 +523,7 @@ class App(Gtk.Application):
         self.brain = Brain(self.meta, self.settings, self.state, self.speech, self.painter.measure,
                            scale=scale, now=time.monotonic(), recent=self.recent.list)
         self.brain.outfit_names = Meta.outfits(config.SPRITES)
+        self.fetch_chat_models()        # her answer model for the settings, in the background
         self.on_caps(initial=True)
         GLib.timeout_add_seconds(3600, lambda: self.apply_outfit() or True)    # the calendar moves on
         self.queue = jobs.Queue(self.job_progress, self.job_done, self.job_start)
@@ -723,6 +724,14 @@ class App(Gtk.Application):
                 self.stop_timer_sound()
             elif kind == 'voice':
                 self.speak(r[1], r[2], r[3], r[4] if len(r) > 4 else 0.5, r[5] if len(r) > 5 else '')
+            elif kind == 'listen':
+                self.listen_ears(r[1])
+            elif kind == 'listen_stop':
+                threading.Thread(target=ears.stop, daemon=True).start()
+            elif kind == 'chat_ask':
+                self.chat_ask(r[1])
+            elif kind == 'chat_models':
+                self.fetch_chat_models()
             elif kind == 'pick_sound':
                 self.pick_sound()
             elif kind == 'form_pick':
@@ -822,6 +831,29 @@ class App(Gtk.Application):
                 p.terminate()
         except (OSError, AttributeError):
             pass
+
+    # ---- her ears and her mind: a local Vosk hears (yumi/ears.py), a local Ollama answers (yumi/chat.py)
+    def listen_ears(self, secs):
+        """one listen: the daemon records the mic and recognizes it, in its own thread"""
+        def work():
+            text = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs)
+            GLib.idle_add(lambda: self.ev(lambda b: b.heard(text)) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def chat_ask(self, history):
+        """the question is away to Ollama; the answer comes back into her bubble"""
+        def work():
+            prompt = chat.system_prompt(self.settings.get('speech_lang', 'en'))
+            reply = chat.ask(self.settings, [{'role': 'system', 'content': prompt}] + history)
+            GLib.idle_add(lambda: self.ev(lambda b: b.replied(reply)) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def fetch_chat_models(self):
+        """the installed Ollama models, for Settings → Her mind → Answer model"""
+        def work():
+            names = chat.models(self.settings)
+            GLib.idle_add(lambda: self.ev(lambda b: b.chat_models_loaded(names)) and False)
+        threading.Thread(target=work, daemon=True).start()
 
     def stop_timer_sound(self):
         """Stop pressed: no second chime, and the one playing is cut off"""
