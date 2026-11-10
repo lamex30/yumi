@@ -136,6 +136,7 @@ LINES = {
         'pile_empty': [("Nothing new yet.", None), ("All quiet here.", None)],
         'timer_done': [("Time's up!", 'surprised'), ("Ding! The timer's done.", 'happy'),
                        ("Hey, that's {mins}. Time!", 'surprised'), ("Timer's over~", 'wink')],
+        'hourly': [("It's {time}.", None), ("{time} on the clock.", 'wink'), ("The time is {time}.", None)],
     },
     'ru': {
         'hello': [("Мм... я тут. Почти.", None), ("Привет. Я буду в уголке.", 'happy'),
@@ -245,6 +246,7 @@ LINES = {
         'pile_empty': [("Пока ничего нового.", None), ("Тут тихо.", None)],
         'timer_done': [("Время вышло!", 'surprised'), ("Дзинь! Таймер сработал.", 'happy'),
                        ("Эй, прошло {mins}. Время!", 'surprised'), ("Таймер закончился~", 'wink')],
+        'hourly': [("Сейчас {time}.", None), ("На часах {time}.", 'wink'), ("Время — {time}.", None)],
     },
 }
 

@@ -9,6 +9,7 @@ Her position is her "foot": bottom-centre of the current frame image.
 """
 import math
 import random
+import time
 from pathlib import Path
 
 from . import jobs as J
@@ -259,6 +260,7 @@ class Brain(Extras):
         self.last_ptr = None
         self.drops = []
         self.next_chatter_check = now + 30
+        self.last_hour = int(time.localtime().tm_hour)  # the hour she last chimed, so she does not repeat
         self.moth = Moth(self)
         self.chat_history = []          # what you asked and what she answered, the last few turns
         self.listening = False          # the mic button was pressed: she is waiting for a phrase
@@ -492,6 +494,7 @@ class Brain(Extras):
                 'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names,
                 'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts'],
                 'stt_size': ['small', 'big'],
+                'chat_provider': ['ollama', 'polza.ai'],
                 'chat_model': self.chat_models or [self.settings.get('chat_model')]}
 
     outfit_names = []                 # outfit folders found in sprites/outfits (set by the app)
@@ -513,6 +516,8 @@ class Brain(Extras):
         if arg == 'chat_model':
             name = str(val or '').split('/')[-1].split(':')[0]   # the short, human part
             return name or t('n_a')
+        if arg == 'chat_provider':
+            return 'Ollama' if str(val) == 'ollama' else 'Polza.ai'
         return str(val)
 
     def toggle_pin(self):
@@ -842,8 +847,9 @@ class Brain(Extras):
             rows.append(('menu', 'main', t('back')))
         elif kind == 'set_her':
             rows = [('set', 'pinned', t('pinned')), ('set', 'reactions', t('reactions')),
-                    ('set', 'chatter', t('chatter')), ('set', 'idle_nap', t('idle_nap')),
-                    ('set', 'breaks', t('breaks')), ('menu', 'settings', t('back'))]
+                    ('set', 'chatter', t('chatter')), ('set', 'hourly_chimes', t('hourly_chimes')),
+                    ('set', 'idle_nap', t('idle_nap')), ('set', 'breaks', t('breaks')),
+                    ('menu', 'settings', t('back'))]
         elif kind == 'set_sound':
             s = self.settings
             rows = [('set', 'voice_kind', t('voice_kind')), ('set', 'voice_vol', t('voice')),
@@ -867,7 +873,7 @@ class Brain(Extras):
         elif kind == 'set_chat':
             if not self.chat_models and 'chat_model' not in self.unavailable:
                 self.requests.append(('chat_models',))
-            rows = [('set', 'chat_model', t('chat_model'))]
+            rows = [('set', 'chat_provider', t('chat_provider')), ('set', 'chat_model', t('chat_model'))]
             if self.chat_models:        # the list may have grown stale: a way to look again
                 rows.append(('chat_refresh', None, t('chat_refresh')))
             rows.append(('menu', 'settings', t('back')))
@@ -933,6 +939,11 @@ class Brain(Extras):
             self.menu = None
             self.close_radial()
             self.start_pipette()
+        elif action == 'clock':
+            self.close_radial()
+            self.menu = None
+            if self.visible() and not self.sleeping and not self.bubble:
+                self.hourly()
         elif action == 'timer':
             self.close_radial()
             self.timer_new()
@@ -994,6 +1005,9 @@ class Brain(Extras):
                 self.requests.append(('wake_set', s[arg]))
             if arg in ('voice_vol', 'voice_kind') and s[arg]:
                 self.say_sample()
+            if arg == 'chat_provider':
+                self.chat_models = []       # refetch for the new provider
+                self.requests.append(('chat_models',))
             self.open_menu(self.menu['kind'] if self.menu else 'settings', data)
         elif action == 'monitor':
             self.requests.append(('monitor_next',))
@@ -1118,6 +1132,15 @@ class Brain(Extras):
         else:
             self.say('weather_fail')
 
+    def hourly(self):
+        """each hour: she says the time, with a funny line from her mind when it is reachable"""
+        lang = self.settings.get('speech_lang', 'en')
+        now = time.localtime()
+        t = time.strftime('%H:%M', now) if str(lang) == 'ru' else time.strftime('%I:%M %p', now).lstrip('0').lower()
+        hour = now.tm_hour
+        self.thinking = True
+        self.requests.append(('hourly_ask', {'hour': hour, 'lang': lang, 'time': t}))
+
     def replied(self, reply):
         """Ollama answered (reply is '' when it did not work out)"""
         self.thinking = False
@@ -1128,6 +1151,17 @@ class Brain(Extras):
             return
         self.chat_history.append({'role': 'assistant', 'content': reply})
         self.say_text(reply)
+
+    def hour_joked(self, payload):
+        """the mind answered with a joke for the hour; she speaks the time + the joke"""
+        self.thinking = False
+        lang = self.settings.get('speech_lang', 'en')
+        t = time.strftime('%H:%M', time.localtime()) if str(lang) == 'ru' else time.strftime('%I:%M %p', time.localtime()).lstrip('0').lower()
+        joke = ' '.join(str(payload.get('joke') or '').split())
+        if joke:
+            self.say_text('{time} — {joke}'.format(time=t, joke=joke))
+        else:
+            self.say('hourly', time=t)
 
     def chat_models_loaded(self, names):
         """the installed Ollama models, for the settings row; empty when Ollama is away"""
@@ -1271,6 +1305,12 @@ class Brain(Extras):
             self.next_chatter_check = now + 30
             if self.visible() and not self.sleeping and not self.bubble:
                 self.say('chatter')
+        # the hour strikes: she speaks the time with a joke
+        hour = int(time.localtime().tm_hour)
+        if self.settings.get('hourly_chimes', True) and self.last_hour != hour:
+            self.last_hour = hour
+            if self.visible() and not self.sleeping and not self.bubble:
+                self.hourly()
         for k, target in self.pull.items():
             v = self.pull_v.get(k, 0.0)
             self.pull_v[k] = v + (target - v) * min(1.0, dt * 18)

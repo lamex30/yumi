@@ -3,6 +3,7 @@
 import importlib.util
 import re
 import sys
+import threading
 from pathlib import Path
 
 _root = Path(__file__).resolve().parent.parent
@@ -39,5 +40,51 @@ text, _face = phrases.Speech({'speech_lang': 'ru'}).line('chat_time', time='14:3
 assert '14:32' in text and '{' not in text, text
 text, _face = phrases.Speech({'speech_lang': 'ru'}).line('weather', report='+4°C, Пасмурно')
 assert '+4°C' in text and '{' not in text, text
+
+# Polza.ai: the OpenAI-compatible endpoint answers with a string, the key travels along
+import json as _json                                   # noqa: E402
+import urllib.request as _urllib                        # noqa: E402
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as _Server  # noqa: E402
+
+SEEN = {}
+
+
+class Polza(BaseHTTPRequestHandler):
+    def do_POST(self):
+        SEEN['path'] = self.path
+        SEEN['auth'] = self.headers.get('Authorization')
+        body = _json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        SEEN['model'] = body.get('model')
+        SEEN['max_tokens'] = body.get('max_tokens')
+        out = _json.dumps({'choices': [{'message': {'role': 'assistant',
+                                                    'content': '  Спокойной ночи!  '}}]}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def log_message(self, *_a):
+        pass
+
+
+polza = _Server(('127.0.0.1', 0), Polza)
+threading.Thread(target=polza.serve_forever, daemon=True).start()
+s = {'chat_provider': 'polza.ai', 'polza_url': f'http://127.0.0.1:{polza.server_address[1]}/v1',
+     'polza_api_key': 'secret', 'chat_model': 'deepseek/deepseek-v4-flash'}
+assert chat.alive(s)
+assert chat.models(s) == ['deepseek/deepseek-v4-flash']
+reply = chat.ask(s, [{'role': 'user', 'content': 'привет'}])
+assert reply == 'Спокойной ночи!', reply            # a string, not a list of words
+assert SEEN['path'] == '/v1/chat/completions', SEEN
+assert SEEN['auth'] == 'Bearer secret', SEEN
+assert SEEN['model'] == 'deepseek/deepseek-v4-flash' and SEEN['max_tokens'] == 220, SEEN
+assert chat.hourly_joke(s, 14) == 'Спокойной ночи!'
+assert chat.ask({'chat_provider': 'polza.ai', 'polza_url': 'http://127.0.0.1:1/x'}, []) == ''
+polza.shutdown()
+
+# no key: she gives up at once, no hanging request, no key sent anywhere
+assert chat.ask({'chat_provider': 'polza.ai'}, [{'role': 'user', 'content': 'hi'}]) == ''
+assert chat.hourly_joke({'chat_provider': 'polza.ai'}, 14) == ''
 
 print('ok')

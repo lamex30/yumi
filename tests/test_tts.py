@@ -67,6 +67,15 @@ assert len(HITS) == 1, HITS
 assert tts.speak('Привет!', 0.25) != p, 'a different volume is a different line'
 assert HITS[0] == ('Привет!', '0.5'), HITS[0]
 
+# digits become words before they reach the daemon: Silero reads «четырнадцать часов» well
+assert tts._convert_digits_for_tts('Сейчас 14:00.') == 'Сейчас четырнадцать часов.'
+assert tts._convert_digits_for_tts('Сейчас 14:05.') == 'Сейчас четырнадцать часов пять минут.'
+assert tts._convert_digits_for_tts('Время — 9:21.') == 'Время — девять часов двадцать одна минута.'
+assert tts._convert_digits_for_tts("It's 2:14 pm.") == "It's two fourteen p m."
+assert tts._convert_digits_for_tts('В году 2026') == 'В году две тысячи двадцать шесть'
+p3 = tts.speak('Сейчас 14:05.', 0.5)
+assert p3 and HITS[-1][0] == 'Сейчас четырнадцать часов пять минут.', HITS[-1]
+
 # a stale port file: nothing answers, and starting a daemon is impossible -> None (blips instead)
 server.shutdown()
 (tts.DIR / 'port.json').write_text('{"port": 1, "profile": "x"}')

@@ -22,7 +22,7 @@ TOUR_STEPS = 5
 # id: action, arg, icon, label; the settings button can move but not go: nothing else opens them
 RING_BUILTIN = {'recent': ('pile', 'recent', 'box', 'recent'), 'shelf': ('pile', 'shelf', 'shelf', 'shelf'),
                 'pipette': ('pipette', None, 'drop', 'pipette'), 'timer': ('timer', None, 'clock', 'timer'),
-                'listen': ('listen', None, 'mic', 'listen'),
+                'clock': ('clock', None, 'clock', 'clock'), 'listen': ('listen', None, 'mic', 'listen'),
                 'sleep': ('sleep', None, 'dnd', 'sleep'), 'settings': ('menu', 'settings', 'gear', 'settings')}
 RING_ALPHA = 0.55
 RING_ALPHA_OFF = 0.22

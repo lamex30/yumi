@@ -43,10 +43,10 @@ def settle(b):
 assert all(len(row) == 7 for g in pixui.ICONS.values() for row in g) and all(len(g) == 7 for g in pixui.ICONS.values())
 
 b = brain()
-DEFAULT = ['recent', 'shelf', 'pipette', 'timer', 'listen', 'sleep', 'settings']
+DEFAULT = ['recent', 'shelf', 'pipette', 'timer', 'clock', 'listen', 'sleep', 'settings']
 assert ids(b) == DEFAULT
 b.settings['ring'] = ['settings', 'gone-button', 'shelf']     # a stale id is dropped, new ones come after
-assert ids(b) == ['settings', 'shelf', 'recent', 'pipette', 'timer', 'listen', 'sleep']
+assert ids(b) == ['settings', 'shelf', 'recent', 'pipette', 'timer', 'clock', 'listen', 'sleep']
 b.settings['ring'] = []
 
 # the switches; a sleeping Yumi keeps the way to wake her; settings and your own buttons do not switch off
@@ -58,7 +58,7 @@ b.settings['ring_off'] = ['settings', 'cmd:foot', 'sleep']
 b.custom = [{'label': 'f', 'label_ru': 'f', 'icon': 'star', 'command': 'foot'}]
 assert 'settings' in ids(b) and 'cmd:foot' in ids(b) and 'sleep' not in ids(b)
 b.set_sleep(True)
-assert 'sleep' in ids(b) and b.radial_items()[5][0] == 'wake'
+assert 'sleep' in ids(b) and b.radial_items()[6][0] == 'wake'
 b = brain()
 
 # settings opens the editor at once; a switched-off button stays in it, nothing closes it but Done
@@ -91,7 +91,7 @@ r = rect_of(b, 'ring_tile', 'recent')
 b.press_at(1, *center(r))
 assert b.ring_drag == 'recent'
 b.motion(*b.ring_slots[3])
-assert ids(b) == ['shelf', 'pipette', 'timer', 'recent', 'listen', 'sleep', 'settings']
+assert ids(b) == ['shelf', 'pipette', 'timer', 'recent', 'clock', 'listen', 'sleep', 'settings']
 b.scene()
 b.motion(*b.ring_slots[8])
 assert ids(b)[-1] == 'recent'

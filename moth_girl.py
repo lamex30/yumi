@@ -737,6 +737,8 @@ class App(Gtk.Application):
                 self.chat_ask(r[1])
             elif kind == 'weather_ask':
                 self.weather_ask(r[1])
+            elif kind == 'hourly_ask':
+                self.hourly_ask(r[1])
             elif kind == 'chat_models':
                 self.fetch_chat_models()
             elif kind == 'pick_sound':
@@ -910,6 +912,15 @@ class App(Gtk.Application):
             lang = self.settings.get('speech_lang', 'en')
             reply = chat.weather_report(where, lang)
             GLib.idle_add(lambda: self.ev(lambda b: b.said_weather(reply)) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def hourly_ask(self, payload):
+        """her mind is asked for a funny line about this hour; the reply goes back to the brain"""
+        def work():
+            lang = payload.get('lang', 'en')
+            hour = int(payload.get('hour', time.localtime().tm_hour))
+            joke = chat.hourly_joke(self.settings, hour, lang)
+            GLib.idle_add(lambda: self.ev(lambda b: b.hour_joked({'joke': joke})) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def fetch_chat_models(self):

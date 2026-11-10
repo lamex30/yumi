@@ -32,11 +32,15 @@ DEFAULT_SETTINGS = {
     'outfit': 'auto',         # auto (by date) / off / a folder name in sprites/outfits
     'ring': [],               # order of her round buttons ([] = the default order)
     'ring_off': [],           # the buttons switched off
+    'chat_provider': 'ollama',   # ollama or polza.ai: who answers when she listens
     'chat_model': 'lakomoor/vikhr-llama-3.2-1b-instruct:1b',   # who answers when she listens
     'ollama_url': 'http://127.0.0.1:11434',   # where her local Ollama lives
+    'polza_url': 'https://polza.ai/api/v1',   # Polza.ai OpenAI-compatible endpoint
+    'polza_api_key': '',   # Polza.ai API key (get it at polza.ai)
     'wake_ears': True,        # she starts listening the moment you say the wake word
     'wake_word': 'юми',       # the wake word itself (say it, then the question)
     'stt_size': 'small',      # her hearing: small (45 MB) / big (a sharper ~1.8 GB model)
+    'hourly_chimes': True,    # she speaks the time with a joke every hour
 }
 DEFAULT_STATE = {
     'mode': 'docked',         # docked / air
@@ -169,8 +173,8 @@ def load_state():
 # ---- interface strings ----
 UI = {
     'en': {
-        'recent': 'Recent', 'shelf': 'Shelf', 'pipette': 'Pipette', 'sleep': 'DND',
-        'wake': 'Wake up', 'settings': 'Settings', 'home': 'Go home', 'quit': 'Quit',
+        'recent': 'Recent', 'shelf': 'Shelf', 'pipette': 'Pipette', 'clock': 'Time',
+        'sleep': 'DND', 'wake': 'Wake up', 'settings': 'Settings', 'home': 'Go home', 'quit': 'Quit',
         'convert': 'Convert', 'compress': 'Compress', 'keep': 'Keep on shelf',
         'unkeep': 'Off the shelf', 'back': 'Back', 'empty_recent': 'Nothing new yet',
         'empty_shelf': 'Drop files on me to keep them here', 'ui_lang': 'Interface',
@@ -198,7 +202,9 @@ UI = {
         'listen': 'Listen', 'cat_chat': 'Her mind', 'chat_model': 'Answer model',
         'chat_refresh': 'Find the model',
         'wake_ears': 'Wake on «Yumi»', 'stt_size': 'Hearing accuracy', 'e_small': 'Lite',
-        'e_big': 'Sharp (downloads ~1.8 GB)',
+        'e_big': 'Sharp (downloads ~1.8 GB)', 'chat_provider': 'Mind provider',
+        'polza_url': 'Polza.ai address', 'polza_api_key': 'Polza.ai API key',
+        'hourly_chimes': 'She says the time every hour',
         'tour1': "Hi! I'm Yumi. I live at the bottom edge of your screen. Let me show you around.",
         'tour2': 'Click me and round buttons appear: files, shelf, pipette, timer, Do Not Disturb and settings.',
         'tour3': 'Scroll the wheel over me for a timer. Click its digits to type a time.',
@@ -207,8 +213,8 @@ UI = {
         'B': 'B', 'KB': 'KB', 'MB': 'MB', 'GB': 'GB',
     },
     'ru': {
-        'recent': 'Недавние', 'shelf': 'Полка', 'pipette': 'Пипетка', 'sleep': 'Не мешать',
-        'wake': 'Разбудить', 'settings': 'Настройки', 'home': 'Домой', 'quit': 'Выйти',
+        'recent': 'Недавние', 'shelf': 'Полка', 'pipette': 'Пипетка', 'clock': 'Время',
+        'sleep': 'Не мешать', 'wake': 'Разбудить', 'settings': 'Настройки', 'home': 'Домой', 'quit': 'Выйти',
         'convert': 'Конвертировать', 'compress': 'Сжать', 'keep': 'На полку',
         'unkeep': 'Убрать с полки', 'back': 'Назад', 'empty_recent': 'Пока ничего нового',
         'empty_shelf': 'Кидай на меня файлы, я их тут сохраню', 'ui_lang': 'Интерфейс',
@@ -227,6 +233,7 @@ UI = {
         'breaks': 'Перерывы', 'idle_nap': 'Дремать без тебя', 'outfit': 'Наряд',
         'voice': 'Голосок', 'voice_kind': 'Тип голоска', 'v_blips': 'Пищалка', 'v_tts': 'Настоящий',
         'cat_her': 'Поведение', 'cat_sound': 'Звук', 'cat_look': 'Внешний вид', 'cat_lang': 'Язык', 'n_a': 'пока недоступно', 'o_auto': 'авто', 'o_off': 'нет', 'o_halloween': 'Хэллоуин', 'o_newyear': 'Новый год',
+        'hourly_chimes': 'Каждый час она говорит время',
         'o_valentine': 'Валентинка', 'o_spring': '8 Марта', 'min': 'мин', 'monitor': 'Экран',
         'cat_ring': 'Кнопки', 'ring_done': 'Готово', 'ring_new': 'Новая кнопка', 'ring_change': 'Изменить кнопку', 'ring_save': 'Сохранить',
         'ring_cmd': 'Команда', 'ring_name': 'Название кнопки', 'ring_icon': 'Иконка', 'ring_file': 'Своя картинка...',
@@ -237,6 +244,8 @@ UI = {
         'chat_refresh': 'Найти модель',
         'wake_ears': 'Будить по «Юми»', 'stt_size': 'Точность ушей', 'e_small': 'Лёгкая',
         'e_big': 'Точная (скачает ~1.8 ГБ)',
+        'chat_provider': 'Провайдер мозгов', 'polza_url': 'Адрес Polza.ai', 'polza_api_key': 'Ключ Polza.ai',
+        'hourly_chimes': 'Каждый час она говорит время',
         'tour1': 'Привет! Я Юми. Я живу у нижнего края твоего экрана. Давай я всё покажу.',
         'tour2': 'Нажми на меня, и вокруг появятся кружочки: файлы, полка, пипетка, таймер, «Не мешать» и настройки.',
         'tour3': 'Покрути колёсико над мной, и появится таймер. Кликни по цифрам, чтобы вписать время.',

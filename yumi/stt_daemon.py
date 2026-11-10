@@ -197,7 +197,23 @@ class Ears:
                         break                             # nothing but quiet: do not wait
                 return ' '.join(json.loads(rec.FinalResult() or '{}').get('text', '').split())
             finally:
-                proc.terminate()
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                except OSError:
+                    pass
+                finally:
+                    try:
+                        proc.stdout.close()
+                    except OSError:
+                        pass
+                    try:
+                        proc.stderr.close()
+                    except OSError:
+                        pass
                 self.busy = False
 
     def wake(self, lang, word, secs, size='small'):
@@ -285,7 +301,23 @@ class Ears:
                     return {'woke': True, 'text': ''}   # the name was heard, the sound went on
                 return {'woke': False, 'text': None}
             finally:
-                proc.terminate()
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                except OSError:
+                    pass
+                finally:
+                    try:
+                        proc.stdout.close()
+                    except OSError:
+                        pass
+                    try:
+                        proc.stderr.close()
+                    except OSError:
+                        pass
                 self.busy = False
                 self.kind = None
 
