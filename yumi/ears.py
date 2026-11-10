@@ -115,6 +115,23 @@ def listen(lang='ru', secs=7):
     return data.get('text') if isinstance(data.get('text'), str) else ''
 
 
+def wake(lang='ru', word='юми', secs=20):
+    """wait for the wake word (say «Юми» and she is all ears): a dict
+    {'woke': bool, 'text': what came after the word, '' when it was said alone},
+    or None when the ears cannot work at all. A manual listen takes the mic over."""
+    info = _ensure()
+    if not info:
+        return None
+    url = f"http://127.0.0.1:{info['port']}/wake?" + urllib.parse.urlencode(
+        {'lang': lang, 'word': word, 'secs': round(secs, 1)})
+    try:
+        with urllib.request.urlopen(url, timeout=max(300, secs + 10)) as r:
+            data = json.loads(r.read().decode())
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    return {'woke': bool(data.get('woke')), 'text': str(data.get('text') or '')}
+
+
 def stop():
     """one more click on her mic button: she stops waiting for the phrase"""
     info = _state()

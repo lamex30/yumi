@@ -45,7 +45,8 @@ English · [Русский](README.ru.md)
   voice ([Silero](https://github.com/snakers4/silero-models), see "Her real voice" below).
 - **She listens and answers.** The mic button on her ring: a local offline Vosk hears your
   phrase, a local Ollama answers it (the model is picked in the settings), she says the answer
-  out loud — see "She listens and answers" below.
+  out loud — see "She listens and answers" below. She also wakes to her name: say «Yumi» and
+  she is listening at once.
 - English and Russian, picked from your system language.
 
 <img src="docs/colors.png" alt="Yumi on teal, rose, amber and blue wallpapers, recolored to each" width="100%">
@@ -295,6 +296,13 @@ vosk goes into its own small venv; the microphone is read with whatever the desk
 (`parecord`, `pw-record` or `arecord`). Ollama must be running (`ollama serve`, the model pulled).
 The answer model is picked in **Settings → Her mind → Answer model** (it cycles through the
 installed ones); where Ollama lives lives in `~/.config/yumi/settings.json` as `ollama_url`.
+
+**The wake word.** Say «Yumi» and she is all ears at once, no buttons. Said with a phrase
+(«Yumi, what's the news today») she waits for the phrase to end and the question goes to her
+whole; a pause after the name — she asks "Yes? What is it?" right away and listens on. The idle
+waiting goes on while enabled (off in **Settings → Language → Wake on «Yumi»**) and it is not an
+eavesdrop: while she is in DND, talking an answer or listening on request, her name is ignored.
+The waiting hears nothing else: everything is computed on the spot, offline.
 
 ## Files
 

@@ -523,6 +523,9 @@ class App(Gtk.Application):
         self.brain = Brain(self.meta, self.settings, self.state, self.speech, self.painter.measure,
                            scale=scale, now=time.monotonic(), recent=self.recent.list)
         self.brain.outfit_names = Meta.outfits(config.SPRITES)
+        self.wake_on = False             # the wake-word loop is running or not
+        self.wake_thread = None
+        self.wake_set(bool(self.settings.get('wake_ears')))   # «Юми» works out of the box
         self.fetch_chat_models()        # her answer model for the settings, in the background
         self.on_caps(initial=True)
         GLib.timeout_add_seconds(3600, lambda: self.apply_outfit() or True)    # the calendar moves on
@@ -728,6 +731,8 @@ class App(Gtk.Application):
                 self.listen_ears(r[1])
             elif kind == 'listen_stop':
                 threading.Thread(target=ears.stop, daemon=True).start()
+            elif kind == 'wake_set':
+                self.wake_set(r[1])
             elif kind == 'chat_ask':
                 self.chat_ask(r[1])
             elif kind == 'chat_models':
@@ -834,11 +839,58 @@ class App(Gtk.Application):
 
     # ---- her ears and her mind: a local Vosk hears (yumi/ears.py), a local Ollama answers (yumi/chat.py)
     def listen_ears(self, secs):
-        """one listen: the daemon records the mic and recognizes it, in its own thread"""
+        """one listen: the daemon records the mic and recognizes it, in its own thread.
+        The mic opens only when she is done talking: her own line must not be heard"""
         def work():
+            b = self.brain
+            for _ in range(80):             # at most ~8 s: her line is not that long
+                if not b.listening:
+                    return                  # clicked again while she was talking: called off
+                if b.now >= b.talk_until and not self.talking():
+                    break
+                time.sleep(0.1)
+            if not b.listening:
+                return
+            self.hush()                     # still sounding after the wait: she gives way to you
             text = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs)
             GLib.idle_add(lambda: self.ev(lambda b: b.heard(text)) and False)
         threading.Thread(target=work, daemon=True).start()
+
+    def talking(self):
+        """her voice is sounding at this very moment"""
+        p = self.voice_proc
+        return bool(p) and p.poll() is None
+
+    def wake_set(self, on):
+        """the wake word: while it is on, a loop keeps the daemon listening for her name
+        and, the moment it passes by, the phrase that follows goes straight to her mind"""
+        self.wake_on = bool(on)
+        if not self.wake_on:
+            if self.wake_thread:            # a /wake may still be waiting: let it off the mic
+                threading.Thread(target=ears.stop, daemon=True).start()
+            return
+        if self.wake_thread:
+            return
+
+        def work():
+            b = self.brain
+            while self.wake_on:
+                time.sleep(0.15)
+                busy = b.sleeping or b.thinking or b.listening or b.now < b.talk_until
+                if not self.wake_on or busy:
+                    continue            # not while she sleeps, answers or listens on request
+                res = ears.wake(lang=self.settings.get('speech_lang', 'en'),
+                                word=self.settings.get('wake_word', 'юми'), secs=20)
+                if not self.wake_on or not res or not res.get('woke'):
+                    continue            # quiet, called off or the ears are away
+                tail = res.get('text') or ''
+                busy = b.sleeping or b.thinking or b.listening or b.now < b.talk_until
+                if busy:
+                    continue            # she got busy in those seconds: the word is spent
+                GLib.idle_add(lambda t=tail: self.ev(lambda br: br.wake_up(t)) and False)
+
+        self.wake_thread = threading.Thread(target=work, daemon=True)
+        self.wake_thread.start()
 
     def chat_ask(self, history):
         """the question is away to Ollama; the answer comes back into her bubble"""

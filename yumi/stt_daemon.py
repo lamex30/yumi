@@ -8,7 +8,9 @@ tools/stt_setup.sh) and asks it to listen: /listen?secs=8&lang=ru. The small mod
 
 The microphone is read with whatever the desktop has: parecord, pw-record or arecord.
 A click on her mic button starts a listen; vosk hears the end of the phrase, or
-secs pass, or another click asks /stop.
+secs pass, or another click asks /stop. /wake is the same microphone held on longer:
+vosk waits for the wake word (юми), and the moment it passes by the app gets the
+phrase that follows — nothing is recognized twice.
 """
 import argparse
 import atexit
@@ -32,7 +34,8 @@ MODELS = {                              # lang: (zip on alphacephei.com, folder 
     'ru': ('vosk-model-small-ru-0.22', 'vosk-model-small-ru-0.22'),
     'en': ('vosk-model-small-en-us-0.15', 'vosk-model-small-en-us-0.15'),
 }
-VERSION = 2                             # bumped when the protocol changes: stale twins are restarted
+VERSION = 3                             # bumped when the protocol changes: stale twins are restarted
+WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 # which command reads the mic, raw s16 mono RATE. pw-record before parecord: on some
 # desktops parecord connects and then stays silent, so arecord gets the last word.
 RECORDER = [
@@ -55,6 +58,51 @@ def log(msg):
     print(f'[yumi-stt] {msg}', flush=True)
 
 
+_LAT = {'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
+        'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o',
+        'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts',
+        'ч': 'ch', 'ш': 'sh', 'щ': 'sh', 'ы': 'y', 'ь': '', 'ъ': '', 'э': 'e', 'ю': 'yu',
+        'я': 'ya'}
+
+
+def variants(word):
+    """spellings the two models may write for the same sound: «юми» is also «yumi»,
+    «umi» (they hear ю as one u or as yu), so the wake word works with either speech language"""
+    lat = ''.join(_LAT.get(c, c) for c in word)
+    out = {word, lat}
+    if 'yu' in lat:
+        out.add(lat.replace('yu', 'u', 1))
+    return out
+
+
+def near(a, b):
+    """True when the two words differ by at most one letter (the hearsay of Vosk)"""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    # a plain edit distance, cut short: one substitution, insertion or deletion is fine
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+            if min(cur) > 1 and min(prev) > 1:
+                return False
+        prev = cur
+    return prev[-1] <= 1
+
+
+def wake_at(text, spellings):
+    """the place of the wake word in the phrase, or -1; only whole words count
+    and only as the first or alone: «юмизнает» must not wake her"""
+    toks = [t.strip('.,!?"«»…:;()[]-—') for t in text.lower().replace('ё', 'е').split()]
+    for i, t in enumerate(toks):
+        if len(t) > 1 and i == 0 and any(near(t, s) for s in spellings):
+            return i
+    return -1
+
+
 class Ears:
     """downloads the models one by one and answers one listen at a time"""
 
@@ -63,6 +111,7 @@ class Ears:
         self.error = None
         self.busy = False
         self.abort = False
+        self.kind = None                # what the lock holds now: 'listen' or 'wake'
         self.lock = threading.Lock()
 
     def model(self, lang):
@@ -136,6 +185,93 @@ class Ears:
                 proc.terminate()
                 self.busy = False
 
+    def wake(self, lang, word, secs):
+        """wait for the wake word, keeping the microphone on:
+        {'woke': True, 'text': the phrase after it} — the name was heard, the rest came
+        {'woke': True, 'text': ''} — the name alone, a phrase may still come
+        {'woke': False, ...} — quiet the whole 'secs', or called off by /stop, or busy.
+        'text' is what was said after the wake word: the app recognizes nothing twice."""
+        from vosk import KaldiRecognizer
+        import selectors
+        name, cmd = recorder_cmd()
+        if not name:
+            raise RuntimeError('no parecord, pw-record or arecord for the microphone')
+        model = self.model(lang)
+        spellings = variants(' '.join(str(word).split()).lower() or 'юми')
+        with self.lock:                     # one microphone at a time
+            if self.busy:
+                return {'woke': False, 'text': None}
+            self.busy, self.abort, self.kind = True, False, 'wake'
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except OSError as e:
+                self.busy = False
+                raise RuntimeError(f'the microphone would not start: {e}')
+            try:
+                sel = selectors.DefaultSelector()
+                sel.register(proc.stdout, selectors.EVENT_READ)
+                rec = KaldiRecognizer(model, RATE)
+                rec.SetWords(False)
+                t0 = time.monotonic()
+                heard = False               # at least one byte of sound has arrived
+                woken = False               # the wake word has passed by already
+                since = t0                  # when the heard words last changed
+                last = ''                   # the previous half-heard words, to notice staleness
+                while time.monotonic() - t0 < secs:
+                    if self.abort:
+                        break               # /stop, or a listen that needs the microphone
+                    if not sel.select(0.5):
+                        if not heard and time.monotonic() - t0 > 8:
+                            raise RuntimeError(f'{name} gave no sound')
+                        if woken and time.monotonic() - since > WAKE_AFTER:
+                            # the name passed by, nothing followed it: her turn to greet
+                            return {'woke': True, 'text': ''}
+                        continue
+                    chunk = os.read(proc.stdout.fileno(), 4000)     # ~0.125 s of audio
+                    if not chunk:
+                        die, err = proc.poll(), ''
+                        if die:
+                            try:
+                                err = ' ' + proc.stderr.read().decode(errors='replace')[-200:]
+                            except OSError:
+                                pass
+                        if die not in (None, 0):
+                            raise RuntimeError(f'{name} died ({die}){err}'.rstrip())
+                        if woken:
+                            return {'woke': True, 'text': ''}   # the name was on tape
+                        break
+                    heard = True
+                    ended = rec.AcceptWaveform(chunk)   # True: an utterance ended just now
+                    if ended:
+                        words = json.loads(rec.FinalResult() or '{}').get('text', '')
+                    else:
+                        words = json.loads(rec.PartialResult() or '{}').get('partial', '')
+                    if woken and words != last:
+                        since = time.monotonic()    # the half-heard moves on: the wait restarts
+                    last = words
+                    if woken and time.monotonic() - since > WAKE_AFTER:
+                        # the name passed by and quiet followed: her turn to greet
+                        return {'woke': True, 'text': ''}
+                    if not words.strip():
+                        continue
+                    i = wake_at(words, spellings)
+                    if not woken and i >= 0:
+                        woken = True                # she hears her name: keep on recording
+                        since = time.monotonic()
+                    if not woken or not ended:
+                        continue    # not her name yet, or the phrase is still forming
+                    said = ' '.join(words.split()[i + 1:]) if i >= 0 else words
+                    if said.strip():
+                        return {'woke': True, 'text': ' '.join(said.split())}
+                    since = time.monotonic()        # the name alone: a pause for what follows
+                if woken:
+                    return {'woke': True, 'text': ''}   # the name was heard, the sound went on
+                return {'woke': False, 'text': None}
+            finally:
+                proc.terminate()
+                self.busy = False
+                self.kind = None
+
     def stop(self):
         self.abort = True
 
@@ -181,15 +317,32 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/stop':
             self.ears.stop()
             return self._json({'ok': True})
+        if u.path == '/wake':
+            try:
+                secs = min(60.0, max(5.0, float((q.get('secs') or ['20'])[0])))
+            except ValueError:
+                secs = 20.0
+            lang = (q.get('lang') or ['ru'])[0]
+            word = ' '.join((q.get('word') or ['юми'])[0].split()) or 'юми'
+            try:
+                res = self.ears.wake(lang, word, secs)
+            except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
+                self.ears.error = str(e)
+                return self._json({'error': str(e)}, 500)
+            return self._json({'ok': True, 'woke': res['woke'], 'text': res.get('text')})
         if u.path != '/listen':
             return self._json({'error': 'no such path'}, 404)
+        if self.ears.busy and self.ears.kind == 'wake':
+            # the mic button was clicked while she was waiting for her name:
+            # the wake-word wait gives the microphone up to this listen
+            self.ears.abort = True
         try:
             secs = min(30.0, max(1.0, float((q.get('secs') or ['7'])[0])))
         except ValueError:
             secs = 7.0
         lang = (q.get('lang') or ['ru'])[0]
         try:
-            text = self.ears.listen(lang, secs, quiet=min(4.0, secs))
+            text = self.ears.listen(lang, secs, quiet=min(6.0, secs))
         except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
             self.ears.error = str(e)
             return self._json({'error': str(e)}, 500)

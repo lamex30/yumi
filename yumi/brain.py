@@ -858,7 +858,7 @@ class Brain(Extras):
             rows.append(('menu', 'settings', t('back')))
         elif kind == 'set_lang':
             rows = [('set', 'ui_lang', t('ui_lang')), ('set', 'speech_lang', t('speech_lang')),
-                    ('menu', 'settings', t('back'))]
+                    ('set', 'wake_ears', t('wake_ears')), ('menu', 'settings', t('back'))]
         elif kind == 'set_chat':
             if not self.chat_models and 'chat_model' not in self.unavailable:
                 self.requests.append(('chat_models',))
@@ -953,7 +953,7 @@ class Brain(Extras):
                 self.requests.append(('listen_stop',))
             elif self.say('listening'):
                 self.listening = True
-                self.requests.append(('listen', 7))
+                self.requests.append(('listen', 15))
         elif action == 'sleep':
             self.menu = None
             self.close_radial()
@@ -985,6 +985,8 @@ class Brain(Extras):
             self.requests.append(('save_settings',))
             if arg == 'recolor':
                 self.requests.append(('recolor',))
+            if arg == 'wake_ears':
+                self.requests.append(('wake_set', s[arg]))
             if arg in ('voice_vol', 'voice_kind') and s[arg]:
                 self.say_sample()
             self.open_menu(self.menu['kind'] if self.menu else 'settings', data)
@@ -1066,6 +1068,21 @@ class Brain(Extras):
         if not self.listening:
             return
         self.listening = False
+        self.heard_text(text)
+
+    def wake_up(self, text):
+        """her name was heard («юми»): text is what was said after it, '' when it was said alone"""
+        if self.sleeping or self.thinking or self.listening or self.now < self.talk_until:
+            return                          # a stray sound while she was busy: not her name
+        if text:
+            self.heard_text(text)           # recognized on the go: the question is whole
+            return
+        if self.say('woke_ask'):            # the name alone: she asks right away what you wanted
+            self.listening = True
+            self.requests.append(('listen', 15))
+
+    def heard_text(self, text):
+        """into her mind, whatever the ears' way was"""
         if text is None:                # the ears are not set up (tools/stt_setup.sh)
             self.say('ears_fail')
             return
