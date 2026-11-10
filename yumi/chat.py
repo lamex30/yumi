@@ -7,7 +7,10 @@ Everything stays on this machine: Ollama runs locally, the words go nowhere else
 If Ollama is not running or has no models, ask() returns '' and she says so.
 """
 import json
+import re
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DEFAULT_MODEL = 'lakomoor/vikhr-llama-3.2-1b-instruct:1b'
@@ -66,3 +69,66 @@ def ask(settings, history, timeout=90):
     except (urllib.error.URLError, OSError, ValueError):
         return ''
     return ' '.join(str((data.get('message') or {}).get('content') or '').split())
+
+
+# ---- the little questions she needs no mind for: the clock and the window ----
+
+TIME_Q_RE = re.compile(
+    r'который\s+час|сколько\s+(?:уже\s+)?времени|какое\s+(?:сейчас\s+)?время'
+    r"|what\s+time\s+is\s+it|what(?:'?s|\s+is)\s+the\s+time|how\s+late\s+is\s+it")
+
+WEATHER_Q_RE = re.compile(
+    r'\bпогод|за\s+окном|что\s+на\s+улице|как\s+на\s+улице'
+    r'|\bweather\b|\bforecast\b|is\s+it\s+(?:raining|snowing)'
+    r'|how\s+(?:hot|warm|cold|sunny)')
+
+# words that may trail a place name in a phrase but are not the place itself
+TRAILING = {'сегодня', 'сейчас', 'теперь', 'завтра', 'вечером', 'утром', 'днём', 'ночью',
+            'now', 'today', 'tonight', 'tomorrow', 'right', 'please', 'outside'}
+
+
+def time_question(text):
+    """True when the phrase asks for the time: her eyes and the clock are enough"""
+    t = ' '.join(str(text or '').lower().split()).strip(' ?!.,')
+    return bool(TIME_Q_RE.search(t))
+
+
+def the_time(lang='en', now=None):
+    """the clock as she says it: 24 hours for Russian, «2:14 pm» for English"""
+    t = time.localtime() if now is None else time.localtime(now)
+    if str(lang) == 'ru':
+        return time.strftime('%H:%M', t)
+    return time.strftime('%I:%M %p', t).lstrip('0').lower()
+
+
+def weather_question(text):
+    """the place to look up from the phrase: a guessed city, '' for wherever she is,
+    None when the phrase is not about the weather at all"""
+    t = ' '.join(str(text or '').lower().split()).strip(' ?!.,')
+    if not WEATHER_Q_RE.search(t):
+        return None
+    # the place runs after the last в/во/in/at until the end of the phrase
+    cuts = [(t.rfind(s), s) for s in (' в ', ' во ', ' in ', ' at ')]
+    i, sep = max(cuts)
+    if i > 0:
+        words = t[i + len(sep):].strip(' ?!.,').split()
+        while words and words[-1] in TRAILING:
+            words.pop()
+        if words and len(words) <= 3:
+            return ' '.join(words)[:64]
+    return ''
+
+
+def weather_report(where, lang='en', timeout=8):
+    """one line from wttr.in («+4°C, Пасмурно»), the nearest great place when `where`
+    is ''; '' when the net is out — she says so instead"""
+    loc = urllib.parse.quote(str(where or '').strip(), safe=',%')
+    lang = 'ru' if str(lang) == 'ru' else 'en'
+    fmt = urllib.parse.quote('%t, %C')      # the temperature and the clouds, no emoji
+    url = 'https://wttr.in/{}?format={}&lang={}'.format(loc or '~', fmt, lang)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            text = r.read().decode(errors='replace')
+    except (urllib.error.URLError, OSError, ValueError):
+        return ''
+    return ' '.join(text.split())[:120]

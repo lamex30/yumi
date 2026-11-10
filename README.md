@@ -46,7 +46,9 @@ English · [Русский](README.ru.md)
 - **She listens and answers.** The mic button on her ring: a local offline Vosk hears your
   phrase, a local Ollama answers it (the model is picked in the settings), she says the answer
   out loud — see "She listens and answers" below. She also wakes to her name: say «Yumi» and
-  she is listening at once.
+  she is listening at once. Ask «what time is it» or «what's the weather» and she answers
+  herself: the clock is always at hand, and the weather is one small peek at [wttr.in](https://wttr.in)
+  (with a place name she looks there instead of out of her own window).
 - English and Russian, picked from your system language.
 
 <img src="docs/colors.png" alt="Yumi on teal, rose, amber and blue wallpapers, recolored to each" width="100%">
@@ -296,6 +298,12 @@ vosk goes into its own small venv; the microphone is read with whatever the desk
 (`parecord`, `pw-record` or `arecord`). Ollama must be running (`ollama serve`, the model pulled).
 The answer model is picked in **Settings → Her mind → Answer model** (it cycles through the
 installed ones); where Ollama lives lives in `~/.config/yumi/settings.json` as `ollama_url`.
+
+**The time and the weather.** «Который час» and «what time is it» she answers by herself,
+no mind involved — she just reads the clock. «Какая погода» and «what's the weather» make her
+peek at [wttr.in](https://wttr.in) (this one small look needs the internet; everything else
+stays offline as before); with a place in the phrase («какая погода в Москве») she looks there,
+otherwise out of her own window — the city where you are, recognized from your network.
 
 **The wake word.** Say «Yumi» and she is all ears at once, no buttons. Said with a phrase
 («Yumi, what's the news today») she waits for the phrase to end and the question goes to her

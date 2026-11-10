@@ -12,6 +12,7 @@ import random
 from pathlib import Path
 
 from . import jobs as J
+from . import chat
 from .config import RING_SLOTS, UI, tr
 from .extras import Extras
 from .sprites import ARCHIVES, DOCS, KIND_COLOR, SWATCHES, swatch_hex
@@ -1090,11 +1091,28 @@ class Brain(Extras):
         if not text:
             self.say('heard_nothing')
             return
+        lang = self.settings.get('speech_lang', 'en')
+        self.say_text(text, voice=False)   # back to you, quietly: you just said it
+        if chat.time_question(text):       # the clock she reads herself, no mind needed
+            self.say('chat_time', time=chat.the_time(lang))
+            return
+        where = chat.weather_question(text)
+        if where is not None:              # the weather is worth one little peek outside
+            self.thinking = True
+            self.requests.append(('weather_ask', where))
+            return
         self.chat_history.append({'role': 'user', 'content': text})
         del self.chat_history[:-10]     # she remembers her last five turns
-        self.say_text(text, voice=False)   # back to you, quietly: you just said it
         self.thinking = True
         self.requests.append(('chat_ask', list(self.chat_history)))
+
+    def said_weather(self, report):
+        """the clouds answered through wttr.in (report is '' when the net was away)"""
+        self.thinking = False
+        if report:
+            self.say_text(report)
+        else:
+            self.say('weather_fail')
 
     def replied(self, reply):
         """Ollama answered (reply is '' when it did not work out)"""

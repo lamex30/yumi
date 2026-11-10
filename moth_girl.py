@@ -735,6 +735,8 @@ class App(Gtk.Application):
                 self.wake_set(r[1])
             elif kind == 'chat_ask':
                 self.chat_ask(r[1])
+            elif kind == 'weather_ask':
+                self.weather_ask(r[1])
             elif kind == 'chat_models':
                 self.fetch_chat_models()
             elif kind == 'pick_sound':
@@ -898,6 +900,14 @@ class App(Gtk.Application):
             prompt = chat.system_prompt(self.settings.get('speech_lang', 'en'))
             reply = chat.ask(self.settings, [{'role': 'system', 'content': prompt}] + history)
             GLib.idle_add(lambda: self.ev(lambda b: b.replied(reply)) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def weather_ask(self, where):
+        """the weather question is away to the clouds; the peek comes back into her bubble"""
+        def work():
+            lang = self.settings.get('speech_lang', 'en')
+            reply = chat.weather_report(where, lang)
+            GLib.idle_add(lambda: self.ev(lambda b: b.said_weather(reply)) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def fetch_chat_models(self):
