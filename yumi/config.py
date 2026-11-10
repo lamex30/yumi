@@ -21,7 +21,8 @@ DEFAULT_SETTINGS = {
     'reactions': True,        # reactions to the system (charger, Wi-Fi, downloads...)
     'pinned': False,          # she stays out and does not hide at the bottom edge
     'chatter': True,          # idle small talk (at most every 10 minutes, only while she is out)
-    'voice_vol': 50,          # her 8-bit voice while her words type out, % (0 = silent)
+    'voice_vol': 50,          # her voice while her words type out, % (0 = silent)
+    'voice_kind': 'blips',    # her voice: blips (8-bit) / tts (a real one, tools/tts_setup.sh)
     'scale': 1,               # integer pixel scale of the sprites
     'recolor': True,          # follow the wallpaper palette
     'hue': None,              # manual color when not following: None = her own colors, else 0..1
@@ -181,7 +182,8 @@ UI = {
         'sound_test': 'Listen', 'audio_files': 'Sounds',
         'hint': 'Drag a file onto me to convert, compress or keep it',
         'breaks': 'Health breaks', 'idle_nap': 'Nap when idle', 'outfit': 'Outfit',
-        'voice': 'Voice', 'cat_her': 'Her', 'cat_sound': 'Sound', 'cat_look': 'Look', 'cat_lang': 'Language', 'n_a': 'not available yet', 'o_auto': 'auto', 'o_off': 'none', 'o_halloween': 'Halloween', 'o_newyear': 'New Year',
+        'voice': 'Voice', 'voice_kind': 'Voice type', 'v_blips': '8-bit', 'v_tts': 'Real voice',
+        'cat_her': 'Her', 'cat_sound': 'Sound', 'cat_look': 'Look', 'cat_lang': 'Language', 'n_a': 'not available yet', 'o_auto': 'auto', 'o_off': 'none', 'o_halloween': 'Halloween', 'o_newyear': 'New Year',
         'o_valentine': 'Valentine', 'o_spring': 'March 8', 'min': 'min', 'monitor': 'Screen',
         'cat_ring': 'Buttons', 'ring_done': 'Done', 'ring_new': 'New button', 'ring_change': 'Edit button', 'ring_save': 'Save',
         'ring_cmd': 'Command', 'ring_name': 'Button name', 'ring_icon': 'Icon', 'ring_file': 'Your own picture...',
@@ -214,7 +216,8 @@ UI = {
         'sound_test': 'Прослушать', 'audio_files': 'Звуки',
         'hint': 'Перетащи файл на меня: сконвертирую, сожму или сохраню',
         'breaks': 'Перерывы', 'idle_nap': 'Дремать без тебя', 'outfit': 'Наряд',
-        'voice': 'Голосок', 'cat_her': 'Поведение', 'cat_sound': 'Звук', 'cat_look': 'Внешний вид', 'cat_lang': 'Язык', 'n_a': 'пока недоступно', 'o_auto': 'авто', 'o_off': 'нет', 'o_halloween': 'Хэллоуин', 'o_newyear': 'Новый год',
+        'voice': 'Голосок', 'voice_kind': 'Тип голоска', 'v_blips': 'Пищалка', 'v_tts': 'Настоящий',
+        'cat_her': 'Поведение', 'cat_sound': 'Звук', 'cat_look': 'Внешний вид', 'cat_lang': 'Язык', 'n_a': 'пока недоступно', 'o_auto': 'авто', 'o_off': 'нет', 'o_halloween': 'Хэллоуин', 'o_newyear': 'Новый год',
         'o_valentine': 'Валентинка', 'o_spring': '8 Марта', 'min': 'мин', 'monitor': 'Экран',
         'cat_ring': 'Кнопки', 'ring_done': 'Готово', 'ring_new': 'Новая кнопка', 'ring_change': 'Изменить кнопку', 'ring_save': 'Сохранить',
         'ring_cmd': 'Команда', 'ring_name': 'Название кнопки', 'ring_icon': 'Иконка', 'ring_file': 'Своя картинка...',

@@ -41,7 +41,8 @@ English · [Русский](README.ru.md)
 - **Seasonal outfits** with hats she made holes in for her antennae.
 - **Several screens.** Carry her over to another one.
 - **Her voice.** Her words type out with little 8-bit blips, like a game character talking
-  (Settings → Sound → Voice: volume or off).
+  (Settings → Sound → Voice: volume or off) — or she can speak out loud with a real offline
+  voice ([Silero](https://github.com/snakers4/silero-models), see "Her real voice" below).
 - English and Russian, picked from your system language.
 
 <img src="docs/colors.png" alt="Yumi on teal, rose, amber and blue wallpapers, recolored to each" width="100%">
@@ -85,6 +86,7 @@ Optional, for the extras (install what you like):
 | `networkmanager` (`nmcli`) | Wi-Fi reactions |
 | `swaync`, `mako` or `dunst` | Do Not Disturb (KDE Plasma needs nothing extra) |
 | `pipewire` (`pw-play`), `paplay`, `aplay` or `ffplay` | the timer bell |
+| `tools/tts_setup.sh` (a venv with torch, ~450 MB) | her real voice: a local Silero TTS |
 
 ### 2. Yumi herself
 
@@ -249,6 +251,28 @@ normal sprite (`body.png`, `held/held0.png`, `sit/body0.png`, `hover/n0.png`…)
 are relative to her body. `keep` lists colors that stay the same on any wallpaper (a red sweater,
 unlike her hair).
 
+## Her real voice
+
+Besides the 8-bit blips she can speak out loud, fully offline: a local
+[Silero](https://github.com/snakers4/silero-models) TTS on your own machine (Russian speakers
+`kseniya`, `baya`, `xenia`…, English `en_0`…, picked by the language of the line). It needs
+Python 3.10–3.13 and ~450 MB of disk, lives in its own venv and touches nothing else:
+
+```sh
+./tools/tts_setup.sh
+```
+
+Then in Yumi: **Settings → Sound → Voice type → Real**. The first line takes a moment while the
+voices warm up in the background; after that she answers at once, and her lines are cached in
+`~/.cache/yumi/tts`. Make her higher and cuter in `~/.config/yumi/tts.json`:
+
+```json
+{"ru_speaker": "kseniya", "en_speaker": "en_0", "pitch": 1.15}
+```
+
+`pitch` is 1.0 as recorded, 1.2 a proper squeak. After editing the file, restart the voice:
+`pkill -f yumi/tts_daemon.py`. Without the setup she simply keeps her blips.
+
 ## Files
 
 | Path | What |
@@ -256,6 +280,7 @@ unlike her hair).
 | `~/.config/yumi/settings.json` | settings |
 | `~/.config/yumi/actions.json` | your round buttons |
 | `~/.config/yumi/palette.json` | optional colors from your theming script |
+| `~/.cache/yumi/tts/` | her real voice: the daemon's port and her cached lines |
 | `~/.local/state/yumi/state.json` | where she sits, her shelf, picked colors |
 | `~/.local/state/yumi/yumi.log` | what she printed (errors go here when she runs in the background) |
 
@@ -283,6 +308,7 @@ catches the pointer.
 - `yumi/extras.py`: gaze, petting, napping, health breaks, tour, outfits, custom buttons
 - `yumi/phrases.py`: her lines in English and Russian
 - `yumi/voice.py`: her 8-bit voice
+- `yumi/tts.py`, `yumi/tts_daemon.py`: her real voice, a local Silero TTS
 - `yumi/jobs.py`: convert / compress commands and the job queue
 - `yumi/files.py`: recent files, downloads, screenshots
 - `yumi/system.py`: power, Wi-Fi, Do Not Disturb, music, idle, color picker

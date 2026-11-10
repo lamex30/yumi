@@ -389,7 +389,7 @@ class Brain(Extras):
         if vol and not self.sleeping:
             blips = [t for t, ch in zip(times, text) if ch.isalnum()]
             self.requests.append(('voice', blips, self.bubble_n,
-                                  1 if text.rstrip().endswith('?') else 0, vol / 100.0))
+                                  1 if text.rstrip().endswith('?') else 0, vol / 100.0, text))
         if face:
             self.set_face(face, dur)
         if self.mode == 'docked' and not self.out and not self.sleeping:
@@ -480,7 +480,7 @@ class Brain(Extras):
         """settings that step through a short list when clicked"""
         return {'ui_lang': ['en', 'ru'], 'speech_lang': ['en', 'ru'],
                 'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names,
-                'voice_vol': [0, 25, 50, 75, 100]}
+                'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts']}
 
     outfit_names = []                 # outfit folders found in sprites/outfits (set by the app)
 
@@ -492,6 +492,8 @@ class Brain(Extras):
             return t('off') if not val else f'{val} {t("min")}'
         if arg == 'voice_vol':
             return t('off') if not val else f'{val}%'
+        if arg == 'voice_kind':
+            return t('v_' + str(val)) if f'v_{val}' in UI['en'] else str(val)
         if arg == 'outfit':
             return t('o_' + str(val)) if f'o_{val}' in UI['en'] else str(val).title()
         return str(val)
@@ -827,7 +829,8 @@ class Brain(Extras):
                     ('set', 'breaks', t('breaks')), ('menu', 'settings', t('back'))]
         elif kind == 'set_sound':
             s = self.settings
-            rows = [('set', 'voice_vol', t('voice')), ('sound_pick', None, t('timer_sound'))]
+            rows = [('set', 'voice_kind', t('voice_kind')), ('set', 'voice_vol', t('voice')),
+                    ('sound_pick', None, t('timer_sound'))]
             if s.get('timer_sound'):
                 rows.append(('sound_reset', None, t('sound_reset')))
             rows += [('sound_test', None, t('sound_test')), ('menu', 'settings', t('back'))]
@@ -953,7 +956,7 @@ class Brain(Extras):
             self.requests.append(('save_settings',))
             if arg == 'recolor':
                 self.requests.append(('recolor',))
-            if arg == 'voice_vol' and s[arg]:
+            if arg in ('voice_vol', 'voice_kind') and s[arg]:
                 self.say_sample()
             self.open_menu(self.menu['kind'] if self.menu else 'settings', data)
         elif action == 'monitor':

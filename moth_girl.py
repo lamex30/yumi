@@ -40,7 +40,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from yumi import config, files, jobs, pixfont, pixui, system, voice  # noqa: E402
+from yumi import config, files, jobs, pixfont, pixui, system, tts, voice  # noqa: E402
 from yumi.brain import UI_PX, Brain  # noqa: E402
 from yumi.phrases import Speech  # noqa: E402
 from yumi.sprites import Meta, palette_delta, palette_from_hue, recolor_bgra, ui_colors  # noqa: E402
@@ -722,7 +722,7 @@ class App(Gtk.Application):
             elif kind == 'sound_stop':
                 self.stop_timer_sound()
             elif kind == 'voice':
-                self.speak(r[1], r[2], r[3], r[4] if len(r) > 4 else 0.5)
+                self.speak(r[1], r[2], r[3], r[4] if len(r) > 4 else 0.5, r[5] if len(r) > 5 else '')
             elif kind == 'pick_sound':
                 self.pick_sound()
             elif kind == 'form_pick':
@@ -775,26 +775,44 @@ class App(Gtk.Application):
             return False
         self.sound_src = GLib.timeout_add(int(min(gap, 8.0) * 1000), again)
 
-    # ---- her voice: 8-bit blips while the words type out
-    def speak(self, blips, bid, end_pitch, volume=0.5):
+    # ---- her voice: 8-bit blips, or a real one from a local Silero (yumi/tts.py)
+    def speak(self, blips, bid, end_pitch, volume=0.5, text=''):
         self.hush()
         self.voice_id = bid
-        if not blips:
+        if not blips and not text:
             return
         path = config.CACHE_DIR / f'voice{bid % 3}.wav'
+        real = bool(text) and self.settings.get('voice_kind') == 'tts'
 
         def work():
-            try:
-                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                voice.render(blips, path, seed=bid, end_pitch=end_pitch, volume=volume)
-            except OSError:
-                return
-            GLib.idle_add(lambda: self.voice_start(path, bid) and False)
+            p = tts.speak(text, volume) if real else None
+            if real and not p:
+                self.warn_tts()               # not set up or failed: the blips speak instead
+            if not p:
+                try:
+                    config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                    voice.render(blips, path, seed=bid, end_pitch=end_pitch, volume=volume)
+                except OSError:
+                    return
+                p = path
+            GLib.idle_add(lambda: self.voice_start(p, bid) and False)
         threading.Thread(target=work, daemon=True).start()
+
+    def warn_tts(self):
+        """once, into the log: why the real voice did not happen"""
+        first = not getattr(self, '_tts_warned', False)
+        self._tts_warned = True
+        if first:
+            print('yumi: her real voice is not set up (run tools/tts_setup.sh); '
+                  'the 8-bit blips speak instead', file=sys.stderr)
+        return first
 
     def voice_start(self, path, bid):
         b = self.brain
         if bid == self.voice_id and b.bubble and b.bubble.get('id') == bid:
+            secs = tts.wav_len(path)
+            if secs:                          # the voice may be longer than the typed words
+                b.bubble['until'] = max(b.bubble['until'], b.now + secs + 1.2)
             self.voice_proc = system.play_file(path)
 
     def hush(self):
