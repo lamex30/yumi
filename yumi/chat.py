@@ -311,6 +311,87 @@ def weather_speak(text, lang='en'):
     return ''.join(out)
 
 
+_CYR_RE = re.compile(r'[\u0400-\u04ff]')
+
+
+def _place_candidates(where):
+    """the spellings to try for a place: the phrase keeps the inflected form
+    («в красноярске», «в анапе»), the lookups want the nominative one
+    («красноярск», «анапа») — otherwise wttr.in matches a wrong same-stem village"""
+    w = str(where or '').strip()
+    if not w or not _CYR_RE.search(w):
+        return [w] if w else []
+    out = [w]
+    stem = w[:-1]
+    if len(stem) > 2:
+        out.append(stem)                    # красноярске → красноярск
+        out.append(stem + 'а')              # анапе → анапа
+        if w.endswith('и'):
+            out.append(stem + 'ь')          # астрахани → астрахань
+    return out
+
+
+_EX_USSR = {'RU', 'BY', 'UA', 'KZ', 'UZ', 'KG', 'TJ', 'AM', 'AZ', 'GE', 'MD', 'LV', 'LT', 'EE'}
+
+
+def _best_place(rows, cyr):
+    """the row to trust: a town (PPL…), not an admin region with its huge population;
+    a Russian phrase means the ex-USSR namesake when there is one («анапа» is the
+    resort, not the bigger Anápolis in Brazil); the rows are (query, row) pairs and
+    a name that just echoes the inflected query («Нижнем Новгороде») loses to the
+    nominative one («Нижний Новгород») on a tie"""
+    rows = [(q, r) for q, r in rows if str(r.get('feature_code') or '').startswith('PPL')]
+    if not rows:
+        return None
+    if cyr:
+        ours = [(q, r) for q, r in rows if r.get('country_code') in _EX_USSR]
+        rows = ours or rows
+    best = max(rows, key=lambda qr: qr[1].get('population') or 0)
+    tie = [qr for qr in rows if (qr[1].get('population') or 0) == (best[1].get('population') or 0)]
+    clean = [qr for qr in tie if str(qr[1].get('name') or '').lower() != str(qr[0]).lower()]
+    return (clean or tie)[0][1]
+
+
+def _geo_open_meteo(where, lang='en', timeout=8):
+    """(lat, lon, name) of the place, from Open-Meteo: it understands the language
+    and ranks the same-named towns by size, so «красноярске» resolves to the real
+    city; None when the net is out or the place is unknown"""
+    cyr = bool(_CYR_RE.search(str(where or '')))
+    seen, rows = set(), []
+    for name in _place_candidates(where):
+        url = ('https://geocoding-api.open-meteo.com/v1/search?name={}&count=10'
+               '&language={}&format=json').format(urllib.parse.quote(name, safe=''),
+                                                  'ru' if str(lang) == 'ru' else 'en')
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as r:
+                data = json.loads(r.read().decode(errors='replace'))
+        except (urllib.error.URLError, OSError, ValueError):
+            break
+        for row in data.get('results') or []:
+            if row.get('id') not in seen:
+                seen.add(row.get('id'))
+                rows.append((name, row))
+    best = _best_place(rows, cyr)
+    if best:
+        found = (best.get('name') or '').strip()
+        if found:
+            return float(best['latitude']), float(best['longitude']), found
+    return None
+
+
+def _now(lat, lon, timeout=8):
+    """the sky right now: {'temp', 'code'} from Open-Meteo, so the line is always
+    in her language (wttr.in answers in English now and then); None when out"""
+    url = ('https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}'
+           '&current=temperature_2m,weather_code').format(lat, lon)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            cur = json.loads(r.read().decode(errors='replace'))['current']
+        return {'temp': float(cur['temperature_2m']), 'code': int(cur['weather_code'])}
+    except (urllib.error.URLError, OSError, ValueError, TypeError, KeyError, IndexError):
+        return None
+
+
 def _geo(where, timeout=8):
     """(lat, lon, name) of the place, from the same wttr.in lookup the one-line report
     uses ('' looks wherever she is); None when the net is out or the place is unknown"""
@@ -378,13 +459,22 @@ def _fmt_week(name, rows, lang='en'):
 
 
 def weather_report(where, lang='en', when='today', timeout=8):
-    """one line about the sky, with the place up front («Yalta: +4°C, Пасмурно») — today from
-    wttr.in, tomorrow or the whole week from Open-Meteo («Завтра, Ялта: ...»);
-    '' when the net is out — she says so instead"""
+    """one line about the sky, with the place up front («Ялта: +4°C, Пасмурно») — today from
+    Open-Meteo (wttr.in only as a fallback), tomorrow or the whole week from Open-Meteo
+    («Завтра, Ялта: ...»); '' when the net is out — she says so instead"""
+    lang = 'ru' if str(lang) == 'ru' else 'en'
     when = when if when in ('tomorrow', 'week') else 'today'
     if when == 'today':
-        loc = urllib.parse.quote(str(where or '').strip(), safe=',%')
-        lang = 'ru' if str(lang) == 'ru' else 'en'
+        where = str(where or '').strip()
+        if where:
+            geo = _geo_open_meteo(where, lang, timeout)   # which of the same-named towns is the real one
+            if geo:
+                lat, lon, name = geo
+                now = _now(lat, lon, timeout)
+                if now:
+                    return '{}: {:+.0f}°C, {}'.format(name, now['temp'],
+                                                      wmo_desc(now['code'], lang))[:120]
+        loc = urllib.parse.quote(where, safe=',%')
         fmt = urllib.parse.quote('%l: %t, %C')   # the place, the temperature, the clouds
         url = 'https://wttr.in/{}?format={}&lang={}'.format(loc or '~', fmt, lang)
         try:
@@ -393,7 +483,7 @@ def weather_report(where, lang='en', when='today', timeout=8):
         except (urllib.error.URLError, OSError, ValueError):
             return ''
         return ' '.join(text.split()).lstrip(':').strip()[:120]   # no name: no empty «:»
-    geo = _geo(where, timeout)                  # the same lookup the today's report uses
+    geo = _geo_open_meteo(where, lang, timeout) or _geo(where, timeout)
     if not geo:
         return ''
     lat, lon, name = geo

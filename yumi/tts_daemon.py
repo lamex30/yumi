@@ -133,8 +133,11 @@ class Handler(BaseHTTPRequestHandler):
             vol = float((q.get('vol') or ['0.5'])[0])
         except ValueError:
             vol = 0.5
+        lang = (q.get('lang') or [''])[0].strip().lower()
+        if lang not in LANGS:
+            lang = lang_of(text)          # not told: guess it by the letters
         try:
-            data = self.engine.synth(text, lang_of(text), vol)
+            data = self.engine.synth(text, lang, vol)
         except Exception as e:        # noqa: BLE001
             return self._json({'error': str(e)}, 500)
         self.send_response(200)

@@ -7,6 +7,7 @@ thrown away past the limit); if anything is missing, speak() returns None and sh
 back to her 8-bit blips.
 """
 import hashlib
+import io
 import json
 import os
 import re
@@ -87,8 +88,67 @@ def _ensure():
     return None
 
 
+def _lang_runs(text):
+    """the line grouped by script: «Красноярск: плюс 7°, light rain» becomes a
+    Russian run and an English one — each half gets the voice that can say it"""
+    words = text.split()
+    kinds = [next((('ru' if '\u0400' <= c <= '\u04ff' else 'en') for c in w if c.isalpha()),
+                  None) for w in words]
+    for i, k in enumerate(kinds):      # a word without letters (a number) follows its neighbours
+        if k is None:
+            kinds[i] = next((x for x in kinds[i + 1:] if x),
+                            next((x for x in reversed(kinds[:i]) if x), 'ru'))
+    runs, cur, cur_k = [], [], None
+    for w, k in zip(words, kinds):
+        if cur and k != cur_k:
+            runs.append((cur_k, ' '.join(cur)))
+            cur = []
+        cur_k = k
+        cur.append(w)
+    if cur:
+        runs.append((cur_k, ' '.join(cur)))
+    return runs
+
+
+def _ask(info, chunk, volume, lang):
+    """one chunk to the daemon: the WAV bytes, or None when it did not work out"""
+    url = f"http://127.0.0.1:{info['port']}/tts?" + urllib.parse.urlencode(
+        {'text': chunk, 'vol': round(volume, 2), 'lang': lang})
+    try:
+        with urllib.request.urlopen(url, timeout=300) as r:
+            data = r.read()
+    except (urllib.error.URLError, OSError):
+        return None
+    return data if data.startswith(b'RIFF') else None
+
+
+def _concat(parts):
+    """one WAV out of many ('wav' parts are opened, 'silence' parts are raw frames;
+    they are all 16-bit mono at the same rate)"""
+    frames, fmt = [], None
+    for kind, data in parts:
+        if kind == 'silence':
+            frames.append(data)
+            continue
+        with wave.open(io.BytesIO(data)) as r:
+            here = (r.getnchannels(), r.getsampwidth(), r.getframerate())
+            if fmt and here != fmt:
+                raise wave.Error('the voices disagree on the sound format')
+            fmt = fmt or here
+            frames.append(r.readframes(r.getnframes()))
+    out = io.BytesIO()
+    with wave.open(out, 'wb') as w:
+        w.setnchannels(fmt[0])
+        w.setsampwidth(fmt[1])
+        w.setframerate(fmt[2])
+        for f in frames:
+            w.writeframes(f)
+    return out.getvalue()
+
+
 def speak(text, volume=0.5):
-    """voice the line: the path of a WAV, or None (she falls back to her blips)"""
+    """voice the line: the path of a WAV, or None (she falls back to her blips);
+    a line of two languages is said by both voices, a small pause in between"""
     text = ' '.join(str(text).split())[:500]
     # convert digits like 14:00 to words for better Silero TTS pronunciation
     text = _convert_digits_for_tts(text)
@@ -100,20 +160,21 @@ def speak(text, volume=0.5):
     key = hashlib.sha1(f"{info['profile']}|{volume:.2f}|{text}".encode()).hexdigest()[:20]
     path = DIR / f'{key}.wav'
     if not path.exists():
-        url = f"http://127.0.0.1:{info['port']}/tts?" + urllib.parse.urlencode(
-            {'text': text, 'vol': round(volume, 2)})
-        try:
-            with urllib.request.urlopen(url, timeout=300) as r:
-                data = r.read()
-        except (urllib.error.URLError, OSError):
-            return None
-        if not data.startswith(b'RIFF'):
+        parts, done = [], False
+        for i, (lang, chunk) in enumerate(_lang_runs(text)):
+            data = _ask(info, chunk, volume, lang)
+            if data:
+                if parts:
+                    parts.append(('silence', b'\x00\x00' * 3600))   # a quarter of a second
+                parts.append(('wav', data))
+                done = True
+        if not done:
             return None
         try:
             tmp = path.with_suffix('.part')
-            tmp.write_bytes(data)
+            tmp.write_bytes(_concat(parts) if len(parts) > 1 else parts[0][1])
             tmp.replace(path)
-        except OSError:
+        except (OSError, wave.Error):
             return None
         _evict()
     return path
@@ -135,7 +196,8 @@ _RU_HUNDREDS = ['', 'сто', 'двести', 'триста', 'четырест�
 _EN_SMALL = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
              'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
              'seventeen', 'eighteen', 'nineteen']
-_EN_TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty']
+_EN_TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty',
+            'sixty', 'seventy', 'eighty', 'ninety']
 _TIME_RE = re.compile(r'(?<!\d)(\d{1,2}):(\d{2})(?!\d)(\s*(?:am|pm)\b)?', re.IGNORECASE)
 
 
@@ -174,30 +236,55 @@ def _ru_words(n, female=False):
 
 
 def _en_words(n):
-    """a number as English words, 0..59 (enough for the clock)"""
+    """a number as English words, 0..99 (enough for the clock and the temperatures)"""
     if n < 20:
         return _EN_SMALL[n]
     t, u = divmod(n, 10)
     return _EN_TENS[t] + (' ' + _EN_SMALL[u] if u else '')
 
 
+def _en_number(n):
+    """a bigger number as English words, 0..9999; bigger ones are spelled digit by digit"""
+    n = int(n)
+    if n > 9999 or n < 0:
+        return ' '.join(_EN_SMALL[int(d)] for d in str(abs(n))) if n else _EN_SMALL[0]
+    parts = []
+    for div, word in ((1000, 'thousand'), (100, 'hundred')):
+        q, n = divmod(n, div)
+        if q:
+            parts.append(_en_words(q) + ' ' + word)
+    if n or not parts:
+        parts.append(_en_words(n))
+    return ' '.join(parts)
+
+
+def _is_ru(text):
+    """the line is Russian when it holds any Cyrillic at all: a stray English word
+    does not change the language of her numbers (and vice versa)"""
+    return any('\u0400' <= c <= '\u04ff' for c in text)
+
+
 def _convert_digits_for_tts(text):
     """«Сейчас 14:05» becomes «Сейчас четырнадцать часов пять минут», «2:14 pm»
-    becomes «two fourteen p m»; other numbers become Russian words"""
+    becomes «two fourteen p m»; other numbers become words in the line's language"""
+    ru = _is_ru(text)
+
     def time_repl(m):
         h, mins, ap = int(m.group(1)), int(m.group(2)), (m.group(3) or '').lower().strip()
-        if ap:                      # her sleepy English clock: «two fourteen p m»
+        if ap or not ru:            # her sleepy English clock: «two fourteen p m»
             words = _en_words(h)
             if mins:
                 words += (' oh ' + _EN_SMALL[mins]) if mins < 10 else ' ' + _en_words(mins)
-            return words + (' p m' if ap == 'pm' else ' a m')
+            if ap:
+                words += ' p m' if ap == 'pm' else ' a m'
+            return words
         words = _ru_words(h) + ' ' + _ru_plural(h, 'час', 'часа', 'часов')
         if mins:
             words += ' ' + _ru_words(mins, female=True) + ' ' + _ru_plural(mins, 'минута', 'минуты', 'минут')
         return words
 
     def num_repl(m):
-        return _ru_words(int(m.group()))
+        return _ru_words(int(m.group())) if ru else _en_number(int(m.group()))
 
     text = _TIME_RE.sub(time_repl, text)
     return re.sub(r'\d+', num_repl, text)
