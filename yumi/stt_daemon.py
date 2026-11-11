@@ -75,6 +75,7 @@ TAP_LINES = 1000                        # recogn.txt holds the freshest this man
 ECHO_SOURCE = 'yumi_ec'                 # the echo-cancel source the ears record through
 ECHO_SINK = 'yumi_ec_sink'              # where her own sounds go, so they can be subtracted
 _echo = {'on': False, 'master': None, 'module': None, 'checked': 0.0, 'failed': 0}
+_echo_gate = threading.Lock()   # echo_ready runs from several threads: one at a time
 # which command reads the mic, raw s16 mono RATE. pw-record before parecord: on some
 # desktops parecord connects and then stays silent, so arecord gets the last word.
 # {mic} in the third column is where a chosen microphone goes (the /mics endpoint lists them).
@@ -141,34 +142,40 @@ def echo_ready(mic=None):
     """the name of the echo-cancel source to record through, or None when there is none:
     best effort, it loads over the chosen mic (her sounds into ECHO_SINK give it the echo
     to subtract). pactl is not free, so the state is re-checked at most every 20 s"""
-    now = time.monotonic()
-    if now - _echo['checked'] >= 20:
-        _echo['checked'] = now
-        if ECHO_SOURCE in _pactl_short('sources'):
-            _echo['on'] = True
-            for line in _pactl_short('modules').splitlines():
-                p = line.split('\t')
-                if len(p) >= 3 and 'module-echo-cancel' in p[1] and ECHO_SOURCE in p[2]:
-                    try:
-                        _echo['module'] = int(p[0])
-                    except ValueError:
-                        pass
-                    for arg in p[2].split():     # what the running canceller listens to
-                        if arg.startswith('source_master='):
-                            _echo['master'] = arg.split('=', 1)[1] or None
-                    break
-        elif _echo['failed'] < 3:       # it refused three times: give up until a restart
-            _echo['on'] = _echo_load(_echo_want(mic))
-            if not _echo['on']:
-                _echo['failed'] += 1
-    if _echo['on'] and _echo_want(mic) != _echo['master']:
-        want = _echo_want(mic)
-        _echo['master'] = want          # what it will listen to from now on
-        if _echo['module'] is not None:
-            subprocess.run(['pactl', 'unload-module', str(_echo['module'])],
-                           capture_output=True, timeout=5)
-        if not _echo_load(want):        # the reload failed: the plain mic is next best
-            _echo['on'], _echo['master'], _echo['module'] = False, None, None
+    with _echo_gate:            # a race here loads the canceller twice: CPU twice over
+        now = time.monotonic()
+        if now - _echo['checked'] >= 20:
+            _echo['checked'] = now
+            if ECHO_SOURCE in _pactl_short('sources'):
+                _echo['on'] = True
+                ids = []                    # every canceller around the mic, oldest first
+                for line in _pactl_short('modules').splitlines():
+                    p = line.split('\t')
+                    if len(p) >= 3 and 'module-echo-cancel' in p[1] and ECHO_SOURCE in p[2]:
+                        try:
+                            ids.append(int(p[0]))
+                        except ValueError:
+                            pass
+                        for arg in p[2].split():     # what the running canceller listens to
+                            if arg.startswith('source_master='):
+                                _echo['master'] = arg.split('=', 1)[1] or None
+                if ids:                     # one is enough: two webrtc ends burn the core
+                    _echo['module'] = ids[-1]
+                    for extra in ids[:-1]:  # a twin from an old race or a lost unload goes
+                        subprocess.run(['pactl', 'unload-module', str(extra)],
+                                       capture_output=True, timeout=5)
+            elif _echo['failed'] < 3:       # it refused three times: give up until a restart
+                _echo['on'] = _echo_load(_echo_want(mic))
+                if not _echo['on']:
+                    _echo['failed'] += 1
+        if _echo['on'] and _echo_want(mic) != _echo['master']:
+            want = _echo_want(mic)
+            _echo['master'] = want          # what it will listen to from now on
+            if _echo['module'] is not None:
+                subprocess.run(['pactl', 'unload-module', str(_echo['module'])],
+                               capture_output=True, timeout=5)
+            if not _echo_load(want):        # the reload failed: the plain mic is next best
+                _echo['on'], _echo['master'], _echo['module'] = False, None, None
     return ECHO_SOURCE if _echo['on'] else None
 
 
