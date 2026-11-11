@@ -22,7 +22,7 @@ English · [Русский](README.ru.md)
 
 - **Lives at the bottom edge.** While she hides, a tiny moth flutters where she sleeps. Touch it
   (or press your hotkey) and she pops out.
-- **Round menu.** Click her: Recent, Shelf, Pipette, Timer, Do Not Disturb, Settings, plus buttons
+- **Round menu.** Click her: Recent, Shelf, Pipette, Timer, Joke, Do Not Disturb, Settings, plus buttons
   of your own. Rearrange them, switch them off or add new ones in Settings → Buttons.
 - **Recent files and a shelf.** A box lands under her and your latest files spill out. Click to
   open, drag a card into any app, keep favourites on her shelf.
@@ -188,7 +188,7 @@ Add **Yumi** to the autostart apps in the system settings, then add a custom sho
 | Do | She does |
 | --- | --- |
 | Hover the moth | pops out; the moth hides behind her |
-| Click her | a round menu: Recent, Shelf, Pipette, Timer, DND, Settings |
+| Click her | a round menu: Recent, Shelf, Pipette, Timer, Joke, DND, Settings |
 | Recent / Shelf | a box lands under her, files spill out next to it |
 | Click a card / drag it out | opens it / drops it into any app |
 | Drag a card onto her, or right-click it | Open, Convert, Compress, Keep on shelf |

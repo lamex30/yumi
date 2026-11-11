@@ -969,6 +969,13 @@ class Brain(Extras):
             self.menu = None
             if self.visible() and not self.sleeping and not self.bubble:
                 self.hourly()
+        elif action == 'joke':
+            self.close_radial()
+            self.menu = None
+            if self.visible() and not self.sleeping and not self.bubble and not self.thinking:
+                self.thinking = True
+                self.requests.append(('joke_ask',
+                                      {'lang': self.settings.get('speech_lang', 'en')}))
         elif action == 'timer':
             self.close_radial()
             self.timer_new()
