@@ -1154,6 +1154,10 @@ class Brain(Extras):
             self.requests.append(('weather_ask',
                                   {'where': where, 'when': chat.weather_when(text)}))
             return
+        if chat.joke_question(text):       # a joke: her mind makes one up fresh, not from the chat
+            self.thinking = True
+            self.requests.append(('joke_ask', {'lang': lang}))
+            return
         self.chat_history.append({'role': 'user', 'content': text})
         del self.chat_history[:-10]     # she remembers her last five turns
         self.thinking = True
@@ -1177,6 +1181,15 @@ class Brain(Extras):
         hour = now.tm_hour
         self.thinking = True
         self.requests.append(('hourly_ask', {'hour': hour, 'lang': lang, 'time': t}))
+
+    def joked(self, reply):
+        """the mind answered with a joke (reply is '' when it did not work out)"""
+        self.thinking = False
+        reply = ' '.join(str(reply or '').split())
+        if reply:
+            self.say_text(reply)
+        else:
+            self.say('joke_fail')
 
     def replied(self, reply):
         """Ollama answered (reply is '' when it did not work out)"""

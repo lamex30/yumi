@@ -339,6 +339,8 @@ no mind involved — she just reads the clock. «Какая погода» and �
 peek at [wttr.in](https://wttr.in) (this one small look needs the internet; everything else
 stays offline as before); with a place in the phrase («какая погода в Москве») she looks there,
 otherwise out of her own window — the city where you are, recognized from your network.
+Say «расскажи анекдот» (or «tell me a joke») and she asks her neural net to make one up,
+then tells it out loud.
 
 **The wake word.** Say «Yumi» and she is all ears at once, no buttons — the name may come
 behind a filler word («well, Yumi») and a half-heard mush of syllables counts too, so she

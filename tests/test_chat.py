@@ -83,6 +83,13 @@ assert '14:32' in text and '{' not in text, text
 text, _face = phrases.Speech({'speech_lang': 'ru'}).line('weather', report='+4°C, Пасмурно')
 assert '+4°C' in text and '{' not in text, text
 
+# the joke command: her mind makes one up on the spot
+for t in ('анекдот', 'расскажи анекдот', 'расскажи шутку', 'Юми, пошути',
+          'скажи что-нибудь смешное', 'tell me a joke', 'make me laugh'):
+    assert chat.joke_question(t), t
+for t in ('который час', 'какая погода', 'привет', 'set a timer'):
+    assert not chat.joke_question(t), t
+
 # Polza.ai: the OpenAI-compatible endpoint answers with a string, the key travels along
 import json as _json                                   # noqa: E402
 import urllib.request as _urllib                        # noqa: E402
@@ -122,11 +129,13 @@ assert SEEN['path'] == '/v1/chat/completions', SEEN
 assert SEEN['auth'] == 'Bearer secret', SEEN
 assert SEEN['model'] == 'deepseek/deepseek-v4-flash' and SEEN['max_tokens'] == 220, SEEN
 assert chat.hourly_joke(s, 14) == 'Спокойной ночи!'
+assert chat.joke(s, 'ru') == 'Спокойной ночи!'
 assert chat.ask({'chat_provider': 'polza.ai', 'polza_url': 'http://127.0.0.1:1/x'}, []) == ''
 polza.shutdown()
 
 # no key: she gives up at once, no hanging request, no key sent anywhere
 assert chat.ask({'chat_provider': 'polza.ai'}, [{'role': 'user', 'content': 'hi'}]) == ''
 assert chat.hourly_joke({'chat_provider': 'polza.ai'}, 14) == ''
+assert chat.joke({'chat_provider': 'polza.ai'}, 'ru') == ''
 
 print('ok')

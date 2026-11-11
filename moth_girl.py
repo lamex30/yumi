@@ -742,6 +742,8 @@ class App(Gtk.Application):
                 self.weather_ask(r[1])
             elif kind == 'hourly_ask':
                 self.hourly_ask(r[1])
+            elif kind == 'joke_ask':
+                self.joke_ask(r[1])
             elif kind == 'chat_models':
                 self.fetch_chat_models()
             elif kind == 'mics':
@@ -942,6 +944,13 @@ class App(Gtk.Application):
             hour = int(payload.get('hour', time.localtime().tm_hour))
             joke = chat.hourly_joke(self.settings, hour, lang)
             GLib.idle_add(lambda: self.ev(lambda b: b.hour_joked({'joke': joke})) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def joke_ask(self, payload):
+        """her mind is asked for a joke; the reply goes back to the brain"""
+        def work():
+            reply = chat.joke(self.settings, payload.get('lang', 'en'))
+            GLib.idle_add(lambda: self.ev(lambda b: b.joked(reply)) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def fetch_chat_models(self):

@@ -159,6 +159,17 @@ def time_question(text):
     return bool(TIME_Q_RE.search(t))
 
 
+JOKE_Q_RE = re.compile(
+    r'анекдот|шутк\w*|пошути|рассмеши|смешн\w*'
+    r'|\bjokes?\b|make\s+me\s+laugh|something\s+funny')
+
+
+def joke_question(text):
+    """True when the phrase asks for a joke: her mind makes one up on the spot"""
+    t = ' '.join(str(text or '').lower().split()).strip(' ?!.,')
+    return bool(JOKE_Q_RE.search(t))
+
+
 def the_time(lang='en', now=None):
     """the clock as she says it: 24 hours for Russian, «2:14 pm» for English"""
     t = time.localtime() if now is None else time.localtime(now)
@@ -196,22 +207,19 @@ def weather_when(text):
     return 'today'
 
 
-def hourly_joke(settings, hour, lang='en', timeout=90):
-    """ask the mind for a short funny line about this hour (Russian or English),
-    one or two sentences, no emoji, no lists; '' when the mind is out of reach"""
+def _one_shot(settings, user, tokens, lang='en', timeout=90):
+    """one reply for one user line, no conversation behind it (the hour joke, a joke, ...);
+    the reply text, or '' when the mind is out of reach"""
     if _provider(settings) == 'polza.ai' and not str(settings.get('polza_api_key') or '').strip():
         return ''          # no key: Polza.ai would hang or refuse, she says so at once
     body = json.dumps({
         'model': settings.get('chat_model') or (POLZA_MODEL if _provider(settings) == 'polza.ai' else DEFAULT_MODEL),
         'messages': [
             {'role': 'system', 'content': system_prompt(lang)},
-            {'role': 'user', 'content': ('Скажи что-нибудь смешное и короткое про время '
-                                         f'{hour}:00, одно-два предложения, по-русски, без эмодзи и списков.'
-                                         if str(lang) == 'ru' else
-                                         f'Say something short and funny about {hour}:00, one or two sentences, in English, no emoji, no lists.')}
+            {'role': 'user', 'content': user}
         ],
         'stream': False,
-        'options': {'num_predict': 120} if _provider(settings) != 'polza.ai' else {'max_tokens': 120}
+        'options': {'num_predict': tokens} if _provider(settings) != 'polza.ai' else {'max_tokens': tokens}
     }).encode()
     try:
         if _provider(settings) == 'polza.ai':
@@ -230,6 +238,26 @@ def hourly_joke(settings, hour, lang='en', timeout=90):
     except (urllib.error.URLError, OSError, ValueError):
         return ''
     return ' '.join(str((data.get('message') or {}).get('content') or '').split())
+
+
+def hourly_joke(settings, hour, lang='en', timeout=90):
+    """ask the mind for a short funny line about this hour (Russian or English),
+    one or two sentences, no emoji, no lists; '' when the mind is out of reach"""
+    user = ('Скажи что-нибудь смешное и короткое про время '
+            f'{hour}:00, одно-два предложения, по-русски, без эмодзи и списков.'
+            if str(lang) == 'ru' else
+            f'Say something short and funny about {hour}:00, one or two sentences, in English, no emoji, no lists.')
+    return _one_shot(settings, user, 120, lang, timeout)
+
+
+def joke(settings, lang='en', timeout=90):
+    """ask the mind for a short joke («анекдот»), one or two sentences, no emoji,
+    no lists; '' when the mind is out of reach"""
+    user = ('Расскажи короткий смешной анекдот, одно-два предложения, по-русски, '
+            'без эмодзи и списков.'
+            if str(lang) == 'ru' else
+            'Tell me a short funny joke, one or two sentences, in English, no emoji, no lists.')
+    return _one_shot(settings, user, 160, lang, timeout)
 
 
 def _degrees_ru(n):
