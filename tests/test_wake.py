@@ -43,19 +43,29 @@ assert not stt.near('привет', 'приветмир')
 assert not stt.near('записка', 'заметка')          # three slips and it is another word
 assert stt.near('приветсур', 'приветмир')          # two slips in a long word are ok
 
-# the learning: a never-met spelling of the name gets remembered for next time
+# the learning: a spelling one letter from the name gets remembered for next time,
+# but a sound two slips away (a video's word) must not grow into the name
 _hearsay = stt.HEARSAY_FILE
 stt.HEARSAY_FILE = Path(_root / 'tests' / 'hearsay.tmp.json')
 if stt.HEARSAY_FILE.exists():
     stt.HEARSAY_FILE.unlink()
 stt.hearsay_save('юми', 'дюме')
-stt.hearsay_save('юми', 'дюме')                    # twice said, remembered once
-assert stt.hearsay_load('юми') >= {'дюме', 'юме', 'юмей'}
+stt.hearsay_save('юми', 'дюме')                    # twice said, never remembered at all
+learned = lambda: stt.hearsay_load('юми') - set(stt.HEARSAY['юми'])
+assert not learned()
+stt.hearsay_save('юми', 'оми')
+stt.hearsay_save('юми', 'оми')                     # one slip from the name: remembered once
+assert learned() == {'оми'}
 stt.hearsay_save('юми', 'ю ми')                    # a two-word slip is not a spelling
 data = stt.hearsay_load('юми')
 assert 'ю ми' not in data                          # hear-say is one token, not two
+assert 'оми' in data
 stt.HEARSAY_FILE.unlink()
 stt.HEARSAY_FILE = _hearsay
+
+# her name deep inside a stream of other words does not wake her: a name is said first
+assert stt.wake_at('привет как дела сегодня погода хорошая совсем неплохо ну юми',
+                   spellings) == (None, None)
 
 print('test_wake: ok')
 sys.exit(0)

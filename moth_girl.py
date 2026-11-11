@@ -888,18 +888,20 @@ class App(Gtk.Application):
             b = self.brain
             while self.wake_on:
                 time.sleep(0.15)
-                busy = b.sleeping or b.thinking or b.listening or b.now < b.talk_until
+                busy = (b.sleeping or b.thinking or b.listening
+                        or b.now < b.talk_until or self.talking())
                 if not self.wake_on or busy:
                     continue            # not while she sleeps, answers or listens on request
                 res = ears.wake(lang=self.settings.get('speech_lang', 'en'),
-                                word=self.settings.get('wake_word', 'юми'), secs=60,
+                                word=self.settings.get('wake_word', 'юми'), secs=120,
                                 size=self.settings.get('stt_size', 'small'),
                                 mic=self.settings.get('stt_mic'),
                                 ear=self.settings.get('ears_range', 'mid'))
                 if not self.wake_on or not res or not res.get('woke'):
                     continue            # quiet, called off or the ears are away
                 tail = res.get('text') or ''
-                busy = b.sleeping or b.thinking or b.listening or b.now < b.talk_until
+                busy = (b.sleeping or b.thinking or b.listening
+                        or b.now < b.talk_until or self.talking())
                 if busy:
                     continue            # she got busy in those seconds: the word is spent
                 GLib.idle_add(lambda t=tail: self.ev(lambda br: br.wake_up(t)) and False)

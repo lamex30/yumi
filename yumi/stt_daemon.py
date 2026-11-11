@@ -63,7 +63,7 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 10                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 11                            # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 VAD_TAIL = 700                          # ms of quiet after speech: the phrase is really over
 TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
@@ -115,17 +115,55 @@ def _echo_want(mic):
     return None
 
 
+def _default_sink():
+    """the name of the output the desktop plays into right now, or None"""
+    try:
+        r = subprocess.run(['pactl', 'get-default-sink'], capture_output=True,
+                           text=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() or None
+
+
+def _echo_sink_master():
+    """the real output the canceller's sink feeds: the default one, but never the
+    canceller's own sink (a reload after the claim would loop through itself)"""
+    sinks = [line.split('\t')[1] for line in _pactl_short('sinks').splitlines()
+             if '\t' in line]
+    real = [s for s in sinks if s != ECHO_SINK and not s.startswith(ECHO_SINK + '.')]
+    if not real:
+        return False            # no real output: the canceller would loop through itself
+    want = _default_sink()
+    return want if want in real else real[0]
+
+
+def _claim_default_sink():
+    """the sounds the computer itself plays go into the canceller's sink too, so her
+    ears subtract them: a video's speech must not pass for a voice in the room"""
+    if _default_sink() != ECHO_SINK:
+        subprocess.run(['pactl', 'set-default-sink', ECHO_SINK],
+                       capture_output=True, timeout=3)
+        log("the computer's sounds now play through the canceller's sink")
+
+
 def _echo_load(master):
     """pactl loads the webrtc echo-cancel around the mic; True when the clean end appeared"""
+    sink_master = _echo_sink_master()
+    if sink_master is False:
+        log('echo-cancel refused: no real output for its sink')
+        return False
     argv = ['pactl', 'load-module', 'module-echo-cancel',
             f'source_name={ECHO_SOURCE}', f'sink_name={ECHO_SINK}', 'aec_method=webrtc']
     if master:
         argv.append(f'source_master={master}')
+    if sink_master:
+        argv.append(f'sink_master={sink_master}')
     try:
         r = subprocess.run(argv, capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return False
     if r.returncode == 0 and ECHO_SOURCE in _pactl_short('sources'):
+        _claim_default_sink()
         try:
             _echo['module'] = int(r.stdout.strip())
         except ValueError:
@@ -404,6 +442,8 @@ def hearsay_save(word, heard):
     heard = ' '.join(heard.split()).lower().replace('ё', 'е')
     if not heard or ' ' in heard or len(heard) > 12:
         return                # the spelling is one token: «ю ми» is matched by the windows
+    if len(heard) < 3 or not any(near(heard, s) for s in variants(word)):
+        return                # a stray sound must not grow into the name: «на» is not «юми»
     try:
         data = json.loads(HEARSAY_FILE.read_text()) if HEARSAY_FILE.exists() else {}
     except (OSError, ValueError):
@@ -471,9 +511,9 @@ def wake_at(text, spellings):
     toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
             for t in text.split()]
     toks = [t for t in toks if t]
-    for n in (3, 2, 1):                     # the fullest hear-say first, anywhere she turns up
-        for i in range(len(toks) - n + 1):
-            said = ''.join(toks[i:i + n])
+    for n in (3, 2, 1):                     # the fullest hear-say first, near the start:
+        for i in range(min(len(toks), 8) - n + 1):   # a name is said first, not deep
+            said = ''.join(toks[i:i + n])                # inside a video's speech stream
             if any(near(said, s) for s in spellings):
                 return ' '.join(toks[i + n:]), said
     return None, None
@@ -807,11 +847,9 @@ class Tap:
     def _work(self, mygen):
         """keep a recorder on tape; if it dies on its own, it goes again after a pause"""
         while self.on and self.gen == mygen:
-            mic = self.want['mic']
-            echo = echo_ready(mic)
-            if echo and not (shutil.which('pw-record') or shutil.which('parecord')):
-                echo = None             # arecord cannot aim at a PipeWire source: plain mic
-            name, cmd = recorder_cmd(echo or mic)
+            mic = self.want['mic']      # the diary hears the plain mic, not the clean end:
+                                        # the canceller stays with one reader, and her own
+            name, cmd = recorder_cmd(mic)   # voice stays on the tape (it is a diary)
             if not name:
                 log('tap: no parecord, pw-record or arecord for the microphone')
                 return
@@ -988,7 +1026,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'ok': True})
         if u.path == '/wake':
             try:
-                secs = min(60.0, max(5.0, float((q.get('secs') or ['20'])[0])))
+                secs = min(300.0, max(5.0, float((q.get('secs') or ['20'])[0])))
             except ValueError:
                 secs = 20.0
             lang = (q.get('lang') or ['ru'])[0]
