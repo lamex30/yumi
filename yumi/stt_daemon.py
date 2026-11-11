@@ -1119,12 +1119,19 @@ def main():
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     except OSError:                     # the port is taken: an older twin may already be there
-        info = read_state()
-        if info and ping(info['port']):
-            write_state(info['port'])
-            log(f'already running on port {info["port"]}')
-            return
-        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        for _ in range(15):             # 3 s: the winner writes its state at once, and a stale
+            info = read_state()         # version (one ears.py is about to kill) frees the port
+            if info and ping(info['port']) and info.get('version') == VERSION:
+                write_state(info['port'])
+                log(f'already running on port {info["port"]}')
+                return
+            try:
+                server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+                break
+            except OSError:
+                time.sleep(0.2)
+        else:
+            server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     port = server.server_address[1]
     write_state(port)
     atexit.register(try_forget, port)

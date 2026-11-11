@@ -12,6 +12,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -27,6 +28,7 @@ DIR = config.CACHE_DIR / 'stt'
 STATE = DIR / 'port.json'
 LOG = config.STATE_DIR / 'stt.log'      # what the daemon printed, for the troubleshooting
 _sys_py_ok = None
+_spawn_lock = threading.Lock()          # ears start from several threads: one daemon at a time
 
 
 def _ping(port, timeout=0.4):
@@ -82,22 +84,26 @@ def _ensure():
     info = _state()
     if info:
         return info
-    py = _python()
-    if not py:
-        return None
-    try:
-        LOG.parent.mkdir(parents=True, exist_ok=True)
-        log = open(LOG, 'ab')           # the daemon's prints live here, for the troubleshooting
-        subprocess.Popen([str(py), str(DAEMON)], start_new_session=True,
-                         stdout=log, stderr=log)
-    except OSError:
-        return None
-    for _ in range(50):                 # 10 s: importing vosk is quick, the first model download is not
+    with _spawn_lock:           # a race here spawns twin daemons: two vosks, two recorders
         info = _state()
         if info:
-            return info
-        time.sleep(0.2)
-    return None
+            return info         # the other thread won the start: its daemon is good enough
+        py = _python()
+        if not py:
+            return None
+        try:
+            LOG.parent.mkdir(parents=True, exist_ok=True)
+            log = open(LOG, 'ab')           # the daemon's prints live here, for the troubleshooting
+            subprocess.Popen([str(py), str(DAEMON)], start_new_session=True,
+                             stdout=log, stderr=log)
+        except OSError:
+            return None
+        for _ in range(50):                 # 10 s: importing vosk is quick, the first model download is not
+            info = _state()
+            if info:
+                return info
+            time.sleep(0.2)
+        return None
 
 
 def mics():
