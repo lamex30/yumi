@@ -38,7 +38,9 @@ DEFAULT_SETTINGS = {
     'polza_url': 'https://polza.ai/api/v1',   # Polza.ai OpenAI-compatible endpoint
     'polza_api_key': '',   # Polza.ai API key (get it at polza.ai)
     'wake_ears': True,        # she starts listening the moment you say the wake word
-    'wake_word': 'юми',       # the wake word itself (say it, then the question)
+    'wake_word': 'юми',       # the wake word itself (say it, then the question);
+                              # the ears learn its hear-says into
+                              # ~/.local/share/yumi/stt/hearsay.json, edit freely
     'stt_size': 'small',      # her hearing: small (45 MB) / big (a sharper ~1.8 GB model)
     'stt_mic': None,          # which microphone the ears hear with: None = auto (the desktop's pick)
     'ears_range': 'mid',      # how far the ears reach: near / mid / far (the noise gate decides)

@@ -366,6 +366,42 @@ def variants(word):
     return out
 
 
+HEARSAY = {'юми': ['юме', 'юмей', 'юный', 'юлий', 'юма', 'юмэ', 'ими', 'ями',
+                   'еми', 'еле', 'уме', 'умэ', 'джуми', 'yumi', 'umi', 'yume', 'emi'],
+           'yumi': ['yumi', 'yume', 'youmi', 'юми', 'юме', 'юный']}
+HEARSAY_FILE = HOME / 'hearsay.json'
+
+
+def hearsay_load(word):
+    """what the ears remember writing for this wake word: the known hear-say above
+    plus everything learned from the live sessions (~/.local/share/yumi/stt/hearsay.json)"""
+    try:
+        learned = json.loads(HEARSAY_FILE.read_text()) or {}
+    except (OSError, ValueError):
+        learned = {}
+    out = set(HEARSAY.get(word, []))
+    out.update(w for w in learned.get(word) or [] if isinstance(w, str) and w.strip())
+    return {w.lower().replace('ё', 'е') for w in out}
+
+
+def hearsay_save(word, heard):
+    """a spelling of the wake word the ears had never met and yet it rang true:
+    remember it, so next time it is a plain match, not a guess one letter away"""
+    heard = ' '.join(heard.split()).lower().replace('ё', 'е')
+    if not heard or ' ' in heard or len(heard) > 12:
+        return                # the spelling is one token: «ю ми» is matched by the windows
+    try:
+        data = json.loads(HEARSAY_FILE.read_text()) if HEARSAY_FILE.exists() else {}
+    except (OSError, ValueError):
+        data = {}
+    data[word] = [heard] + [w for w in data.get(word) or [] if w != heard][:40]
+    try:
+        HEARSAY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        HEARSAY_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=1))
+    except OSError:
+        pass
+
+
 def near(a, b):
     """True when the two words differ by at most a couple of letters (the hearsay of
     Vosk): one letter forgiven to short words, two to the long ones where one slips in anyway"""
@@ -387,16 +423,18 @@ def near(a, b):
 
 
 def wake_at(text, spellings):
-    """what came after the wake word in the phrase, or None; only whole words count
-    and only near the start («юми» or behind a filler «ну, юми»; glued hear-say like
-    «ю и ми» counts too): «юмизнает» must not wake her"""
+    """what came after the wake word and the spelling the ears wrote it with, or (None, None);
+    whole words only, anywhere in the first words of the phrase («юми» or behind a filler
+    «а можно ми»), glued hear-say like «ю и ми» counts too: «юмизнает» must not wake her"""
     toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
             for t in text.split()]
     toks = [t for t in toks if t]
-    for i, n in ((0, 3), (0, 2), (0, 1), (1, 2), (1, 1)):   # the fullest hear-say first
-        if i + n <= len(toks) and any(near(''.join(toks[i:i + n]), s) for s in spellings):
-            return ' '.join(toks[i + n:])
-    return None
+    for n in (3, 2, 1):                     # the fullest hear-say first, anywhere she turns up
+        for i in range(len(toks) - n + 1):
+            said = ''.join(toks[i:i + n])
+            if any(near(said, s) for s in spellings):
+                return ' '.join(toks[i + n:]), said
+    return None, None
 
 
 class Ears:
@@ -528,7 +566,8 @@ class Ears:
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
         model = self.model(lang, size)
-        spellings = variants(' '.join(str(word).split()).lower() or 'юми')
+        word = ' '.join(str(word).split()).lower() or 'юми'
+        spellings = variants(word) | hearsay_load(word)
         with self.lock:                     # one microphone at a time
             if self.busy:
                 return {'woke': False, 'text': None}
@@ -588,7 +627,7 @@ class Ears:
                     last = words
                     if woken and det.speech_ms and det.silence_ms >= VAD_TAIL:
                         # the voice died down after the name: whatever came after is the phrase
-                        hit = wake_at(words, spellings)
+                        hit, _src = wake_at(words, spellings)
                         said = hit if hit is not None else words
                         said = ' '.join(said.split())
                         if said:
@@ -599,10 +638,12 @@ class Ears:
                         return {'woke': True, 'text': ''}
                     if not words.strip():
                         continue
-                    hit = wake_at(words, spellings)
+                    hit, src = wake_at(words, spellings)
                     if not woken and hit is not None:
                         woken = True                # she hears her name: keep on recording
                         since = time.monotonic()
+                        if src and src not in spellings:
+                            hearsay_save(word, src)     # a hear-say she never met: learn it
                     if not woken or not ended:
                         continue    # not her name yet, or the phrase is still forming
                     said = hit if hit is not None else words
