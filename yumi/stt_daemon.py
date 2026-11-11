@@ -137,6 +137,31 @@ def _echo_sink_master():
     return want if want in real else real[0]
 
 
+def _vol_pct(name):
+    """the quietest channel's volume percent of a sink, or None; pactl's long text"""
+    try:
+        r = subprocess.run(['pactl', 'get-sink-volume', name], capture_output=True,
+                           text=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    pcts = [int(m) for m in re.findall(r'/\s*(\d+)\s*%', r.stdout)]
+    return min(pcts) if pcts else None
+
+
+def _uncap_real_sink():
+    """the real output must never be quieter than the knob: after the claim the volume
+    slider and keys turn the canceller's sink, so a real end left low (an old volume,
+    a reload's restore) caps everything — cranked up full and still barely audible"""
+    virtual = _vol_pct(ECHO_SINK)
+    master = _echo_sink_master()
+    real = _vol_pct(master) if master else None
+    if virtual is None or real is None or real >= virtual:
+        return
+    subprocess.run(['pactl', 'set-sink-volume', master, f'{virtual}%'],
+                   capture_output=True, timeout=3)
+    log(f'the real output was quieter than the knob, raised it to {virtual}%')
+
+
 def _claim_default_sink():
     """the sounds the computer itself plays go into the canceller's sink too, so her
     ears subtract them: a video's speech must not pass for a voice in the room"""
@@ -144,6 +169,7 @@ def _claim_default_sink():
         subprocess.run(['pactl', 'set-default-sink', ECHO_SINK],
                        capture_output=True, timeout=3)
         log("the computer's sounds now play through the canceller's sink")
+        _uncap_real_sink()
 
 
 def _echo_load(master):
@@ -186,6 +212,7 @@ def echo_ready(mic=None):
             _echo['checked'] = now
             if ECHO_SOURCE in _pactl_short('sources'):
                 _echo['on'] = True
+                _uncap_real_sink()      # the knob above the real end must not be capped
                 ids = []                    # every canceller around the mic, oldest first
                 for line in _pactl_short('modules').splitlines():
                     p = line.split('\t')
