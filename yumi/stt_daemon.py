@@ -63,7 +63,7 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 9                             # bumped when the protocol changes: stale twins are restarted
+VERSION = 10                            # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 VAD_TAIL = 700                          # ms of quiet after speech: the phrase is really over
 TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
@@ -546,7 +546,9 @@ class Ears:
         name, cmd = recorder_cmd(echo or mic)
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
-        model = self.model(lang, size)
+        # vosk only hears where the phrase ends here (whisper reads the words):
+        # the small model is enough for that, the big one is not worth its gigabytes
+        model = self.model(lang, 'small')
         with self.lock:                     # one listen at a time
             if self.busy:
                 return None                 # the app never does this, but just in case
