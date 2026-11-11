@@ -19,7 +19,8 @@ the current recorder can hear).
 A click on her mic button starts a listen; vosk hears the end of the phrase, or
 secs pass, or another click asks /stop. /wake is the same microphone held on longer:
 vosk waits for the wake word (юми), and the moment it passes by the app gets the
-phrase that follows — nothing is recognized twice.
+phrase that follows — nothing is recognized twice. His word is a guess, so before
+she wakes, the tape of the last seconds goes to whisper for a yes or a no.
 
 Before the sound goes anywhere it is cleaned here: a one-pole high-pass (hum and
 rumble go), a noise gate with a floor that follows the quiet (steady hiss and fan
@@ -65,6 +66,8 @@ WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the siz
                 'big': 'large-v3'}
 VERSION = 11                            # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
+WAKE_TAPE = RATE * 6 * 2                # bytes of the recent sound the judge reads: ~6 s
+WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
 VAD_TAIL = 700                          # ms of quiet after speech: the phrase is really over
 TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
 TAP_SEGMENT = 600.0                     # s of tape in one wav, then the next file starts
@@ -546,6 +549,21 @@ def wake_at(text, spellings):
     return None, None
 
 
+_judge = threading.Lock()   # one whisper reading at a time, wake to wake
+
+
+def transcribe_model(model, pcm, lang):
+    """s16 mono through a whisper that is already in hand ('' for silence): a function
+    of its own so a thread may read with a model the lock will not hand out again
+    (an RLock is open to its own thread only)"""
+    import numpy as np
+    audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    segments, _info = model.transcribe(
+        audio, language=lang or None, beam_size=1, vad_filter=True,
+        condition_on_previous_text=False)
+    return ' '.join(s.text for s in segments).strip()
+
+
 class Ears:
     """downloads the models one by one and answers one listen at a time"""
 
@@ -602,13 +620,7 @@ class Ears:
         """bytes of s16 mono RATE through faster-whisper: the words it hears ('' for
         silence). vad_filter keeps the quiet out (whisper dreams on silence), and the
         chain is not carried on (so one dream does not write the next)"""
-        import numpy as np
-        model = self.whisper(lang, size)
-        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-        segments, _info = model.transcribe(
-            audio, language=lang or None, beam_size=1, vad_filter=True,
-            condition_on_previous_text=False)
-        return ' '.join(s.text for s in segments).strip()
+        return transcribe_model(self.whisper(lang, size), pcm, lang)
 
     def listen(self, lang, secs, quiet, size='small', mic=None, ear=None):
         """hear one phrase: the recognized text ('' when there was nothing)"""
@@ -715,7 +727,10 @@ class Ears:
         {'woke': True, 'text': the phrase after it} — the name was heard, the rest came
         {'woke': True, 'text': ''} — the name alone, a phrase may still come
         {'woke': False, ...} — quiet the whole 'secs', or called off by /stop, or busy.
-        'text' is what was said after the wake word: the app recognizes nothing twice."""
+        'text' is what was said after the wake word: the app recognizes nothing twice.
+        The name is not taken at vosk's word alone: when his letters seem to spell it,
+        the tape of the last seconds goes to whisper for a yes or a no (vosk dreams of
+        the name in every video); with whisper away, his word is taken as it comes."""
         from vosk import KaldiRecognizer
         import selectors
         echo = echo_ready(mic)
@@ -727,6 +742,28 @@ class Ears:
         model = self.model(lang, size)
         word = ' '.join(str(word).split()).lower() or 'юми'
         spellings = variants(word) | hearsay_load(word)
+        # whisper is the judge: loaded here, while the lock is ours, because the judge
+        # thread may not ask for it — an RLock is open to its own thread only
+        try:
+            wmodel = self.whisper(lang, size)
+        except Exception as e:      # noqa: BLE001 - whisper is best effort, vosk stands
+            wmodel = None
+            log('whisper will not judge, vosk answers alone: ' + str(e)[-120:])
+        judge_lock = threading.Lock()
+
+        def judge(says):
+            """whisper reads the tape in its own thread (the words come in while the
+            judge still reads) and leaves its answer for the wake loop to find"""
+            with _judge:                # wake to wake: one whisper reading at a time
+                try:
+                    text = transcribe_model(wmodel, says, lang)
+                except Exception as e:  # noqa: BLE001 - a failed verdict is no verdict
+                    log('the judge failed, vosk answers alone: ' + str(e)[-120:])
+                    text = ''
+                after, said = wake_at(text, spellings)
+                with judge_lock:
+                    verdict.update(busy=False, ok=after is not None, after=after or '',
+                                   said=said, t=time.monotonic())
         with self.lock:                     # one microphone at a time
             if self.busy:
                 return {'woke': False, 'text': None}
@@ -749,6 +786,10 @@ class Ears:
                 woken = False               # the wake word has passed by already
                 since = t0                  # when the heard words last changed
                 last = ''                   # the previous half-heard words, to notice staleness
+                tape = bytearray()          # the judge's tape: the newest clean sound stays
+                verdict = {'busy': False, 'ok': None, 'after': '', 'said': None,
+                           't': 0.0}        # whisper's fresh answer lives here
+                heard_after = ''            # the words whisper heard past the name
                 while time.monotonic() - t0 < secs:
                     if self.abort:
                         break               # /stop, or a listen that needs the microphone
@@ -757,7 +798,7 @@ class Ears:
                             raise RuntimeError(f'{name} gave no sound')
                         if woken and time.monotonic() - since > WAKE_AFTER:
                             # the name passed by, nothing followed it: her turn to greet
-                            return {'woke': True, 'text': ''}
+                            return {'woke': True, 'text': heard_after}
                         continue
                     chunk = os.read(proc.stdout.fileno(), 4000)     # ~0.125 s of audio
                     if not chunk:
@@ -770,12 +811,15 @@ class Ears:
                         if die not in (None, 0):
                             raise RuntimeError(f'{name} died ({die}){err}'.rstrip())
                         if woken:
-                            return {'woke': True, 'text': ''}   # the name was on tape
+                            return {'woke': True, 'text': heard_after}   # the name was on tape
                         break
                     heard = True
                     chunk = hp_pass(chunk, st)            # hum and rumble go
                     voiced = det.feed(chunk)              # the voice detector follows the frames
                     chunk = gate_noise(chunk, st, voiced) # the hiss dies, speech is never touched
+                    tape += chunk                         # the judge reads the same clean sound
+                    if len(tape) > WAKE_TAPE:
+                        del tape[:-WAKE_TAPE]
                     ended = rec.AcceptWaveform(chunk)   # True: an utterance ended just now
                     if ended:
                         words = json.loads(rec.FinalResult() or '{}').get('text', '')
@@ -789,16 +833,45 @@ class Ears:
                         hit, _src = wake_at(words, spellings)
                         said = hit if hit is not None else words
                         said = ' '.join(said.split())
+                        if not said and heard_after:
+                            said = heard_after      # vosk went quiet: whisper's words stand in
                         if said:
                             return {'woke': True, 'text': said}
                         return {'woke': True, 'text': ''}   # her turn to greet
                     if woken and time.monotonic() - since > WAKE_AFTER:
                         # the name passed by and quiet followed: her turn to greet
                         return {'woke': True, 'text': ''}
+                    if woken and time.monotonic() - since > WAKE_AFTER:
+                        # the name passed by and quiet followed: her turn to greet
+                        return {'woke': True, 'text': heard_after}
+                    # the judge's answer, when it has come: a yes wakes her, a no means
+                    # the letters were a dream of vosk's (a name in a video's stream);
+                    # it is read even when vosk went quiet — a name said into silence
+                    # must not hang unanswered
+                    if not woken and wmodel is not None and not verdict['busy'] \
+                            and verdict['ok'] is not None:
+                        with judge_lock:
+                            ok, after, said = verdict['ok'], verdict['after'], verdict['said']
+                            verdict['ok'] = None        # the verdict is spent
+                        if ok:
+                            woken = True                # whisper heard the name too
+                            since = time.monotonic()
+                            heard_after = after
+                            if said and said not in spellings:
+                                hearsay_save(word, said)    # a hear-say the judge approved
                     if not words.strip():
                         continue
                     hit, src = wake_at(words, spellings)
-                    if not woken and hit is not None:
+                    if not woken and hit is not None and wmodel is not None:
+                        # a candidate: the tape goes to the judge; a fresh reading only
+                        # when the last one is answered and the wait between reads has passed
+                        if not verdict['busy'] and verdict['ok'] is None \
+                                and time.monotonic() - verdict['t'] > WAKE_REJUDGE:
+                            verdict['busy'] = True
+                            threading.Thread(target=judge, args=(bytes(tape),),
+                                             daemon=True).start()
+                    if not woken and hit is not None and wmodel is None:
+                        # no judge today: vosk's word is taken as it comes
                         woken = True                # she hears her name: keep on recording
                         since = time.monotonic()
                         if src and src not in spellings:
@@ -808,11 +881,13 @@ class Ears:
                     said = hit if hit is not None else words
                     # (the name passed by in an earlier phrase: the whole utterance is the tail)
                     said = ' '.join(said.split())
+                    if not said and heard_after:
+                        said = heard_after          # vosk went quiet: whisper's words stand in
                     if said:
                         return {'woke': True, 'text': said}
                     since = time.monotonic()        # the name alone: a pause for what follows
                 if woken:
-                    return {'woke': True, 'text': ''}   # the name was heard, the sound went on
+                    return {'woke': True, 'text': heard_after}   # the name was heard
                 return {'woke': False, 'text': None}
             finally:
                 try:

@@ -349,6 +349,9 @@ catches it properly at first try more often than not. Said with a phrase
 whole; a pause after the name — she asks "Yes? What is it?" right away and listens on. The idle
 waiting goes on while enabled (off in **Settings → Her ears → Wake on «Yumi»**) and it is not an
 eavesdrop: while she is in DND, talking an answer or listening on request, her name is ignored.
+The name is not taken at the first word's say-so: when vosk's letters seem to spell it, the tape
+of the last seconds goes to whisper for a yes or a no — a name half-heard in a video's stream
+stays a dream (the confirmation costs a moment; vosk keeps listening while whisper reads).
 The waiting hears nothing else: everything is computed on the spot, offline.
 
 ## Files
