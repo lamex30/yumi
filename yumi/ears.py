@@ -1,9 +1,9 @@
-"""Her ears: a local Vosk hears the microphone (no GTK here).
+"""Her ears: local faster-whisper reads the phrases, local Vosk hears their ends (no GTK here).
 
-tools/stt_setup.sh puts a venv with vosk into ~/.local/share/yumi/stt. The first time
-she listens, this starts yumi/stt_daemon.py with that Python and keeps it warm; the small
-Russian model (~45 MB) is downloaded once on the first listen (the settings can ask for the
-big one, ~1.8 GB, much sharper). listen() returns the heard
+tools/stt_setup.sh puts a venv with vosk and faster-whisper into ~/.local/share/yumi/stt. The
+first time she listens, this starts yumi/stt_daemon.py with that Python and keeps it warm; the
+small Russian vosk model (~45 MB) and the small whisper model (~460 MB) are downloaded once on
+the first listens. listen() returns the heard
 text, '' when there was silence, and None when the ears cannot work at all (no vosk, no
 microphone tool).
 """

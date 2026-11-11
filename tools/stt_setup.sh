@@ -1,8 +1,10 @@
 #!/bin/sh
-# The ears for Yumi: a local Vosk speech recognition, no cloud.
+# The ears for Yumi: local Vosk + faster-whisper speech recognition, no cloud.
 #   ./tools/stt_setup.sh
-# Puts vosk into its own venv (~/.local/share/yumi/stt, ~10 MB); your system Python is not
-# touched. The small Russian model (~45 MB) downloads by itself the first time she listens.
+# Puts vosk and faster-whisper into their own venv (~/.local/share/yumi/stt, vosk
+# ~10 MB + whisper ~100 MB of code); your system Python is not touched. The small
+# vosk model (~45 MB) downloads by itself the first time she listens, and the small
+# whisper model (~460 MB) — the first time a phrase is read by whisper.
 set -e
 cd "$(dirname "$0")/.."
 DIR="${YUMI_STT_HOME:-$HOME/.local/share/yumi/stt}"
@@ -21,6 +23,21 @@ else
         "$DIR/bin/pip" install --quiet vosk webrtcvad || \
             echo 'no webrtcvad (a C compiler is wanted): she hears on without the voice detector'
     fi
+fi
+
+# faster-whisper is the ear that reads the phrases (vosk only hears where they end);
+# a failed install is no tragedy: vosk's words are used when whisper is not there
+if ! "$DIR/bin/python" -c 'import faster_whisper' >/dev/null 2>&1; then
+    if command -v uv >/dev/null 2>&1; then
+        uv pip install --python "$DIR/bin/python" faster-whisper || true
+    else
+        "$DIR/bin/pip" install --quiet faster-whisper || true
+    fi
+fi
+if "$DIR/bin/python" -c 'import faster_whisper' >/dev/null 2>&1; then
+    echo 'faster-whisper is in.'
+else
+    echo 'faster-whisper did not come: the phrases will be read by vosk alone.'
 fi
 
 echo 'Checking the microphone tool (parecord, pw-record or arecord)...'

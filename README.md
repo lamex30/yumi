@@ -290,8 +290,12 @@ voices warm up in the background; after that she answers at once, and her lines 
 ## She listens and answers
 
 The mic button on her ring (**Listen**) makes her hear you: click it, say a phrase, click again to
-stop waiting. A local [Vosk](https://github.com/alphacep/vosk-api) recognizes the speech fully
-offline — the small Russian model (~45 MB, English too) downloads itself on the first listen.
+stop waiting. The speech is recognized fully offline: a local
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) (a small whisper on the CPU) reads the
+phrase, and a local [Vosk](https://github.com/alphacep/vosk-api) tells her where the phrase ends
+(and waits for her name, see "Юми, ..."). Both models download themselves on the first listens —
+the small vosk one (~45 MB, Russian and English) and the small whisper one (~460 MB, it
+understands far better than its size suggests).
 What she hears shows in her bubble, then a local [Ollama](https://ollama.com) answers (by default
 `lakomoor/vikhr-llama-3.2-1b-instruct:1b`); she repeats the answer in her bubble and with her voice
 (see "Her real voice" above — with Silero she speaks Russian aloud). She remembers her last five
@@ -301,14 +305,14 @@ turns until you quit her. To set the ears up:
 ./tools/stt_setup.sh
 ```
 
-vosk goes into its own small venv; the microphone is read with whatever the desktop has
-(`parecord`, `pw-record` or `arecord`). If several microphones are around, she listens to the
-one you pick: **Settings → Her ears → Microphone** — the list comes from your desktop, with
-«auto» keeping the desktop's own choice. If she hears you wrong, there is a sharper ear:
-**Settings → Her ears → Hearing accuracy → Sharp** — a big model (~1.8 GB, downloaded once
-on the first listen) understands speech noticeably better than the small one; the price
-is memory and a longer first listen. How far the ears reach: **Settings → Her ears →
-Ear range** (Close / Normal / Across the room) — it is the noise gate's threshold, it
+vosk and faster-whisper go into their own small venv; the microphone is read with whatever the
+desktop has (`parecord`, `pw-record` or `arecord`). If several microphones are around, she listens to the one you pick: **Settings → Her ears →
+Microphone** — the list comes from your desktop, with «auto» keeping the desktop's own choice.
+If she hears you wrong, there is a sharper ear: **Settings → Her ears → Hearing accuracy →
+Sharp** — the whisper model grows to `large-v3` (~3 GB, downloaded once on the first listen)
+and vosk brings its big Russian model too; both understand speech noticeably better than the
+small ones, the price is memory and a longer first listen. How far the ears reach: **Settings →
+Her ears → Ear range** (Close / Normal / Across the room) — it is the noise gate's threshold, it
 decides whose speech counts as a voice. «Close» cuts a quiet voice from the other end
 of the room (a whisper by the screen is gone too), «Across the room» lets even a quiet
 one pass. The real range lives in the microphone itself: the input slider in the sound
@@ -322,9 +326,10 @@ only the five freshest stay on the shelf) and the heard phrases into `recogn.txt
 quiet thread: the mic button and the wake word go on as usual. Mind that `/tmp` lives in
 memory on many systems, and five 10 MB files are ~50 MB.
 
-The sound is cleaned before vosk: a high-pass (hum goes), a noise gate whose floor follows
+The sound is cleaned before the models: a high-pass (hum goes), a noise gate whose floor follows
 the room (his fans and hiss die), and a voice detector (`webrtcvad`, installed by
-`stt_setup.sh`, works without too) that hears where a phrase really ends. On PipeWire or
+`stt_setup.sh`, works without too) that hears where a phrase really ends — the tape of it goes
+to whisper whole. On PipeWire or
 PulseAudio there is also webrtc echo cancellation (best effort, `pactl` loads
 `module-echo-cancel` over the chosen mic): her own voice played into the echo-cancel sink
 is subtracted from what her ears hear, so she never hears herself.

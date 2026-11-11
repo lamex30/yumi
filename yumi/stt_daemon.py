@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""Her ears: a local Vosk over the microphone as a tiny HTTP server (no GTK, no Yumi imports).
+"""Her ears: local Vosk and faster-whisper over the microphone as a tiny HTTP server.
 
 Yumi's app side (yumi/ears.py) starts this with a Python that has vosk (see
 tools/stt_setup.sh) and asks it to listen: /listen?secs=8&lang=ru. The small models
 (~45 MB each, Russian and English) are downloaded on the first use into
 ~/.local/share/yumi/stt; after that a phrase takes a moment.
+
+The phrase itself is recognized by faster-whisper (a small whisper, int8 on the
+CPU, also fully local): vosk stays only as the ear that notices the phrase has
+ended, and whisper reads the tape and writes the words — it hears far better,
+even the small model. The first listen downloads the whisper model (~460 MB)
+into ~/.local/share/yumi/stt/whisper; when whisper is not there or fails, the
+vosk's own words are used instead.
 
 The microphone is read with whatever the desktop has: parecord, pw-record or arecord.
 A particular microphone can be named (mic=... from the settings; /mics lists the ones
@@ -14,19 +21,18 @@ secs pass, or another click asks /stop. /wake is the same microphone held on lon
 vosk waits for the wake word (юми), and the moment it passes by the app gets the
 phrase that follows — nothing is recognized twice.
 
-Before vosk the sound is cleaned here: a one-pole high-pass (hum and rumble go),
-a noise gate with a floor that follows the quiet (steady hiss and fan die), and a
-webrtc voice detector (webrtcvad, best effort) that finds where speech really ends,
-so vosk does not guess the end from its own timing.
+Before the sound goes anywhere it is cleaned here: a one-pole high-pass (hum and
+rumble go), a noise gate with a floor that follows the quiet (steady hiss and fan
+die), and a webrtc voice detector (webrtcvad, best effort) that finds where speech
+really ends, so the models do not guess the end from their own timing.
 
 On top of the microphone there is a webrtc echo-cancel source (module-echo-cancel
 over pactl, best effort): the chosen mic feeds it, the ears record from the clean
 end, and her own sounds played into the echo-cancel sink are subtracted — she never
 hears herself. When it cannot be set up, the ears fall back to the plain mic.
 
-Two sizes per language: the small one (~45 MB) is quick and always on, the big one
-(~1.8 GB here and here) hears at least twice as well; the app asks for it with
-size=big in the settings (Hearing accuracy / her Hearing accuracy).
+Two sizes per language: the small one is quick and always on, the big one hears
+better still; the app asks for it with size=big in the settings (Hearing accuracy).
 """
 import argparse
 import atexit
@@ -55,7 +61,9 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
     'en': {'small': ('vosk-model-small-en-us-0.15', 'vosk-model-small-en-us-0.15'),
            'big': ('vosk-model-en-us-0.22', 'vosk-model-en-us-0.22')},
 }
-VERSION = 8                             # bumped when the protocol changes: stale twins are restarted
+WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
+                'big': 'large-v3'}
+VERSION = 9                             # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 VAD_TAIL = 700                          # ms of quiet after speech: the phrase is really over
 TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
@@ -371,7 +379,6 @@ HEARSAY = {'юми': ['юме', 'юмей', 'юный', 'юлий', 'юма', '�
            'yumi': ['yumi', 'yume', 'youmi', 'юми', 'юме', 'юный']}
 HEARSAY_FILE = HOME / 'hearsay.json'
 
-
 def hearsay_load(word):
     """what the ears remember writing for this wake word: the known hear-say above
     plus everything learned from the live sessions (~/.local/share/yumi/stt/hearsay.json)"""
@@ -422,6 +429,34 @@ def near(a, b):
     return prev[-1] <= lim
 
 
+class Utterance:
+    """the phrase on tape, kept for whisper to read: a little of the sound before
+    the first voice (so the first word does not lose its head) and then the whole
+    phrase with the quiet inside it; the room hiss before and after stays out"""
+
+    LEAD = 6400                     # bytes: ~0.2 s of pre-speech sound on tape
+
+    def __init__(self):
+        self.lead = bytearray()
+        self.buf = bytearray()
+
+    def feed(self, chunk, voiced):
+        """one cleaned chunk of s16 mono; True while a voice has ever passed by"""
+        if voiced or self.buf:
+            self.buf += chunk       # once the voice began, the inner quiet is a phrase's own
+        else:
+            self.lead += chunk
+            if len(self.lead) > self.LEAD:
+                del self.lead[:-self.LEAD]
+        return self.buf
+
+    def take(self):
+        """the phrase's bytes of s16 mono (lead included), or b'' when no voice passed"""
+        out = bytes(self.lead + self.buf) if self.buf else b''
+        self.lead, self.buf = bytearray(), bytearray()
+        return out
+
+
 def wake_at(text, spellings):
     """what came after the wake word and the spelling the ears wrote it with, or (None, None);
     whole words only, anywhere in the first words of the phrase («юми» or behind a filler
@@ -442,11 +477,13 @@ class Ears:
 
     def __init__(self):
         self.models = {}
+        self.wsp = {}                   # faster-whisper models, one per (lang, size)
         self.error = None
         self.busy = False
         self.abort = False
         self.kind = None                # what the lock holds now: 'listen' or 'wake'
-        self.lock = threading.Lock()
+        # RLock: a listen holds it and still reads the whisper loader within itself
+        self.lock = threading.RLock()
         self.tap = Tap(self)
 
     def model(self, lang, size='small'):
@@ -466,6 +503,38 @@ class Ears:
                 del self.models[other]      # a big model is many: one per language at a time
             self.models[key] = m
             return m
+
+    def whisper(self, lang, size='small'):
+        """the faster-whisper model for a language, downloaded and loaded on the first
+        need; one model is kept per language — a size switch lets the old one go"""
+        from faster_whisper import WhisperModel
+        with self.lock:
+            name = WHISPER_SIZE.get(size if size in WHISPER_SIZE else 'small')
+            key = (lang, name)
+            if key in self.wsp:
+                return self.wsp[key]
+            path = HOME / 'whisper'      # the models live with the rest of the ears
+            path.mkdir(parents=True, exist_ok=True)
+            log(f'whisper: loading {name} ({lang})...')
+            m = WhisperModel(name, device='cpu', compute_type='int8',
+                             download_root=str(path))
+            for other in [k for k in self.wsp if k[0] == lang and k != key]:
+                del self.wsp[other]
+            self.wsp[key] = m
+            log(f'whisper: {name} is ready')
+            return m
+
+    def transcribe(self, pcm, lang, size='small'):
+        """bytes of s16 mono RATE through faster-whisper: the words it hears ('' for
+        silence). vad_filter keeps the quiet out (whisper dreams on silence), and the
+        chain is not carried on (so one dream does not write the next)"""
+        import numpy as np
+        model = self.whisper(lang, size)
+        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        segments, _info = model.transcribe(
+            audio, language=lang or None, beam_size=1, vad_filter=True,
+            condition_on_previous_text=False)
+        return ' '.join(s.text for s in segments).strip()
 
     def listen(self, lang, secs, quiet, size='small', mic=None, ear=None):
         """hear one phrase: the recognized text ('' when there was nothing)"""
@@ -493,6 +562,7 @@ class Ears:
                 rec = KaldiRecognizer(model, RATE)
                 rec.SetWords(False)
                 det = Detector()
+                utt = Utterance()           # the phrase on tape, for whisper to read
                 gmin, gk = ear_gate(ear)
                 st = {'hp': 0.0, 'floor': None, 'gate_min': gmin, 'gate_k': gk}
                 t0 = time.monotonic()
@@ -523,14 +593,27 @@ class Ears:
                     chunk = hp_pass(chunk, st)            # hum and rumble go
                     voiced = det.feed(chunk)              # the voice detector follows the frames
                     chunk = gate_noise(chunk, st, voiced) # the hiss dies, speech is never touched
+                    utt.feed(chunk, voiced)               # the phrase collects on the tape
                     if rec.AcceptWaveform(chunk):         # vosk heard the phrase end
                         break
-                    if det.speech_ms and det.silence_ms >= VAD_TAIL:
+                    # a click or a knock passes the detector for a moment: a breath of
+                    # speech (under 0.4 s) is not yet a phrase, so the quiet after it
+                    # does not end the listen — the real words may still be coming
+                    if det.speech_ms >= 400 and det.silence_ms >= VAD_TAIL:
                         break                             # the voice died down: the phrase is over
                     if time.monotonic() - t0 > quiet and not json.loads(
                             rec.PartialResult() or '{}').get('partial'):
                         break                             # nothing but quiet: do not wait
-                return ' '.join(json.loads(rec.FinalResult() or '{}').get('text', '').split())
+                said = utt.take()
+                text = ''
+                if len(said) >= RATE:         # under a second is a breath, not a phrase
+                    try:
+                        text = self.transcribe(said, lang, size)   # whisper reads the tape
+                    except Exception as e:    # noqa: BLE001 - whisper is best effort
+                        log('whisper failed, vosk answers instead: ' + str(e)[-120:])
+                if not text:                  # whisper silent or away: vosk's words stand in
+                    text = ' '.join(json.loads(rec.FinalResult() or '{}').get('text', '').split())
+                return text
             finally:
                 try:
                     proc.terminate()
