@@ -387,8 +387,10 @@ class Brain(Extras):
             return False
         return self.say_text(line[0], face=line[1])
 
-    def say_text(self, text, face=None, voice=True):
-        """her own words (a chat reply too) in the usual bubble, typed out and voiced"""
+    def say_text(self, text, face=None, voice=True, spoken=None):
+        """her own words (a chat reply too) in the usual bubble, typed out and voiced;
+        `spoken` is what the real voice says when the written words are too compact
+        (the weather signs, «+5°C», that a voice reads poorly)"""
         text = ' '.join(str(text).split())
         if not text:
             return False
@@ -402,7 +404,8 @@ class Brain(Extras):
         if voice and vol and not self.sleeping:
             blips = [t for t, ch in zip(times, text) if ch.isalnum()]
             self.requests.append(('voice', blips, self.bubble_n,
-                                  1 if text.rstrip().endswith('?') else 0, vol / 100.0, text))
+                                  1 if text.rstrip().endswith('?') else 0, vol / 100.0,
+                                  spoken if spoken is not None else text))
         if face:
             self.set_face(face, dur)
         if self.mode == 'docked' and not self.out and not self.sleeping:
@@ -496,6 +499,7 @@ class Brain(Extras):
                 'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts'],
                 'stt_size': ['small', 'big'],
                 'stt_mic': [None] + [m['name'] for m in self.mics],
+                'ears_range': ['near', 'mid', 'far'],
                 'chat_provider': ['ollama', 'polza.ai'],
                 'chat_model': self.chat_models or [self.settings.get('chat_model')]}
 
@@ -513,6 +517,8 @@ class Brain(Extras):
             return t('v_' + str(val)) if f'v_{val}' in UI['en'] else str(val)
         if arg == 'stt_size':
             return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
+        if arg == 'ears_range':
+            return t('r_' + str(val)) if f'r_{val}' in UI['en'] else str(val)
         if arg == 'stt_mic':
             if not val:
                 return t('mic_auto')
@@ -872,7 +878,8 @@ class Brain(Extras):
             if not self.mics and 'stt_mic' not in self.unavailable:
                 self.requests.append(('mics',))
             rows = [('set', 'wake_ears', t('wake_ears')), ('set', 'stt_size', t('stt_size')),
-                    ('set', 'stt_mic', t('stt_mic')), ('set', 'tap_ears', t('tap_ears'))]
+                    ('set', 'stt_mic', t('stt_mic')), ('set', 'ears_range', t('ears_range')),
+                    ('set', 'tap_ears', t('tap_ears'))]
             if self.mics:
                 rows.append(('mic_refresh', None, t('mic_refresh')))
             rows.append(('menu', 'settings', t('back')))
@@ -1023,6 +1030,8 @@ class Brain(Extras):
                 self.requests.append(('wake_set', s[arg]))
             if arg == 'tap_ears':
                 self.requests.append(('tap_set', s[arg]))
+            if arg == 'ears_range':
+                self.requests.append(('tap_set', s.get('tap_ears')))   # the diary re-ears too
             if arg in ('voice_vol', 'voice_kind') and s[arg]:
                 self.say_sample()
             if arg == 'chat_provider':
@@ -1139,8 +1148,11 @@ class Brain(Extras):
             return
         where = chat.weather_question(text)
         if where is not None:              # the weather is worth one little peek outside
+            if not where:                  # no place named: her city from the settings,
+                where = str(self.settings.get('weather_city') or '').strip()   # or her own window
             self.thinking = True
-            self.requests.append(('weather_ask', where))
+            self.requests.append(('weather_ask',
+                                  {'where': where, 'when': chat.weather_when(text)}))
             return
         self.chat_history.append({'role': 'user', 'content': text})
         del self.chat_history[:-10]     # she remembers her last five turns
@@ -1148,10 +1160,12 @@ class Brain(Extras):
         self.requests.append(('chat_ask', list(self.chat_history)))
 
     def said_weather(self, report):
-        """the clouds answered through wttr.in (report is '' when the net was away)"""
+        """the clouds answered through wttr.in / Open-Meteo (report is '' when the net was away);
+        the bubble keeps «+5°C», the ears hear «плюс 5 градусов»"""
         self.thinking = False
         if report:
-            self.say_text(report)
+            spoken = chat.weather_speak(report, self.settings.get('speech_lang', 'en'))
+            self.say_text(report, spoken=spoken)
         else:
             self.say('weather_fail')
 

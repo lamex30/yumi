@@ -49,7 +49,12 @@ English · [Русский](README.ru.md)
   out loud — see "She listens and answers" below. She also wakes to her name: say «Yumi» and
   she is listening at once. Ask «what time is it» or «what's the weather» and she answers
   herself: the clock is always at hand, and the weather is one small peek at [wttr.in](https://wttr.in)
-  (with a place name she looks there instead of out of her own window).
+  (with a place name she looks there instead of out of her own window). The weather comes
+  for today («юми погода в ялте»), for tomorrow («юми погода на завтра в ялте») and for
+  the whole week («юми погода на неделю»); tomorrow and the week she peeks at
+  [Open-Meteo](https://open-meteo.com). Her own city can be written into
+  `~/.config/yumi/settings.json` as `"weather_city": "Yalta"` — then «юми погода» looks
+  there (the default is «Anapa», while `""` looks wherever the computer stands).
 - English and Russian, picked from your system language.
 
 <img src="docs/colors.png" alt="Yumi on teal, rose, amber and blue wallpapers, recolored to each" width="100%">
@@ -302,14 +307,20 @@ one you pick: **Settings → Her ears → Microphone** — the list comes from y
 «auto» keeping the desktop's own choice. If she hears you wrong, there is a sharper ear:
 **Settings → Her ears → Hearing accuracy → Sharp** — a big model (~1.8 GB, downloaded once
 on the first listen) understands speech noticeably better than the small one; the price
-is memory and a longer first listen. The answer model is picked in **Settings → Her mind →
-Answer model** (it cycles through the installed ones); where Ollama lives lives in
-`~/.config/yumi/settings.json` as `ollama_url`.
+is memory and a longer first listen. How far the ears reach: **Settings → Her ears →
+Ear range** (Close / Normal / Across the room) — it is the noise gate's threshold, it
+decides whose speech counts as a voice. «Close» cuts a quiet voice from the other end
+of the room (a whisper by the screen is gone too), «Across the room» lets even a quiet
+one pass. The real range lives in the microphone itself: the input slider in the sound
+settings and the mic's directivity matter more than any gate. The answer model is picked
+in **Settings → Her mind → Answer model** (it cycles through the installed ones); where
+Ollama lives lives in `~/.config/yumi/settings.json` as `ollama_url`.
 **Settings → Her ears → Ears diary** — while it is on, she writes everything she hears into
-`/tmp/yumi`: the sound into `ears-*.wav` files (a fresh one every ten minutes) and the heard
-phrases into `recogn.txt`, one «time - phrase» per line. It runs in its own quiet thread:
-the mic button and the wake word go on as usual. Mind that `/tmp` lives in memory on many
-systems, and an hour of sound is ~115 MB.
+`/tmp/yumi`: the sound into `ears-*.wav` files (no bigger than 10 MB and ten minutes each,
+only the five freshest stay on the shelf) and the heard phrases into `recogn.txt`, one
+«time - phrase» per line (the freshest thousand, the old ones fade). It runs in its own
+quiet thread: the mic button and the wake word go on as usual. Mind that `/tmp` lives in
+memory on many systems, and five 10 MB files are ~50 MB.
 
 The sound is cleaned before vosk: a high-pass (hum goes), a noise gate whose floor follows
 the room (his fans and hiss die), and a voice detector (`webrtcvad`, installed by

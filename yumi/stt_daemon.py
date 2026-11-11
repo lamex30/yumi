@@ -55,11 +55,14 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
     'en': {'small': ('vosk-model-small-en-us-0.15', 'vosk-model-small-en-us-0.15'),
            'big': ('vosk-model-en-us-0.22', 'vosk-model-en-us-0.22')},
 }
-VERSION = 7                             # bumped when the protocol changes: stale twins are restarted
+VERSION = 8                             # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 VAD_TAIL = 700                          # ms of quiet after speech: the phrase is really over
 TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
 TAP_SEGMENT = 600.0                     # s of tape in one wav, then the next file starts
+TAP_MAX_BYTES = 10 * 1024 * 1024        # a segment is no bigger than this: the diary is small
+TAP_KEEP = 5                            # only the newest segments stay: the diary is a ring
+TAP_LINES = 1000                        # recogn.txt holds the freshest this many lines
 
 ECHO_SOURCE = 'yumi_ec'                 # the echo-cancel source the ears record through
 ECHO_SINK = 'yumi_ec_sink'              # where her own sounds go, so they can be subtracted
@@ -164,6 +167,16 @@ def echo_ready(mic=None):
 HP_A = 0.9607                    # one-pole high-pass ~100 Hz: hum and rumble go, speech stays
 GATE_MIN = 260                   # s16: quieter than this is the room itself, not a voice
 DAMP_DEEP, DAMP_SOFT = 0.12, 0.35   # how much of the sound passes the closed and half-open gate
+EAR_RANGE = {                    # how far the ears reach: the gate decides whose speech counts —
+    'near': (800, 6.0),          # an arm's length: a murmur from the far corner dies
+    'mid':  (GATE_MIN, 3.0),     # the usual ear, the one she always had
+    'far':  (120, 2.2),          # across the room: even a quiet voice passes the gate
+}
+
+
+def ear_gate(ear):
+    """(gate floor minimum, floor factor) the noise gate listens with"""
+    return EAR_RANGE.get(ear, EAR_RANGE['mid'])
 
 
 def hp_pass(chunk, st):
@@ -208,7 +221,7 @@ def gate_noise(chunk, st, voiced):
     else:
         floor += (rms - floor) * 0.05   # it creeps up slowly across the quiet
     st['floor'] = floor
-    thr = max(GATE_MIN, floor * 3.0)
+    thr = max(st.get('gate_min', GATE_MIN), floor * st.get('gate_k', 3.0))
     if rms < thr:
         damp = DAMP_DEEP if rms < thr * 0.5 else DAMP_SOFT
         for i in range(n):
@@ -416,7 +429,7 @@ class Ears:
             self.models[key] = m
             return m
 
-    def listen(self, lang, secs, quiet, size='small', mic=None):
+    def listen(self, lang, secs, quiet, size='small', mic=None, ear=None):
         """hear one phrase: the recognized text ('' when there was nothing)"""
         from vosk import KaldiRecognizer
         import selectors
@@ -442,7 +455,8 @@ class Ears:
                 rec = KaldiRecognizer(model, RATE)
                 rec.SetWords(False)
                 det = Detector()
-                st = {'hp': 0.0, 'floor': None}     # the cleaner's memory for this listen
+                gmin, gk = ear_gate(ear)
+                st = {'hp': 0.0, 'floor': None, 'gate_min': gmin, 'gate_k': gk}
                 t0 = time.monotonic()
                 heard = False               # at least one byte of sound has arrived
                 while time.monotonic() - t0 < secs:
@@ -499,7 +513,7 @@ class Ears:
                         pass
                 self.busy = False
 
-    def wake(self, lang, word, secs, size='small', mic=None):
+    def wake(self, lang, word, secs, size='small', mic=None, ear=None):
         """wait for the wake word, keeping the microphone on:
         {'woke': True, 'text': the phrase after it} — the name was heard, the rest came
         {'woke': True, 'text': ''} — the name alone, a phrase may still come
@@ -530,7 +544,8 @@ class Ears:
                 rec = KaldiRecognizer(model, RATE)
                 rec.SetWords(False)
                 det = Detector()
-                st = {'hp': 0.0, 'floor': None}     # the cleaner's memory for this wake
+                gmin, gk = ear_gate(ear)
+                st = {'hp': 0.0, 'floor': None, 'gate_min': gmin, 'gate_k': gk}     # the cleaner's memory
                 t0 = time.monotonic()
                 heard = False               # at least one byte of sound has arrived
                 woken = False               # the wake word has passed by already
@@ -638,10 +653,11 @@ class Tap:
         self.gen = 0                    # bumped on every change: the running loop gives up
         self.want = {'mic': None, 'lang': 'ru', 'size': 'small'}
 
-    def set(self, on, mic=None, lang='ru', size='small'):
+    def set(self, on, mic=None, lang='ru', size='small', ear=None):
         """the app's wish: the diary on or off (a new mic or model restarts the tape)"""
         want = {'mic': mic, 'lang': lang,
-                'size': size if size in ('small', 'big') else 'small'}
+                'size': size if size in ('small', 'big') else 'small',
+                'ear': ear if ear in EAR_RANGE else 'mid'}
         with self.lock:
             if bool(on) and self.on and self.want == want:
                 return self.status()    # already taping exactly this: nothing to restart
@@ -693,6 +709,14 @@ class Tap:
                 log(f'tap: {name} stopped on its own, again in 2 s')
                 time.sleep(2)
 
+    def _prune(self, keep=TAP_KEEP):
+        """the diary is a ring: only the newest segments stay on the shelf"""
+        try:
+            for old in sorted(TAP_DIR.glob('ears-*.wav'))[:-keep]:
+                old.unlink()
+        except OSError:
+            pass
+
     def _follow(self, proc, mygen, name):
         """the tape: the raw sound goes into the wav files, the cleaned sound into vosk"""
         from vosk import KaldiRecognizer
@@ -704,20 +728,36 @@ class Tap:
         rec = KaldiRecognizer(model, RATE)
         rec.SetWords(False)
         det = Detector()
-        st = {'hp': 0.0, 'floor': None}     # the cleaner's memory for this tape
-        seg = {'wav': None, 't0': 0.0}
+        gmin, gk = ear_gate(self.want.get('ear'))
+        st = {'hp': 0.0, 'floor': None, 'gate_min': gmin, 'gate_k': gk}    # the cleaner's memory
+        seg = {'wav': None, 't0': 0.0, 'bytes': 0}
+        lines = 0                          # how many lines recogn.txt holds right now
+        try:
+            with open(TAP_DIR / 'recogn.txt', encoding='utf-8') as f:
+                lines = sum(1 for _ in f)
+        except OSError:
+            pass
 
         def say(text):
-            if text:
-                try:
-                    with open(TAP_DIR / 'recogn.txt', 'a', encoding='utf-8') as f:
-                        f.write(tap_line(text) + '\n')
-                except OSError:
-                    pass
+            """one phrase into recogn.txt, «time - phrase»; only the freshest
+            TAP_LINES lines stay: once over, the file is rewritten without the old"""
+            nonlocal lines
+            if not text:
+                return
+            try:
+                with open(TAP_DIR / 'recogn.txt', 'a', encoding='utf-8') as f:
+                    f.write(tap_line(text) + '\n')
+                lines += 1
+                if lines > TAP_LINES:
+                    lines = tap_roll(TAP_DIR / 'recogn.txt', lines)
+            except OSError:
+                pass
 
         def put(chunk):
-            """the sound into the segment file: a fresh wav every TAP_SEGMENT seconds"""
-            if not seg['wav'] or time.monotonic() - seg['t0'] > TAP_SEGMENT:
+            """the sound into the segment file: a fresh wav every TAP_SEGMENT seconds
+            or TAP_MAX_BYTES, whichever comes first; old segments go off the shelf"""
+            if (not seg['wav'] or seg['bytes'] >= TAP_MAX_BYTES
+                    or time.monotonic() - seg['t0'] > TAP_SEGMENT):
                 if seg['wav']:
                     seg['wav'].close()
                 seg['wav'] = wave.open(str(TAP_DIR / time.strftime('ears-%Y%m%d-%H%M%S.wav')),
@@ -725,8 +765,10 @@ class Tap:
                 seg['wav'].setnchannels(1)
                 seg['wav'].setsampwidth(2)
                 seg['wav'].setframerate(RATE)
-                seg['t0'] = time.monotonic()
+                seg['t0'], seg['bytes'] = time.monotonic(), 0
+                self._prune()
             seg['wav'].writeframes(chunk)
+            seg['bytes'] += len(chunk)
 
         try:
             while self.on and self.gen == mygen:
@@ -797,8 +839,9 @@ class Handler(BaseHTTPRequestHandler):
                 mic = (q.get('mic') or [None])[0] or None
                 lang = (q.get('lang') or ['ru'])[0]
                 size = (q.get('size') or ['small'])[0]
+                ear = (q.get('ear') or ['mid'])[0]
                 try:
-                    st = self.ears.tap.set(on, mic=mic, lang=lang, size=size)
+                    st = self.ears.tap.set(on, mic=mic, lang=lang, size=size, ear=ear)
                 except Exception as e:      # noqa: BLE001 - any failure is reported over HTTP
                     self.ears.error = str(e)
                     return self._json({'error': str(e)}, 500)
@@ -819,8 +862,9 @@ class Handler(BaseHTTPRequestHandler):
             word = ' '.join((q.get('word') or ['юми'])[0].split()) or 'юми'
             size = (q.get('size') or ['small'])[0]
             mic = (q.get('mic') or [None])[0] or None
+            ear = (q.get('ear') or ['mid'])[0]
             try:
-                res = self.ears.wake(lang, word, secs, size=size, mic=mic)
+                res = self.ears.wake(lang, word, secs, size=size, mic=mic, ear=ear)
             except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
                 self.ears.error = str(e)
                 return self._json({'error': str(e)}, 500)
@@ -838,8 +882,10 @@ class Handler(BaseHTTPRequestHandler):
         lang = (q.get('lang') or ['ru'])[0]
         size = (q.get('size') or ['small'])[0]
         mic = (q.get('mic') or [None])[0] or None
+        ear = (q.get('ear') or ['mid'])[0]
         try:
-            text = self.ears.listen(lang, secs, quiet=min(6.0, secs), size=size, mic=mic)
+            text = self.ears.listen(lang, secs, quiet=min(6.0, secs), size=size, mic=mic,
+                                    ear=ear)
         except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
             self.ears.error = str(e)
             return self._json({'error': str(e)}, 500)
@@ -867,6 +913,19 @@ def tap_line(text, now=None):
     return f'{stamp} - {text}'
 
 
+def tap_roll(path, lines):
+    """recogn.txt is rewritten without its oldest lines, the freshest TAP_LINES stay;
+    the line count after the roll comes back (the old one when the file would not move)"""
+    try:
+        with open(path, encoding='utf-8') as f:
+            keep = f.readlines()[-TAP_LINES:]
+        with open(path, 'w', encoding='utf-8') as f:
+            f.writelines(keep)
+        return len(keep)
+    except OSError:
+        return lines
+
+
 def save_tap_state(on, want=None):
     """the diary's wish across the daemon's restarts: it resumes tapping by itself"""
     try:
@@ -887,7 +946,8 @@ def load_tap_state():
         return None
     w = d.get('want') or {}
     return {'mic': w.get('mic'), 'lang': w.get('lang') or 'ru',
-            'size': w.get('size') if w.get('size') in ('small', 'big') else 'small'}
+            'size': w.get('size') if w.get('size') in ('small', 'big') else 'small',
+            'ear': w.get('ear') if w.get('ear') in EAR_RANGE else 'mid'}
 
 
 def ping(port, timeout=0.5):

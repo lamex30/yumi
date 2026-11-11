@@ -863,7 +863,8 @@ class App(Gtk.Application):
             self.hush()                     # still sounding after the wait: she gives way to you
             text = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs,
                                size=self.settings.get('stt_size', 'small'),
-                               mic=self.settings.get('stt_mic'))
+                               mic=self.settings.get('stt_mic'),
+                               ear=self.settings.get('ears_range', 'mid'))
             GLib.idle_add(lambda: self.ev(lambda b: b.heard(text)) and False)
         threading.Thread(target=work, daemon=True).start()
 
@@ -893,7 +894,8 @@ class App(Gtk.Application):
                 res = ears.wake(lang=self.settings.get('speech_lang', 'en'),
                                 word=self.settings.get('wake_word', 'юми'), secs=60,
                                 size=self.settings.get('stt_size', 'small'),
-                                mic=self.settings.get('stt_mic'))
+                                mic=self.settings.get('stt_mic'),
+                                ear=self.settings.get('ears_range', 'mid'))
                 if not self.wake_on or not res or not res.get('woke'):
                     continue            # quiet, called off or the ears are away
                 tail = res.get('text') or ''
@@ -911,7 +913,8 @@ class App(Gtk.Application):
         def work():
             ears.tap(bool(on), lang=self.settings.get('speech_lang', 'en'),
                      size=self.settings.get('stt_size', 'small'),
-                     mic=self.settings.get('stt_mic'))
+                     mic=self.settings.get('stt_mic'),
+                     ear=self.settings.get('ears_range', 'mid'))
         threading.Thread(target=work, daemon=True).start()
 
     def chat_ask(self, history):
@@ -922,11 +925,11 @@ class App(Gtk.Application):
             GLib.idle_add(lambda: self.ev(lambda b: b.replied(reply)) and False)
         threading.Thread(target=work, daemon=True).start()
 
-    def weather_ask(self, where):
+    def weather_ask(self, ask):
         """the weather question is away to the clouds; the peek comes back into her bubble"""
         def work():
             lang = self.settings.get('speech_lang', 'en')
-            reply = chat.weather_report(where, lang)
+            reply = chat.weather_report(ask.get('where', ''), lang, ask.get('when', 'today'))
             GLib.idle_add(lambda: self.ev(lambda b: b.said_weather(reply)) and False)
         threading.Thread(target=work, daemon=True).start()
 

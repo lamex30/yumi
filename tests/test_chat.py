@@ -35,6 +35,48 @@ assert chat.weather_question("what's the weather in San Francisco tonight?") == 
 assert chat.weather_question('is it raining at your place') == 'your place'
 assert chat.weather_question('покажи погоду в Санкт-Петербурге') == 'санкт-петербурге'
 
+# the forecast slice: today, tomorrow or the whole week
+assert chat.weather_when('какая погода в Москве?') == 'today'
+assert chat.weather_when('юми погода на завтра в ялте') == 'tomorrow'
+assert chat.weather_when('погода завтра') == 'tomorrow'
+assert chat.weather_when('погода на неделю') == 'week'
+assert chat.weather_when('what is the weather this week in London') == 'week'
+assert chat.weather_when('is it raining at your place') == 'today'
+
+# the place survives the forecast words
+assert chat.weather_question('покажи погоду в Санкт-Петербурге на завтра') == 'санкт-петербурге'
+assert chat.weather_question('погода в ялте на неделю') == 'ялте'
+assert chat.weather_question('погода на неделю в Ялте') == 'ялте'
+assert chat.weather_question('погода на завтра') == ''
+
+# the sky in words, for the codes Open-Meteo sends back
+assert chat.wmo_desc(0, 'ru') == 'ясно' and chat.wmo_desc(3, 'en') == 'overcast', chat.wmo_desc(3)
+
+# the lines she says about tomorrow and the week (no net needed: pure formatting)
+assert chat._fmt_tomorrow('Ялта', {'code': 3, 'min': 4.2, 'max': 9.7}, 'ru') == \
+    'Завтра, Ялта: пасмурно, от +4 до +10°C'
+assert chat._fmt_tomorrow('Yalta', {'code': 0, 'min': -3.4, 'max': 2.1}, 'en') == \
+    'Tomorrow, Yalta: clear, -3 to +2 °C'
+assert chat._fmt_week('Ялта', [{'date': '2026-11-11', 'min': 4, 'max': 9},
+                               {'date': '2026-11-12', 'min': 6, 'max': 11}], 'ru') == \
+    'Ялта, на неделю: ср +4/+9°, чт +6/+11°'
+
+# the signs and the degrees become words for her ears (the bubble keeps the signs)
+assert chat.weather_speak('+5°C, Облачно', 'ru') == 'плюс 5 градусов, Облачно'
+assert chat.weather_speak('Ялта: -3°C', 'ru') == 'Ялта: минус 3 градуса'
+assert chat.weather_speak('+1°C', 'ru') == 'плюс 1 градус'
+assert chat.weather_speak('+2°C', 'ru') == 'плюс 2 градуса'
+assert chat.weather_speak('+21°C', 'ru') == 'плюс 21 градус'
+assert chat.weather_speak('+11°C', 'ru') == 'плюс 11 градусов'
+assert chat.weather_speak('Ялта, на неделю: ср +8/+14°, чт -3/-1°', 'ru') == \
+    'Ялта, на неделю: ср от плюс 8 до плюс 14 градусов, чт от минус 3 до минус 1 градус'
+assert chat.weather_speak('Yalta: +5°C, Light rain', 'en') == 'Yalta: 5 degrees, Light rain'
+assert chat.weather_speak('Yalta: -3°C', 'en') == 'Yalta: minus 3 degrees'
+assert chat.weather_speak('Yalta, this week: Wed +8/+14°', 'en') == \
+    'Yalta, this week: Wed 8 to 14 degrees'
+assert chat.weather_speak('Завтра, Ялта: пасмурно, от +4 до +10°C', 'ru') == \
+    'Завтра, Ялта: пасмурно, от плюс 4 до плюс 10 градусов'
+
 # her lines format cleanly when the clock or the window answers
 text, _face = phrases.Speech({'speech_lang': 'ru'}).line('chat_time', time='14:32')
 assert '14:32' in text and '{' not in text, text

@@ -113,7 +113,7 @@ def mics():
     return data.get('mics') if isinstance(data.get('mics'), list) else []
 
 
-def listen(lang='ru', secs=7, size='small', mic=None):
+def listen(lang='ru', secs=7, size='small', mic=None, ear=None):
     """hear one phrase: the text, '' for silence, None when the ears are not set up"""
     info = _ensure()
     if not info:
@@ -121,6 +121,8 @@ def listen(lang='ru', secs=7, size='small', mic=None):
     q = {'lang': lang, 'secs': round(secs, 1), 'size': size}
     if mic:
         q['mic'] = mic
+    if ear:
+        q['ear'] = ear
     url = f"http://127.0.0.1:{info['port']}/listen?" + urllib.parse.urlencode(q)
     try:
         # the first listen may download the model (~45 MB), hence the generous timeout
@@ -131,7 +133,7 @@ def listen(lang='ru', secs=7, size='small', mic=None):
     return data.get('text') if isinstance(data.get('text'), str) else ''
 
 
-def wake(lang='ru', word='юми', secs=20, size='small', mic=None):
+def wake(lang='ru', word='юми', secs=20, size='small', mic=None, ear=None):
     """wait for the wake word (say «Юми» and she is all ears): a dict
     {'woke': bool, 'text': what came after the word, '' when it was said alone},
     or None when the ears cannot work at all. A manual listen takes the mic over."""
@@ -141,6 +143,8 @@ def wake(lang='ru', word='юми', secs=20, size='small', mic=None):
     q = {'lang': lang, 'word': word, 'secs': round(secs, 1), 'size': size}
     if mic:
         q['mic'] = mic
+    if ear:
+        q['ear'] = ear
     url = f"http://127.0.0.1:{info['port']}/wake?" + urllib.parse.urlencode(q)
     try:
         with urllib.request.urlopen(url, timeout=max(300, secs + 10)) as r:
@@ -150,7 +154,7 @@ def wake(lang='ru', word='юми', secs=20, size='small', mic=None):
     return {'woke': bool(data.get('woke')), 'text': str(data.get('text') or '')}
 
 
-def tap(on, lang='ru', size='small', mic=None):
+def tap(on, lang='ru', size='small', mic=None, ear=None):
     """the ears' diary: everything the microphone hears goes to /tmp/yumi — the sound
     into ears-*.wav and the heard words into recogn.txt («time - phrase»), in the
     daemon's own thread; True/False when the daemon answered, None when it is away"""
@@ -165,6 +169,10 @@ def tap(on, lang='ru', size='small', mic=None):
             pass
         return False
     q = {'on': 1 if on else 0, 'lang': lang, 'size': size}
+    if mic:
+        q['mic'] = mic
+    if ear:
+        q['ear'] = ear
     if mic:
         q['mic'] = mic
     url = f"http://127.0.0.1:{info['port']}/tap?" + urllib.parse.urlencode(q)
