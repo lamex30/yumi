@@ -266,6 +266,7 @@ class Brain(Extras):
         self.listening = False          # the mic button was pressed: she is waiting for a phrase
         self.thinking = False           # the question is away at Ollama
         self.chat_models = []           # installed Ollama models, for the settings row
+        self.mics = []                  # microphones her ears can hear, for the settings row
         self.radial = False             # the ring of round buttons around her
         self.radial_t = Spring(0)
         self.timer = None               # see timer_* below
@@ -494,6 +495,7 @@ class Brain(Extras):
                 'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names,
                 'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts'],
                 'stt_size': ['small', 'big'],
+                'stt_mic': [None] + [m['name'] for m in self.mics],
                 'chat_provider': ['ollama', 'polza.ai'],
                 'chat_model': self.chat_models or [self.settings.get('chat_model')]}
 
@@ -511,6 +513,13 @@ class Brain(Extras):
             return t('v_' + str(val)) if f'v_{val}' in UI['en'] else str(val)
         if arg == 'stt_size':
             return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
+        if arg == 'stt_mic':
+            if not val:
+                return t('mic_auto')
+            for m in self.mics:
+                if m.get('name') == val:
+                    return m.get('label') or val
+            return str(val)
         if arg == 'outfit':
             return t('o_' + str(val)) if f'o_{val}' in UI['en'] else str(val).title()
         if arg == 'chat_model':
@@ -837,8 +846,9 @@ class Brain(Extras):
         elif kind == 'settings':
             # the settings come in a few small groups
             rows = [('menu', 'set_her', t('cat_her')), ('menu', 'set_sound', t('cat_sound')),
-                    ('menu', 'set_look', t('cat_look')), ('menu', 'set_lang', t('cat_lang')),
-                    ('menu', 'set_chat', t('cat_chat')), ('ring_edit', None, t('cat_ring')),
+                    ('menu', 'set_ears', t('cat_ears')), ('menu', 'set_look', t('cat_look')),
+                    ('menu', 'set_lang', t('cat_lang')), ('menu', 'set_chat', t('cat_chat')),
+                    ('ring_edit', None, t('cat_ring')),
                     ('tour_again', None, t('tour_again')), ('restart', None, t('restart'))]
             home_x = self.clamp_x(self.W - EDGE_MARGIN * self.S - self.meta.bw * self.S / 2)
             if self.mode != 'docked' or abs(self.dock_x - home_x) > 4:
@@ -857,6 +867,15 @@ class Brain(Extras):
             if s.get('timer_sound'):
                 rows.append(('sound_reset', None, t('sound_reset')))
             rows += [('sound_test', None, t('sound_test')), ('menu', 'settings', t('back'))]
+        elif kind == 'set_ears':
+            # the mic list is fetched once: «Find the microphone» looks again after it changed
+            if not self.mics and 'stt_mic' not in self.unavailable:
+                self.requests.append(('mics',))
+            rows = [('set', 'wake_ears', t('wake_ears')), ('set', 'stt_size', t('stt_size')),
+                    ('set', 'stt_mic', t('stt_mic'))]
+            if self.mics:
+                rows.append(('mic_refresh', None, t('mic_refresh')))
+            rows.append(('menu', 'settings', t('back')))
         elif kind == 'set_look':
             s = self.settings
             rows = [('set', 'recolor', t('follow'))]
@@ -868,7 +887,6 @@ class Brain(Extras):
             rows.append(('menu', 'settings', t('back')))
         elif kind == 'set_lang':
             rows = [('set', 'ui_lang', t('ui_lang')), ('set', 'speech_lang', t('speech_lang')),
-                    ('set', 'wake_ears', t('wake_ears')), ('set', 'stt_size', t('stt_size')),
                     ('menu', 'settings', t('back'))]
         elif kind == 'set_chat':
             if not self.chat_models and 'chat_model' not in self.unavailable:
@@ -1022,6 +1040,9 @@ class Brain(Extras):
             self.requests.append(('sound', 'timer'))
         elif action == 'chat_refresh':
             self.requests.append(('chat_models',))
+        elif action == 'mic_refresh':
+            self.unavailable.discard('stt_mic')     # a new look, whatever the last one found
+            self.requests.append(('mics',))
         elif action == 'hue':
             self.settings['hue'] = arg
             self.requests.append(('save_settings',))
@@ -1172,6 +1193,19 @@ class Brain(Extras):
             self.unavailable.add('chat_model')
         if (self.menu or {}).get('kind') == 'set_chat':
             self.open_menu('set_chat', self.menu.get('data'))
+
+    def mics_loaded(self, mics):
+        """the microphones her ears can hear, for the settings row; empty when there is none"""
+        self.mics = [m for m in mics or [] if isinstance(m, dict) and m.get('name')]
+        if self.mics:
+            self.unavailable.discard('stt_mic')
+        else:
+            self.unavailable.add('stt_mic')
+            if self.settings.get('stt_mic'):    # the chosen one is gone: back to auto
+                self.settings['stt_mic'] = None
+                self.requests.append(('save_settings',))
+        if (self.menu or {}).get('kind') == 'set_ears':
+            self.open_menu('set_ears', self.menu.get('data'))
 
     def start_pipette(self):
         self.pipette = True
@@ -1544,7 +1578,7 @@ class Brain(Extras):
         if action == 'menu':
             return {'settings': 'gear', 'convert': 'convert', 'compress': 'compress',
                     'set_her': 'heart', 'set_sound': 'note', 'set_look': 'image',
-                    'set_lang': 'doc'}.get(arg, 'back')
+                    'set_ears': 'mic', 'set_lang': 'doc'}.get(arg, 'back')
         if action == 'job':
             return 'next'
         return self.ICON_FOR.get(action)

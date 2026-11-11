@@ -100,13 +100,28 @@ def _ensure():
     return None
 
 
-def listen(lang='ru', secs=7, size='small'):
+def mics():
+    """the microphones the ears can hear: [{'name': ..., 'label': ...}], [] when none or no ears"""
+    info = _ensure()
+    if not info:
+        return []
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{info['port']}/mics", timeout=5) as r:
+            data = json.loads(r.read().decode())
+    except (urllib.error.URLError, OSError, ValueError):
+        return []
+    return data.get('mics') if isinstance(data.get('mics'), list) else []
+
+
+def listen(lang='ru', secs=7, size='small', mic=None):
     """hear one phrase: the text, '' for silence, None when the ears are not set up"""
     info = _ensure()
     if not info:
         return None
-    url = f"http://127.0.0.1:{info['port']}/listen?" + urllib.parse.urlencode(
-        {'lang': lang, 'secs': round(secs, 1), 'size': size})
+    q = {'lang': lang, 'secs': round(secs, 1), 'size': size}
+    if mic:
+        q['mic'] = mic
+    url = f"http://127.0.0.1:{info['port']}/listen?" + urllib.parse.urlencode(q)
     try:
         # the first listen may download the model (~45 MB), hence the generous timeout
         with urllib.request.urlopen(url, timeout=max(300, secs + 10)) as r:
@@ -116,15 +131,17 @@ def listen(lang='ru', secs=7, size='small'):
     return data.get('text') if isinstance(data.get('text'), str) else ''
 
 
-def wake(lang='ru', word='юми', secs=20, size='small'):
+def wake(lang='ru', word='юми', secs=20, size='small', mic=None):
     """wait for the wake word (say «Юми» and she is all ears): a dict
     {'woke': bool, 'text': what came after the word, '' when it was said alone},
     or None when the ears cannot work at all. A manual listen takes the mic over."""
     info = _ensure()
     if not info:
         return None
-    url = f"http://127.0.0.1:{info['port']}/wake?" + urllib.parse.urlencode(
-        {'lang': lang, 'word': word, 'secs': round(secs, 1), 'size': size})
+    q = {'lang': lang, 'word': word, 'secs': round(secs, 1), 'size': size}
+    if mic:
+        q['mic'] = mic
+    url = f"http://127.0.0.1:{info['port']}/wake?" + urllib.parse.urlencode(q)
     try:
         with urllib.request.urlopen(url, timeout=max(300, secs + 10)) as r:
             data = json.loads(r.read().decode())

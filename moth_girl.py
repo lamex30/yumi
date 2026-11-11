@@ -741,6 +741,8 @@ class App(Gtk.Application):
                 self.hourly_ask(r[1])
             elif kind == 'chat_models':
                 self.fetch_chat_models()
+            elif kind == 'mics':
+                self.fetch_mics()
             elif kind == 'pick_sound':
                 self.pick_sound()
             elif kind == 'form_pick':
@@ -857,7 +859,8 @@ class App(Gtk.Application):
                 return
             self.hush()                     # still sounding after the wait: she gives way to you
             text = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs,
-                               size=self.settings.get('stt_size', 'small'))
+                               size=self.settings.get('stt_size', 'small'),
+                               mic=self.settings.get('stt_mic'))
             GLib.idle_add(lambda: self.ev(lambda b: b.heard(text)) and False)
         threading.Thread(target=work, daemon=True).start()
 
@@ -886,7 +889,8 @@ class App(Gtk.Application):
                     continue            # not while she sleeps, answers or listens on request
                 res = ears.wake(lang=self.settings.get('speech_lang', 'en'),
                                 word=self.settings.get('wake_word', 'юми'), secs=60,
-                                size=self.settings.get('stt_size', 'small'))
+                                size=self.settings.get('stt_size', 'small'),
+                                mic=self.settings.get('stt_mic'))
                 if not self.wake_on or not res or not res.get('woke'):
                     continue            # quiet, called off or the ears are away
                 tail = res.get('text') or ''
@@ -928,6 +932,13 @@ class App(Gtk.Application):
         def work():
             names = chat.models(self.settings)
             GLib.idle_add(lambda: self.ev(lambda b: b.chat_models_loaded(names)) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def fetch_mics(self):
+        """the microphones her ears can hear, for Settings → Her ears → Microphone"""
+        def work():
+            mics = ears.mics()
+            GLib.idle_add(lambda: self.ev(lambda b: b.mics_loaded(mics)) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def stop_timer_sound(self):

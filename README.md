@@ -44,7 +44,8 @@ English · [Русский](README.ru.md)
   (Settings → Sound → Voice: volume or off) — or she can speak out loud with a real offline
   voice ([Silero](https://github.com/snakers4/silero-models), see "Her real voice" below).
 - **She listens and answers.** The mic button on her ring: a local offline Vosk hears your
-  phrase, a local Ollama answers it (the model is picked in the settings), she says the answer
+  phrase (the microphone is picked in the settings), a local Ollama answers it (the model is
+  picked in the settings), she says the answer
   out loud — see "She listens and answers" below. She also wakes to her name: say «Yumi» and
   she is listening at once. Ask «what time is it» or «what's the weather» and she answers
   herself: the clock is always at hand, and the weather is one small peek at [wttr.in](https://wttr.in)
@@ -199,7 +200,8 @@ Add **Yumi** to the autostart apps in the system settings, then add a custom sho
 
 Settings come in groups: **Her** (stay out, system reactions, idle chatter, napping when you
 are away, health breaks every 20 / 30 / 45 / 60 min: water, eyes, stretch), **Sound** (her
-voice volume, the timer sound: her bell or any audio file), **Look** (wallpaper colors or a
+voice volume, the timer sound: her bell or any audio file), **Her ears** (microphone, hearing
+accuracy, wake on «Yumi»), **Look** (wallpaper colors or a
 color by hand, outfit, which screen she lives on) and **Language**. The first-run tour can be
 replayed from there too.
 
@@ -295,8 +297,10 @@ turns until you quit her. To set the ears up:
 ```
 
 vosk goes into its own small venv; the microphone is read with whatever the desktop has
-(`parecord`, `pw-record` or `arecord`). If she hears you wrong, there is a sharper ear:
-**Settings → Language → Hearing accuracy → Sharp** — a big model (~1.8 GB, downloaded once
+(`parecord`, `pw-record` or `arecord`). If several microphones are around, she listens to the
+one you pick: **Settings → Her ears → Microphone** — the list comes from your desktop, with
+«auto» keeping the desktop's own choice. If she hears you wrong, there is a sharper ear:
+**Settings → Her ears → Hearing accuracy → Sharp** — a big model (~1.8 GB, downloaded once
 on the first listen) understands speech noticeably better than the small one; the price
 is memory and a longer first listen. The answer model is picked in **Settings → Her mind →
 Answer model** (it cycles through the installed ones); where Ollama lives lives in
@@ -313,7 +317,7 @@ behind a filler word («well, Yumi») and a half-heard mush of syllables counts 
 catches it properly at first try more often than not. Said with a phrase
 («Yumi, what's the news today») she waits for the phrase to end and the question goes to her
 whole; a pause after the name — she asks "Yes? What is it?" right away and listens on. The idle
-waiting goes on while enabled (off in **Settings → Language → Wake on «Yumi»**) and it is not an
+waiting goes on while enabled (off in **Settings → Her ears → Wake on «Yumi»**) and it is not an
 eavesdrop: while she is in DND, talking an answer or listening on request, her name is ignored.
 The waiting hears nothing else: everything is computed on the spot, offline.
 

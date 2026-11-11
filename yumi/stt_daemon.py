@@ -7,6 +7,8 @@ tools/stt_setup.sh) and asks it to listen: /listen?secs=8&lang=ru. The small mod
 ~/.local/share/yumi/stt; after that a phrase takes a moment.
 
 The microphone is read with whatever the desktop has: parecord, pw-record or arecord.
+A particular microphone can be named (mic=... from the settings; /mics lists the ones
+the current recorder can hear).
 A click on her mic button starts a listen; vosk hears the end of the phrase, or
 secs pass, or another click asks /stop. /wake is the same microphone held on longer:
 vosk waits for the wake word (юми), and the moment it passes by the app gets the
@@ -20,6 +22,7 @@ import argparse
 import atexit
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,24 +43,103 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
     'en': {'small': ('vosk-model-small-en-us-0.15', 'vosk-model-small-en-us-0.15'),
            'big': ('vosk-model-en-us-0.22', 'vosk-model-en-us-0.22')},
 }
-VERSION = 4                             # bumped when the protocol changes: stale twins are restarted
+VERSION = 5                             # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 # which command reads the mic, raw s16 mono RATE. pw-record before parecord: on some
 # desktops parecord connects and then stays silent, so arecord gets the last word.
+# {mic} in the third column is where a chosen microphone goes (the /mics endpoint lists them).
 RECORDER = [
     ('pw-record', ['pw-record', '--raw', '--format', 's16', '--rate', str(RATE),
-                   '--channels', '1', '-']),
-    ('arecord', ['arecord', '-q', '-t', 'raw', '-f', 'S16_LE', '-r', str(RATE), '-c', '1', '-']),
+                   '--channels', '1', '-'], ['--target', '{mic}']),
+    ('arecord', ['arecord', '-q', '-t', 'raw', '-f', 'S16_LE', '-r', str(RATE), '-c', '1', '-'],
+     ['-D', '{mic}']),
     ('parecord', ['parecord', '--raw', '--format=s16le', f'--rate={RATE}',
-                  '--channels=1', '--latency-msec=100', '-']),
+                  '--channels=1', '--latency-msec=100', '-'], ['--device={mic}']),
 ]
 
 
-def recorder_cmd():
-    for name, cmd in RECORDER:
+def recorder_cmd(mic=None):
+    """(name, argv) that reads the mic; a chosen microphone is named before the '-'"""
+    for name, cmd, mic_args in RECORDER:
         if shutil.which(name):
+            if mic:                     # the last '-' is the pipe: options go right before it
+                cmd = cmd[:-1] + [a.format(mic=mic) for a in mic_args] + cmd[-1:]
             return name, cmd
     return None, None
+
+
+def _out(argv):
+    return subprocess.run(argv, capture_output=True, text=True, timeout=3).stdout
+
+
+def _pw_mics():
+    """pw-cli lists every source node; its node.name is what pw-record --target wants"""
+    mics, cur = [], {}
+    def flush():
+        if cur.get('media.class') == 'Audio/Source':
+            name = cur.get('node.name', '')
+            if name and not name.endswith('.monitor'):   # a loopback of an output is no ear
+                mics.append({'name': name, 'label': cur.get('node.description')
+                             or cur.get('node.nick') or name})
+    for line in _out(['pw-cli', 'ls', 'Node']).splitlines():
+        s = line.strip()
+        if s.startswith('id '):
+            flush()
+            cur = {}
+        elif '=' in s:
+            k, _, v = s.partition('=')
+            cur[k.strip()] = v.strip().strip('"')
+    flush()
+    return mics
+
+
+def _pactl_mics():
+    """parecord picks a source with --device, the names live in pactl"""
+    mics, name, label = [], None, None
+    for line in _out(['pactl', 'list', 'sources']).splitlines():
+        s = line.strip()
+        if s.startswith('Source #'):    # the previous source is over: keep it
+            if name and not name.endswith('.monitor'):
+                mics.append({'name': name, 'label': label or name})
+            name, label = None, None
+        elif s.startswith('Name:'):
+            name = s[5:].strip()
+        elif s.startswith('Description:'):
+            label = s[12:].strip()
+    if name and not name.endswith('.monitor'):
+        mics.append({'name': name, 'label': label or name})
+    return mics
+
+
+def _arecord_mics():
+    """arecord picks a device with -D; the cards live in arecord -l (plughw resamples for us)"""
+    mics = []
+    for line in _out(['arecord', '-l']).splitlines():
+        m = re.match(r'card (\d+): (.+?), device (\d+): (.+)', line.strip())
+        if not m:
+            continue
+        card, cdesc, dev, ddesc = m.groups()
+        cname = re.search(r'\[([^\]]*)\]', cdesc)
+        dname = re.search(r'\[([^\]]*)\]', ddesc)
+        label = ': '.join(x for x in ((cname.group(1) if cname else cdesc.strip()),
+                                      (dname.group(1) if dname else ddesc.split(',')[0]).strip()) if x)
+        mics.append({'name': f'plughw:{card},{dev}', 'label': label})
+    return mics
+
+
+def list_mics():
+    """every microphone the current recorder can hear: [{'name': ..., 'label': ...}], [] when none"""
+    name, _cmd = recorder_cmd()
+    try:
+        if name == 'pw-record':
+            return _pw_mics() if shutil.which('pw-cli') else _pactl_mics()
+        if name == 'parecord':
+            return _pactl_mics()
+        if name == 'arecord':
+            return _arecord_mics()
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    return []
 
 
 def log(msg):
@@ -143,11 +225,11 @@ class Ears:
             self.models[key] = m
             return m
 
-    def listen(self, lang, secs, quiet, size='small'):
+    def listen(self, lang, secs, quiet, size='small', mic=None):
         """hear one phrase: the recognized text ('' when there was nothing)"""
         from vosk import KaldiRecognizer
         import selectors
-        name, cmd = recorder_cmd()
+        name, cmd = recorder_cmd(mic)
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
         model = self.model(lang, size)
@@ -216,7 +298,7 @@ class Ears:
                         pass
                 self.busy = False
 
-    def wake(self, lang, word, secs, size='small'):
+    def wake(self, lang, word, secs, size='small', mic=None):
         """wait for the wake word, keeping the microphone on:
         {'woke': True, 'text': the phrase after it} — the name was heard, the rest came
         {'woke': True, 'text': ''} — the name alone, a phrase may still come
@@ -224,7 +306,7 @@ class Ears:
         'text' is what was said after the wake word: the app recognizes nothing twice."""
         from vosk import KaldiRecognizer
         import selectors
-        name, cmd = recorder_cmd()
+        name, cmd = recorder_cmd(mic)
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
         model = self.model(lang, size)
@@ -363,6 +445,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'ok': True, 'error': self.ears.error, 'version': VERSION,
                                'profile': ' '.join(sorted(MODELS)),
                                'recorder': recorder_cmd()[0]})
+        if u.path == '/mics':
+            # the microphones this recorder can hear, for Settings → Her ears → Microphone
+            return self._json({'ok': True, 'recorder': recorder_cmd()[0], 'mics': list_mics()})
         if u.path == '/stop':
             self.ears.stop()
             return self._json({'ok': True})
@@ -374,8 +459,9 @@ class Handler(BaseHTTPRequestHandler):
             lang = (q.get('lang') or ['ru'])[0]
             word = ' '.join((q.get('word') or ['юми'])[0].split()) or 'юми'
             size = (q.get('size') or ['small'])[0]
+            mic = (q.get('mic') or [None])[0] or None
             try:
-                res = self.ears.wake(lang, word, secs, size=size)
+                res = self.ears.wake(lang, word, secs, size=size, mic=mic)
             except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
                 self.ears.error = str(e)
                 return self._json({'error': str(e)}, 500)
@@ -392,8 +478,9 @@ class Handler(BaseHTTPRequestHandler):
             secs = 7.0
         lang = (q.get('lang') or ['ru'])[0]
         size = (q.get('size') or ['small'])[0]
+        mic = (q.get('mic') or [None])[0] or None
         try:
-            text = self.ears.listen(lang, secs, quiet=min(6.0, secs), size=size)
+            text = self.ears.listen(lang, secs, quiet=min(6.0, secs), size=size, mic=mic)
         except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
             self.ears.error = str(e)
             return self._json({'error': str(e)}, 500)
