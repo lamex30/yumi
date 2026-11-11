@@ -526,6 +526,7 @@ class App(Gtk.Application):
         self.wake_on = False             # the wake-word loop is running or not
         self.wake_thread = None
         self.wake_set(bool(self.settings.get('wake_ears')))   # «Юми» works out of the box
+        self.tap_set(bool(self.settings.get('tap_ears')))     # the diary, too, if it was asked
         self.fetch_chat_models()        # her answer model for the settings, in the background
         self.on_caps(initial=True)
         GLib.timeout_add_seconds(3600, lambda: self.apply_outfit() or True)    # the calendar moves on
@@ -733,6 +734,8 @@ class App(Gtk.Application):
                 threading.Thread(target=ears.stop, daemon=True).start()
             elif kind == 'wake_set':
                 self.wake_set(r[1])
+            elif kind == 'tap_set':
+                self.tap_set(r[1])
             elif kind == 'chat_ask':
                 self.chat_ask(r[1])
             elif kind == 'weather_ask':
@@ -901,6 +904,15 @@ class App(Gtk.Application):
 
         self.wake_thread = threading.Thread(target=work, daemon=True)
         self.wake_thread.start()
+
+    def tap_set(self, on):
+        """the ears' diary: while it is on, the daemon records everything the ears hear
+        into /tmp/yumi (the sound and the words), in its own thread beside her work"""
+        def work():
+            ears.tap(bool(on), lang=self.settings.get('speech_lang', 'en'),
+                     size=self.settings.get('stt_size', 'small'),
+                     mic=self.settings.get('stt_mic'))
+        threading.Thread(target=work, daemon=True).start()
 
     def chat_ask(self, history):
         """the question is away to Ollama; the answer comes back into her bubble"""

@@ -305,6 +305,18 @@ on the first listen) understands speech noticeably better than the small one; th
 is memory and a longer first listen. The answer model is picked in **Settings → Her mind →
 Answer model** (it cycles through the installed ones); where Ollama lives lives in
 `~/.config/yumi/settings.json` as `ollama_url`.
+**Settings → Her ears → Ears diary** — while it is on, she writes everything she hears into
+`/tmp/yumi`: the sound into `ears-*.wav` files (a fresh one every ten minutes) and the heard
+phrases into `recogn.txt`, one «time - phrase» per line. It runs in its own quiet thread:
+the mic button and the wake word go on as usual. Mind that `/tmp` lives in memory on many
+systems, and an hour of sound is ~115 MB.
+
+The sound is cleaned before vosk: a high-pass (hum goes), a noise gate whose floor follows
+the room (his fans and hiss die), and a voice detector (`webrtcvad`, installed by
+`stt_setup.sh`, works without too) that hears where a phrase really ends. On PipeWire or
+PulseAudio there is also webrtc echo cancellation (best effort, `pactl` loads
+`module-echo-cancel` over the chosen mic): her own voice played into the echo-cancel sink
+is subtracted from what her ears hear, so she never hears herself.
 
 **The time and the weather.** «Который час» and «what time is it» she answers by herself,
 no mind involved — she just reads the clock. «Какая погода» and «what's the weather» make her

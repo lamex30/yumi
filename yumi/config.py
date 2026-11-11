@@ -41,6 +41,7 @@ DEFAULT_SETTINGS = {
     'wake_word': 'юми',       # the wake word itself (say it, then the question)
     'stt_size': 'small',      # her hearing: small (45 MB) / big (a sharper ~1.8 GB model)
     'stt_mic': None,          # which microphone the ears hear with: None = auto (the desktop's pick)
+    'tap_ears': False,        # a diary of everything the ears hear: /tmp/yumi (sound + words)
     'hourly_chimes': True,    # she speaks the time with a joke every hour
 }
 DEFAULT_STATE = {
@@ -206,6 +207,7 @@ UI = {
         'e_big': 'Sharp (downloads ~1.8 GB)', 'cat_ears': 'Her ears', 'stt_mic': 'Microphone',
         'mic_refresh': 'Find the microphone', 'mic_auto': 'auto', 'chat_provider': 'Mind provider',
         'polza_url': 'Polza.ai address', 'polza_api_key': 'Polza.ai API key',
+        'tap_ears': 'Ears diary (/tmp/yumi)',
         'hourly_chimes': 'She says the time every hour',
         'tour1': "Hi! I'm Yumi. I live at the bottom edge of your screen. Let me show you around.",
         'tour2': 'Click me and round buttons appear: files, shelf, pipette, timer, Do Not Disturb and settings.',
@@ -248,6 +250,7 @@ UI = {
         'e_big': 'Точная (скачает ~1.8 ГБ)', 'cat_ears': 'Её ушки', 'stt_mic': 'Микрофон',
         'mic_refresh': 'Найти микрофон', 'mic_auto': 'авто',
         'chat_provider': 'Провайдер мозгов', 'polza_url': 'Адрес Polza.ai', 'polza_api_key': 'Ключ Polza.ai',
+        'tap_ears': 'Дневник ушек (/tmp/yumi)',
         'hourly_chimes': 'Каждый час она говорит время',
         'tour1': 'Привет! Я Юми. Я живу у нижнего края твоего экрана. Давай я всё покажу.',
         'tour2': 'Нажми на меня, и вокруг появятся кружочки: файлы, полка, пипетка, таймер, «Не мешать» и настройки.',

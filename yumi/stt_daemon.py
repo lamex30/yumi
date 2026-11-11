@@ -14,8 +14,18 @@ secs pass, or another click asks /stop. /wake is the same microphone held on lon
 vosk waits for the wake word (юми), and the moment it passes by the app gets the
 phrase that follows — nothing is recognized twice.
 
+Before vosk the sound is cleaned here: a one-pole high-pass (hum and rumble go),
+a noise gate with a floor that follows the quiet (steady hiss and fan die), and a
+webrtc voice detector (webrtcvad, best effort) that finds where speech really ends,
+so vosk does not guess the end from its own timing.
+
+On top of the microphone there is a webrtc echo-cancel source (module-echo-cancel
+over pactl, best effort): the chosen mic feeds it, the ears record from the clean
+end, and her own sounds played into the echo-cancel sink are subtracted — she never
+hears herself. When it cannot be set up, the ears fall back to the plain mic.
+
 Two sizes per language: the small one (~45 MB) is quick and always on, the big one
-(~1.8 GB here and there) hears at least twice as well; the app asks for it with
+(~1.8 GB here and here) hears at least twice as well; the app asks for it with
 size=big in the settings (Hearing accuracy / her Hearing accuracy).
 """
 import argparse
@@ -30,7 +40,9 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import wave
 import zipfile
+from array import array
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -43,8 +55,15 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
     'en': {'small': ('vosk-model-small-en-us-0.15', 'vosk-model-small-en-us-0.15'),
            'big': ('vosk-model-en-us-0.22', 'vosk-model-en-us-0.22')},
 }
-VERSION = 5                             # bumped when the protocol changes: stale twins are restarted
+VERSION = 7                             # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
+VAD_TAIL = 700                          # ms of quiet after speech: the phrase is really over
+TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
+TAP_SEGMENT = 600.0                     # s of tape in one wav, then the next file starts
+
+ECHO_SOURCE = 'yumi_ec'                 # the echo-cancel source the ears record through
+ECHO_SINK = 'yumi_ec_sink'              # where her own sounds go, so they can be subtracted
+_echo = {'on': False, 'master': None, 'module': None, 'checked': 0.0, 'failed': 0}
 # which command reads the mic, raw s16 mono RATE. pw-record before parecord: on some
 # desktops parecord connects and then stays silent, so arecord gets the last word.
 # {mic} in the third column is where a chosen microphone goes (the /mics endpoint lists them).
@@ -66,6 +85,174 @@ def recorder_cmd(mic=None):
                 cmd = cmd[:-1] + [a.format(mic=mic) for a in mic_args] + cmd[-1:]
             return name, cmd
     return None, None
+
+
+def _pactl_short(what):
+    try:
+        return subprocess.run(['pactl', 'list', 'short', what], capture_output=True,
+                              text=True, timeout=3).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
+def _echo_want(mic):
+    """the mic the canceller should listen to: the chosen one, but never its own clean
+    end (that would be a loop) and never a monitor of an output"""
+    if mic and mic != ECHO_SOURCE and not mic.endswith('.monitor'):
+        return mic
+    return None
+
+
+def _echo_load(master):
+    """pactl loads the webrtc echo-cancel around the mic; True when the clean end appeared"""
+    argv = ['pactl', 'load-module', 'module-echo-cancel',
+            f'source_name={ECHO_SOURCE}', f'sink_name={ECHO_SINK}', 'aec_method=webrtc']
+    if master:
+        argv.append(f'source_master={master}')
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if r.returncode == 0 and ECHO_SOURCE in _pactl_short('sources'):
+        try:
+            _echo['module'] = int(r.stdout.strip())
+        except ValueError:
+            _echo['module'] = None
+        _echo['master'] = master        # what the canceller listens to now
+        log('echo-cancel is on' + (f' (master {master})' if master else ''))
+        return True
+    if r.stderr and r.stderr.strip():
+        log('echo-cancel refused: ' + r.stderr.strip()[-120:])
+    return False
+
+
+def echo_ready(mic=None):
+    """the name of the echo-cancel source to record through, or None when there is none:
+    best effort, it loads over the chosen mic (her sounds into ECHO_SINK give it the echo
+    to subtract). pactl is not free, so the state is re-checked at most every 20 s"""
+    now = time.monotonic()
+    if now - _echo['checked'] >= 20:
+        _echo['checked'] = now
+        if ECHO_SOURCE in _pactl_short('sources'):
+            _echo['on'] = True
+            for line in _pactl_short('modules').splitlines():
+                p = line.split('\t')
+                if len(p) >= 3 and 'module-echo-cancel' in p[1] and ECHO_SOURCE in p[2]:
+                    try:
+                        _echo['module'] = int(p[0])
+                    except ValueError:
+                        pass
+                    for arg in p[2].split():     # what the running canceller listens to
+                        if arg.startswith('source_master='):
+                            _echo['master'] = arg.split('=', 1)[1] or None
+                    break
+        elif _echo['failed'] < 3:       # it refused three times: give up until a restart
+            _echo['on'] = _echo_load(_echo_want(mic))
+            if not _echo['on']:
+                _echo['failed'] += 1
+    if _echo['on'] and _echo_want(mic) != _echo['master']:
+        want = _echo_want(mic)
+        _echo['master'] = want          # what it will listen to from now on
+        if _echo['module'] is not None:
+            subprocess.run(['pactl', 'unload-module', str(_echo['module'])],
+                           capture_output=True, timeout=5)
+        if not _echo_load(want):        # the reload failed: the plain mic is next best
+            _echo['on'], _echo['master'], _echo['module'] = False, None, None
+    return ECHO_SOURCE if _echo['on'] else None
+
+
+HP_A = 0.9607                    # one-pole high-pass ~100 Hz: hum and rumble go, speech stays
+GATE_MIN = 260                   # s16: quieter than this is the room itself, not a voice
+DAMP_DEEP, DAMP_SOFT = 0.12, 0.35   # how much of the sound passes the closed and half-open gate
+
+
+def hp_pass(chunk, st):
+    """one chunk of raw s16 mono through the high-pass: hum and rumble go; st carries
+    the filter's last output and last input between the chunks"""
+    n = len(chunk) // 2
+    if n == 0:
+        return chunk
+    hp = st.get('hp') or 0.0
+    prev = st.get('prev') or 0.0
+    vals = array('h', chunk[:n * 2])
+    for i in range(n):
+        x = vals[i]
+        hp = HP_A * (hp + x - prev)
+        prev = x
+        v = int(hp)
+        if v > 32767:
+            v = 32767
+        elif v < -32768:
+            v = -32768
+        vals[i] = v
+    st['hp'] = hp
+    st['prev'] = prev
+    return vals.tobytes()
+
+
+def gate_noise(chunk, st, voiced):
+    """the noise gate after the high-pass: the floor follows the quiet chunks only,
+    speech never raises it; a chunk the voice detector called speech is never damped,
+    so even a whisper passes whole"""
+    n = len(chunk) // 2
+    if n == 0 or voiced:
+        return chunk
+    vals = array('h', chunk[:n * 2])
+    acc = 0
+    for v in vals:
+        acc += v * v
+    rms = (acc / n) ** 0.5
+    floor = st.get('floor')
+    if floor is None or rms < floor:
+        floor = rms                   # the quietest thing on tape so far is the noise itself
+    else:
+        floor += (rms - floor) * 0.05   # it creeps up slowly across the quiet
+    st['floor'] = floor
+    thr = max(GATE_MIN, floor * 3.0)
+    if rms < thr:
+        damp = DAMP_DEEP if rms < thr * 0.5 else DAMP_SOFT
+        for i in range(n):
+            vals[i] = int(vals[i] * damp)
+        return vals.tobytes()
+    return chunk
+
+
+class Detector:
+    """the voice detector around vosk (webrtcvad, best effort): it counts how much speech
+    passed by and how long the quiet after it has been, so the end of a phrase is heard
+    from the sound itself, not guessed from vosk's own timing"""
+
+    FRAME = 960                      # bytes: exactly 30 ms of s16 mono at 16 kHz
+
+    def __init__(self):
+        try:
+            import webrtcvad
+            self.vad = webrtcvad.Vad(2)
+        except Exception:            # noqa: BLE001 - no vad is no problem, vosk still works
+            self.vad = None
+        self.buf = b''
+        self.speech_ms = 0           # how much voice has passed by in total
+        self.silence_ms = 0          # quiet in a row right now
+
+    def feed(self, chunk):
+        """take the cleaned chunk into the frames; True while speech is on tape"""
+        self.buf += chunk
+        voiced = False
+        while len(self.buf) >= self.FRAME:
+            frame, self.buf = self.buf[:self.FRAME], self.buf[self.FRAME:]
+            said = True              # a missing detector never cuts speech short
+            if self.vad:
+                try:
+                    said = self.vad.is_speech(frame, RATE)
+                except Exception:    # noqa: BLE001
+                    said = True
+            if said:
+                voiced = True
+                self.speech_ms += 30
+                self.silence_ms = 0
+            elif self.speech_ms:
+                self.silence_ms += 30
+        return voiced
 
 
 def _out(argv):
@@ -128,18 +315,21 @@ def _arecord_mics():
 
 
 def list_mics():
-    """every microphone the current recorder can hear: [{'name': ..., 'label': ...}], [] when none"""
+    """every microphone the current recorder can hear: [{'name': ..., 'label': ...}], [] when none;
+    the echo-cancel source is ours, not a choice: it goes on top of whatever is picked"""
     name, _cmd = recorder_cmd()
     try:
         if name == 'pw-record':
-            return _pw_mics() if shutil.which('pw-cli') else _pactl_mics()
-        if name == 'parecord':
-            return _pactl_mics()
-        if name == 'arecord':
-            return _arecord_mics()
+            mics = _pw_mics() if shutil.which('pw-cli') else _pactl_mics()
+        elif name == 'parecord':
+            mics = _pactl_mics()
+        elif name == 'arecord':
+            mics = _arecord_mics()
+        else:
+            mics = []
     except (OSError, subprocess.SubprocessError, ValueError):
         return []
-    return []
+    return [m for m in mics if m.get('name') != ECHO_SOURCE]
 
 
 def log(msg):
@@ -206,6 +396,7 @@ class Ears:
         self.abort = False
         self.kind = None                # what the lock holds now: 'listen' or 'wake'
         self.lock = threading.Lock()
+        self.tap = Tap(self)
 
     def model(self, lang, size='small'):
         """the recognizer's factory: the model folder, downloaded on the first need;
@@ -229,7 +420,10 @@ class Ears:
         """hear one phrase: the recognized text ('' when there was nothing)"""
         from vosk import KaldiRecognizer
         import selectors
-        name, cmd = recorder_cmd(mic)
+        echo = echo_ready(mic)
+        if echo and not (shutil.which('pw-record') or shutil.which('parecord')):
+            echo = None                 # arecord cannot aim at a PipeWire source: plain mic then
+        name, cmd = recorder_cmd(echo or mic)
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
         model = self.model(lang, size)
@@ -247,6 +441,8 @@ class Ears:
                 sel.register(proc.stdout, selectors.EVENT_READ)
                 rec = KaldiRecognizer(model, RATE)
                 rec.SetWords(False)
+                det = Detector()
+                st = {'hp': 0.0, 'floor': None}     # the cleaner's memory for this listen
                 t0 = time.monotonic()
                 heard = False               # at least one byte of sound has arrived
                 while time.monotonic() - t0 < secs:
@@ -272,8 +468,13 @@ class Ears:
                             raise RuntimeError(f'{name} died ({die}){err}'.rstrip())
                         break
                     heard = True
+                    chunk = hp_pass(chunk, st)            # hum and rumble go
+                    voiced = det.feed(chunk)              # the voice detector follows the frames
+                    chunk = gate_noise(chunk, st, voiced) # the hiss dies, speech is never touched
                     if rec.AcceptWaveform(chunk):         # vosk heard the phrase end
                         break
+                    if det.speech_ms and det.silence_ms >= VAD_TAIL:
+                        break                             # the voice died down: the phrase is over
                     if time.monotonic() - t0 > quiet and not json.loads(
                             rec.PartialResult() or '{}').get('partial'):
                         break                             # nothing but quiet: do not wait
@@ -306,7 +507,10 @@ class Ears:
         'text' is what was said after the wake word: the app recognizes nothing twice."""
         from vosk import KaldiRecognizer
         import selectors
-        name, cmd = recorder_cmd(mic)
+        echo = echo_ready(mic)
+        if echo and not (shutil.which('pw-record') or shutil.which('parecord')):
+            echo = None                 # arecord cannot aim at a PipeWire source: plain mic then
+        name, cmd = recorder_cmd(echo or mic)
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
         model = self.model(lang, size)
@@ -325,6 +529,8 @@ class Ears:
                 sel.register(proc.stdout, selectors.EVENT_READ)
                 rec = KaldiRecognizer(model, RATE)
                 rec.SetWords(False)
+                det = Detector()
+                st = {'hp': 0.0, 'floor': None}     # the cleaner's memory for this wake
                 t0 = time.monotonic()
                 heard = False               # at least one byte of sound has arrived
                 woken = False               # the wake word has passed by already
@@ -354,6 +560,9 @@ class Ears:
                             return {'woke': True, 'text': ''}   # the name was on tape
                         break
                     heard = True
+                    chunk = hp_pass(chunk, st)            # hum and rumble go
+                    voiced = det.feed(chunk)              # the voice detector follows the frames
+                    chunk = gate_noise(chunk, st, voiced) # the hiss dies, speech is never touched
                     ended = rec.AcceptWaveform(chunk)   # True: an utterance ended just now
                     if ended:
                         words = json.loads(rec.FinalResult() or '{}').get('text', '')
@@ -362,6 +571,14 @@ class Ears:
                     if woken and words != last:
                         since = time.monotonic()    # the half-heard moves on: the wait restarts
                     last = words
+                    if woken and det.speech_ms and det.silence_ms >= VAD_TAIL:
+                        # the voice died down after the name: whatever came after is the phrase
+                        hit = wake_at(words, spellings)
+                        said = hit if hit is not None else words
+                        said = ' '.join(said.split())
+                        if said:
+                            return {'woke': True, 'text': said}
+                        return {'woke': True, 'text': ''}   # her turn to greet
                     if woken and time.monotonic() - since > WAKE_AFTER:
                         # the name passed by and quiet followed: her turn to greet
                         return {'woke': True, 'text': ''}
@@ -407,6 +624,132 @@ class Ears:
         self.abort = True
 
 
+class Tap:
+    """the ears' diary: while it is on, its own thread keeps a recorder on the same
+    microphone the listens and wakes use (PipeWire reads a source twice with no fuss),
+    writes the sound into wav files in TAP_DIR (a fresh one every TAP_SEGMENT) and the
+    heard phrases into TAP_DIR/recogn.txt as «time - phrase». It never touches the
+    listens' lock: she answers the mic button while the tape goes on."""
+
+    def __init__(self, ears):
+        self.ears = ears
+        self.lock = threading.Lock()
+        self.on = False
+        self.gen = 0                    # bumped on every change: the running loop gives up
+        self.want = {'mic': None, 'lang': 'ru', 'size': 'small'}
+
+    def set(self, on, mic=None, lang='ru', size='small'):
+        """the app's wish: the diary on or off (a new mic or model restarts the tape)"""
+        want = {'mic': mic, 'lang': lang,
+                'size': size if size in ('small', 'big') else 'small'}
+        with self.lock:
+            if bool(on) and self.on and self.want == want:
+                return self.status()    # already taping exactly this: nothing to restart
+            self.want, self.on = want, bool(on)
+            self.gen += 1               # whatever runs now winds down
+            if self.on:
+                threading.Thread(target=self._work, args=(self.gen,), daemon=True).start()
+            save_tap_state(self.on, want)
+        return self.status()
+
+    def status(self):
+        return {'on': self.on, 'dir': str(TAP_DIR), **(self.want if self.on else {})}
+
+    def _work(self, mygen):
+        """keep a recorder on tape; if it dies on its own, it goes again after a pause"""
+        while self.on and self.gen == mygen:
+            mic = self.want['mic']
+            echo = echo_ready(mic)
+            if echo and not (shutil.which('pw-record') or shutil.which('parecord')):
+                echo = None             # arecord cannot aim at a PipeWire source: plain mic
+            name, cmd = recorder_cmd(echo or mic)
+            if not name:
+                log('tap: no parecord, pw-record or arecord for the microphone')
+                return
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except OSError as e:
+                log(f'tap: the microphone would not start ({e}), again in 3 s')
+                time.sleep(3)
+                continue
+            try:
+                self._follow(proc, mygen, name)
+            finally:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                except OSError:
+                    pass
+                finally:
+                    for f in (proc.stdout, proc.stderr):
+                        try:
+                            f.close()
+                        except OSError:
+                            pass
+            if self.on and self.gen == mygen:
+                log(f'tap: {name} stopped on its own, again in 2 s')
+                time.sleep(2)
+
+    def _follow(self, proc, mygen, name):
+        """the tape: the raw sound goes into the wav files, the cleaned sound into vosk"""
+        from vosk import KaldiRecognizer
+        import selectors
+        model = self.ears.model(self.want['lang'], self.want['size'])   # a local ref: it
+        TAP_DIR.mkdir(parents=True, exist_ok=True)                      # outlives the tap
+        sel = selectors.DefaultSelector()
+        sel.register(proc.stdout, selectors.EVENT_READ)
+        rec = KaldiRecognizer(model, RATE)
+        rec.SetWords(False)
+        det = Detector()
+        st = {'hp': 0.0, 'floor': None}     # the cleaner's memory for this tape
+        seg = {'wav': None, 't0': 0.0}
+
+        def say(text):
+            if text:
+                try:
+                    with open(TAP_DIR / 'recogn.txt', 'a', encoding='utf-8') as f:
+                        f.write(tap_line(text) + '\n')
+                except OSError:
+                    pass
+
+        def put(chunk):
+            """the sound into the segment file: a fresh wav every TAP_SEGMENT seconds"""
+            if not seg['wav'] or time.monotonic() - seg['t0'] > TAP_SEGMENT:
+                if seg['wav']:
+                    seg['wav'].close()
+                seg['wav'] = wave.open(str(TAP_DIR / time.strftime('ears-%Y%m%d-%H%M%S.wav')),
+                                       'wb')
+                seg['wav'].setnchannels(1)
+                seg['wav'].setsampwidth(2)
+                seg['wav'].setframerate(RATE)
+                seg['t0'] = time.monotonic()
+            seg['wav'].writeframes(chunk)
+
+        try:
+            while self.on and self.gen == mygen:
+                if not sel.select(1.0):
+                    continue
+                chunk = os.read(proc.stdout.fileno(), 4000)     # ~0.125 s of audio
+                if not chunk:
+                    die = proc.poll()
+                    if die not in (None, 0):
+                        log(f'tap: {name} died ({die})')
+                    break
+                put(chunk)                          # the diary keeps the untouched sound
+                chunk = hp_pass(chunk, st)          # hum and rumble go
+                voiced = det.feed(chunk)            # the voice detector follows the frames
+                chunk = gate_noise(chunk, st, voiced)    # the hiss dies, speech is kept
+                if rec.AcceptWaveform(chunk):       # vosk heard the phrase end
+                    say(json.loads(rec.FinalResult() or '{}').get('text', ''))
+            say(json.loads(rec.FinalResult() or '{}').get('text', ''))
+        finally:
+            if seg['wav']:
+                seg['wav'].close()
+
+
 def download(zip_name, folder):
     """fetch and unpack a small model (~45 MB) from alphacephei.com, once per language"""
     HOME.mkdir(parents=True, exist_ok=True)
@@ -444,7 +787,23 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/ping':
             return self._json({'ok': True, 'error': self.ears.error, 'version': VERSION,
                                'profile': ' '.join(sorted(MODELS)),
-                               'recorder': recorder_cmd()[0]})
+                               'recorder': recorder_cmd()[0],
+                               'aec': bool(_echo['on']), 'tap': self.ears.tap.status()})
+        if u.path == '/tap':
+            # the ears' diary: /tap?on=1&lang=ru&size=small&mic=... starts it, on=0 stops,
+            # a bare /tap just tells the state
+            if q.get('on'):
+                on = q['on'][0] not in ('', '0', 'false', 'no')
+                mic = (q.get('mic') or [None])[0] or None
+                lang = (q.get('lang') or ['ru'])[0]
+                size = (q.get('size') or ['small'])[0]
+                try:
+                    st = self.ears.tap.set(on, mic=mic, lang=lang, size=size)
+                except Exception as e:      # noqa: BLE001 - any failure is reported over HTTP
+                    self.ears.error = str(e)
+                    return self._json({'error': str(e)}, 500)
+                return self._json({'ok': True, **st})
+            return self._json({'ok': True, **self.ears.tap.status()})
         if u.path == '/mics':
             # the microphones this recorder can hear, for Settings → Her ears → Microphone
             return self._json({'ok': True, 'recorder': recorder_cmd()[0], 'mics': list_mics()})
@@ -502,6 +861,35 @@ def write_state(port):
     STATE.write_text(json.dumps({'port': port, 'pid': os.getpid(), 'version': VERSION}))
 
 
+def tap_line(text, now=None):
+    """one line of recogn.txt: «time - phrase»"""
+    stamp = time.strftime('%H:%M:%S', time.localtime(now if now is not None else time.time()))
+    return f'{stamp} - {text}'
+
+
+def save_tap_state(on, want=None):
+    """the diary's wish across the daemon's restarts: it resumes tapping by itself"""
+    try:
+        STATE.parent.mkdir(parents=True, exist_ok=True)
+        (STATE.parent / 'tap.json').write_text(
+            json.dumps({'on': bool(on), 'want': want or {}}, ensure_ascii=False))
+    except OSError:
+        pass
+
+
+def load_tap_state():
+    """what the diary was asked last, or None when it was off (or was never asked)"""
+    try:
+        d = json.loads((STATE.parent / 'tap.json').read_text())
+    except (OSError, ValueError):
+        return None
+    if not (isinstance(d, dict) and d.get('on')):
+        return None
+    w = d.get('want') or {}
+    return {'mic': w.get('mic'), 'lang': w.get('lang') or 'ru',
+            'size': w.get('size') if w.get('size') in ('small', 'big') else 'small'}
+
+
 def ping(port, timeout=0.5):
     try:
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/ping', timeout=timeout) as r:
@@ -532,6 +920,9 @@ def main():
         sys.exit(1)
 
     Handler.ears = Ears()
+    resumed = load_tap_state()
+    if resumed:                         # the diary keeps taping across the daemon's restarts
+        Handler.ears.tap.set(True, **resumed)
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
     except OSError:                     # the port is taken: an older twin may already be there

@@ -13,10 +13,13 @@ else
     if command -v uv >/dev/null 2>&1; then
         uv venv --python python3 "$DIR"
         uv pip install --python "$DIR/bin/python" vosk
+        uv pip install --python "$DIR/bin/python" webrtcvad 'setuptools<81' || \
+            echo 'no webrtcvad (a C compiler is wanted): she hears on without the voice detector'
     else
         python3 -m venv "$DIR"
-        "$DIR/bin/pip" install --quiet --upgrade pip
-        "$DIR/bin/pip" install --quiet vosk
+        "$DIR/bin/pip" install --quiet --upgrade pip 'setuptools<81'
+        "$DIR/bin/pip" install --quiet vosk webrtcvad || \
+            echo 'no webrtcvad (a C compiler is wanted): she hears on without the voice detector'
     fi
 fi
 

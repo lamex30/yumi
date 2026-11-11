@@ -872,7 +872,7 @@ class Brain(Extras):
             if not self.mics and 'stt_mic' not in self.unavailable:
                 self.requests.append(('mics',))
             rows = [('set', 'wake_ears', t('wake_ears')), ('set', 'stt_size', t('stt_size')),
-                    ('set', 'stt_mic', t('stt_mic'))]
+                    ('set', 'stt_mic', t('stt_mic')), ('set', 'tap_ears', t('tap_ears'))]
             if self.mics:
                 rows.append(('mic_refresh', None, t('mic_refresh')))
             rows.append(('menu', 'settings', t('back')))
@@ -1021,6 +1021,8 @@ class Brain(Extras):
                 self.requests.append(('recolor',))
             if arg == 'wake_ears':
                 self.requests.append(('wake_set', s[arg]))
+            if arg == 'tap_ears':
+                self.requests.append(('tap_set', s[arg]))
             if arg in ('voice_vol', 'voice_kind') and s[arg]:
                 self.say_sample()
             if arg == 'chat_provider':

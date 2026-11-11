@@ -413,10 +413,36 @@ def ppm_pixel(data):
     return '#%02x%02x%02x' % tuple(px)
 
 
+_echo_route = {'when': 0.0, 'name': None}
+
+
+def _echo_sink():
+    """the echo-cancel sink (yumi_ec_sink) when it exists, else None; pactl is not free,
+    so the answer is remembered for half a minute"""
+    if time.monotonic() - _echo_route['when'] > 30:
+        _echo_route['when'] = time.monotonic()
+        try:
+            out = subprocess.run(['pactl', 'list', 'short', 'sinks'], capture_output=True,
+                                 text=True, timeout=3).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ''
+        _echo_route['name'] = 'yumi_ec_sink' if 'yumi_ec_sink' in out else None
+    return _echo_route['name']
+
+
 def play_file(path):
-    """play a sound file in the background with whatever player is around"""
+    """play a sound file in the background with whatever player is around; when the
+    echo-cancel sink is around, her sounds go through it, so the echo-cancel source
+    knows them and subtracts them from what her ears hear (she never hears herself)"""
     path = str(path)
-    for cmd in (['pw-play', path], ['paplay', path], ['aplay', '-q', path],
+    sink = _echo_sink()
+    pw = ['pw-play', path]
+    pa = ['paplay', path]
+    if sink:
+        pw = ['pw-play', '--target', sink, path]
+        pa = ['paplay', '--device=' + sink, path]
+    for cmd in (pw, pa,
+                ['aplay', '-q', path],
                 ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', path]):
         if shutil.which(cmd[0]):
             return spawn(*cmd)

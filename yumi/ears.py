@@ -150,6 +150,32 @@ def wake(lang='ru', word='юми', secs=20, size='small', mic=None):
     return {'woke': bool(data.get('woke')), 'text': str(data.get('text') or '')}
 
 
+def tap(on, lang='ru', size='small', mic=None):
+    """the ears' diary: everything the microphone hears goes to /tmp/yumi — the sound
+    into ears-*.wav and the heard words into recogn.txt («time - phrase»), in the
+    daemon's own thread; True/False when the daemon answered, None when it is away"""
+    info = _ensure() if on else _state()    # off needs no daemon: the wish is on disk
+    if not info:
+        if on:
+            return None
+        try:
+            DIR.mkdir(parents=True, exist_ok=True)
+            (DIR / 'tap.json').write_text(json.dumps({'on': False, 'want': {}}))
+        except OSError:
+            pass
+        return False
+    q = {'on': 1 if on else 0, 'lang': lang, 'size': size}
+    if mic:
+        q['mic'] = mic
+    url = f"http://127.0.0.1:{info['port']}/tap?" + urllib.parse.urlencode(q)
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            data = json.loads(r.read().decode())
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    return bool(data.get('on'))
+
+
 def stop():
     """one more click on her mic button: she stops waiting for the phrase"""
     info = _state()
