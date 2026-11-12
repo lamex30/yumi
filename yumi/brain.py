@@ -963,6 +963,10 @@ class Brain(Extras):
         data = (self.menu or {}).get('data') or {}
         if self.extras_do(action, arg):
             return
+        if action == 'search':
+            # Search for files - will be handled via requests
+            self.requests.append(('search_files', arg))
+            return
         if action == 'pile':
             self.menu = None
             self.close_radial()

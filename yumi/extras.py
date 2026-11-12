@@ -24,7 +24,8 @@ RING_BUILTIN = {'recent': ('pile', 'recent', 'box', 'recent'), 'shelf': ('pile',
                 'pipette': ('pipette', None, 'drop', 'pipette'), 'timer': ('timer', None, 'clock', 'timer'),
                 'clock': ('clock', None, 'clock', 'clock'), 'listen': ('listen', None, 'mic', 'listen'),
                 'joke': ('joke', None, 'laugh', 'joke'),
-                'sleep': ('sleep', None, 'dnd', 'sleep'), 'settings': ('menu', 'settings', 'gear', 'settings')}
+                'sleep': ('sleep', None, 'dnd', 'sleep'), 'settings': ('menu', 'settings', 'gear', 'settings'),
+                'search': ('search', None, 'search', 'Поиск файлов')}
 RING_ALPHA = 0.55
 RING_ALPHA_OFF = 0.22
 FORM_NAME_MAX = 18
@@ -359,6 +360,9 @@ class Extras:
             self.menu = None
             self.close_radial()
             self.start_tour()
+            return True
+        if action == 'search':
+            self.requests.append(('search_files', arg))
             return True
         return False
 

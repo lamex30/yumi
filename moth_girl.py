@@ -722,6 +722,82 @@ class App(Gtk.Application):
                     b.nap = False          # you asked her to wake: the nap guard must not ignore it
                 self.world.set_dnd(r[1])
                 b.set_sleep(r[1])          # the notification daemon will confirm; act now
+            elif kind == 'search_files':
+                from . import files as F
+                from . import jobs as J
+                query = r[1] if len(r) > 1 else ''
+                if query:
+                    # Search for files using find or fd
+                    import subprocess
+                    from pathlib import Path
+                    
+                    expand_path = Path.home()
+                    results = []
+                    
+                    # Try fd first
+                    try:
+                        result = subprocess.run(
+                            ['fd', '-t', 'f', '--glob', query, str(expand_path)],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if result.returncode == 0 and result.stdout.strip():
+                            results = [Path(p) for p in result.stdout.strip().split('\n') if p.strip()]
+                    except Exception:
+                        pass
+                    
+                    # Fall back to find
+                    if not results:
+                        try:
+                            result = subprocess.run(
+                                ['find', str(expand_path), '-name', query, '-type', 'f'],
+                                capture_output=True, text=True, timeout=30
+                            )
+                            if result.returncode == 0:
+                                results = [Path(p) for p in result.stdout.strip().split('\n') if p.strip()]
+                        except Exception:
+                            pass
+                    
+                    # Return results to brain
+                    if results:
+                        b.requests.append(('search_results', results))
+                    else:
+                        b.requests.append(('search_done', []))
+            elif kind == 'search_results':
+                # Display search results in a menu
+                results = r[1]
+                if results:
+                    from . import config as C
+                    from . import phrases as P
+                    
+                    # Create a menu with search results
+                    lang = b.settings.get('ui_lang', 'en')
+                    ui = C.UI.get(lang, C.UI['en'])
+                    
+                    rows = []
+                    for i, path in enumerate(results[:10]):  # Show max 10 results
+                        name = path.name
+                        rows.append(('menu', f'search_{i}', name))
+                    
+                    if len(results) > 10:
+                        rows.append(('more', None, f'... и еще {len(results) - 10}'))
+                    
+                    rows.append(('back', None, ui.get('back', 'Back')))
+                    
+                    b.menu = {
+                        'kind': 'search',
+                        'rows': rows,
+                        'title': ui.get('search_title', 'Результаты поиска'),
+                        'data': {'query': r[2] if len(r) > 2 else query, 'results': [str(p) for p in results]}
+                    }
+                else:
+                    b.menu = {
+                        'kind': 'search',
+                        'rows': [('none', None, 'Файлы не найдены')],
+                        'title': ui.get('search_title', 'Результаты поиска'),
+                    }
+            elif kind == 'search_done':
+                # Clear search state
+                b.menu = None
             elif kind == 'copy':
                 if not system.copy_text(r[1]):
                     Gdk.Display.get_default().get_clipboard().set(r[1])
