@@ -145,6 +145,9 @@ LINES = {
         'music_next': [("Next track.", None), ("Skipping ahead~", 'wink')],
         'music_previous': [("Back to the previous one.", None), ("Rewound a bit.", None)],
         'music_stop': [("Quiet, then.", None), ("Music stopped.", None)],
+        'volume_up': [("A bit louder, then.", None), ("Louder it is~", 'wink')],
+        'volume_down': [("Quieter... there.", None), ("A bit softer, then.", None)],
+        'volume_set': [("Volume at {pct}.", None), ("There, {pct}~", 'wink')],
         'stop_all': [("Stopped.", None), ("All quiet.", None)],
     },
     'ru': {
@@ -264,6 +267,9 @@ LINES = {
         'music_next': [("Следующий трек.", None), ("Перематываю дальше~", 'wink')],
         'music_previous': [("Назад, к предыдущему.", None), ("Немного отмотала.", None)],
         'music_stop': [("Тишина, значит.", None), ("Музыка остановлена.", None)],
+        'volume_up': [("Делаю громче.", None), ("Громче, так громче~", 'wink')],
+        'volume_down': [("Делаю потише.", None), ("Тише... вот так.", None)],
+        'volume_set': [("Громкость: {pct}.", None), ("Поставила {pct}~", 'wink')],
         'stop_all': [("Остановилась.", None), ("Тишина.", None)],
     },
 }

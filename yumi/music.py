@@ -12,6 +12,8 @@ Optional: mpd for playing her own library
 """
 
 import os
+import random
+import re
 import shutil
 import subprocess
 import threading
@@ -164,6 +166,8 @@ def play_music(file_path=None, directory=None):
         _mpc('add', str(directory))
         if not (_mpc('playlist').stdout or '').strip():
             _mpc('add', '/')
+        _mpc('shuffle')                # a fresh deal of the queue: it never starts
+                                       # with the same first song twice in a row
         _mpc('play')
         if is_mpd_playing():
             return True
@@ -176,7 +180,7 @@ def play_music(file_path=None, directory=None):
         except OSError:
             songs = []
         if songs:
-            song = file_path or songs[0]
+            song = file_path or random.choice(songs)   # a surprise first song, not the same one
             try:
                 proc = subprocess.Popen(
                     ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', str(song)],
@@ -282,9 +286,64 @@ def service_stop():
         _running_processes['mpd'] = None
 
 
+def _default_sink():
+    """the system's default output sink name, or None when pactl is away"""
+    if not shutil.which('pactl'):
+        return None
+    try:
+        r = subprocess.run(['pactl', 'get-default-sink'], capture_output=True,
+                           text=True, timeout=3, env=ENV)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    name = r.stdout.strip()
+    return name if r.returncode == 0 and name else None
+
+
+def _sink_volume(name=None):
+    """the system output's volume percent (the quietest channel), or None"""
+    try:
+        r = subprocess.run(['pactl', 'get-sink-volume', name or '@DEFAULT_SINK@'],
+                           capture_output=True, text=True, timeout=3, env=ENV)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    pcts = [int(m) for m in re.findall(r'/\s*(\d+)\s*%', r.stdout)]
+    return min(pcts) if pcts else None
+
+
+def system_volume(cmd):
+    """The system loudness: 'volume_up' and 'volume_down' step it by 10,
+    'volume N' sets it to N (10..100).
+
+    Returns the new volume percent, or None when the knob would not turn.
+    """
+    name = _default_sink()
+    if not name:
+        return None
+    cur = _sink_volume(name)
+    if cur is None:
+        cur = 50
+    if cmd == 'volume_up':
+        new = min(100, cur + 10)
+    elif cmd == 'volume_down':
+        new = max(0, cur - 10)
+    else:
+        try:                            # 'volume 50' from the voice parser
+            new = int(str(cmd).split(None, 1)[1].strip('%'))
+        except (ValueError, IndexError):
+            return None
+        new = min(100, max(10, new))    # «громкость 10-100»: the range she obeys
+    try:
+        r = subprocess.run(['pactl', 'set-sink-volume', name, f'{new}%'],
+                           capture_output=True, timeout=3, env=ENV)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return new if r.returncode == 0 else None
+
+
 def music_control(cmd):
     """One entry for her voice and menu: 'play', 'pause', 'play_pause',
-    'next', 'previous', 'stop'.
+    'next', 'previous', 'stop', plus the system volume: 'volume_up',
+    'volume_down', 'volume N' (10..100).
 
     «Включи музыку» ('play') is always her own library: never a toggle of some
     other player that happens to be around. The true toggle 'play_pause' is
@@ -328,5 +387,8 @@ def music_control(cmd):
 
     if cmd == 'previous':
         return previous_track()
+
+    if cmd in ('volume_up', 'volume_down') or cmd.startswith('volume '):
+        return system_volume(cmd)      # «тише», «громче», «громкость 50»: the whole system
 
     return False

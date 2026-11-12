@@ -1307,16 +1307,25 @@ class Brain(Extras):
         self.say('stop_all')
 
     def music_control(self, cmd):
-        """Handle music control commands.
+        """Handle music and system-volume commands.
 
         Args:
-            cmd: One of 'play', 'pause', 'play_pause', 'next', 'previous', 'stop'
+            cmd: One of 'play', 'pause', 'play_pause', 'next', 'previous',
+                 'stop', 'volume_up', 'volume_down', 'volume N' (10..100)
         """
         phrases = {'play_pause': 'music_toggle', 'play': 'music_play',
                    'pause': 'music_pause', 'next': 'music_next',
-                   'previous': 'music_previous', 'stop': 'music_stop'}
+                   'previous': 'music_previous', 'stop': 'music_stop',
+                   'volume_up': 'volume_up', 'volume_down': 'volume_down'}
         if cmd in phrases:
             self.say(phrases[cmd])
+            self.requests.append(('music_control', cmd))
+        elif cmd.startswith('volume '):    # «громкость 50»: she names the level
+            try:
+                pct = int(cmd.split()[1])
+            except (ValueError, IndexError):
+                return
+            self.say('volume_set', pct=pct)
             self.requests.append(('music_control', cmd))
 
     def dnd_motion(self, x, y):
@@ -2383,8 +2392,18 @@ MUSIC_PAUSE = frozenset(('пауза', 'паузу', 'приостанови', '
 MUSIC_STOP_ANY = frozenset(('стоп', 'стопи', 'останови', 'остановить', 'stop'))
 MUSIC_STOP_MUSIC = frozenset(('выключи', 'выключить', 'выруби', 'выруб'))
 MUSIC_NEXT = ('переключи', 'переключить', 'next', 'skip')
+VOLUME_UP = frozenset(('громче', 'повысь', 'повысить', 'louder', 'up'))
+VOLUME_DOWN = frozenset(('тише', 'тихо', 'quieter', 'softer', 'lower'))
+VOLUME_WORD = frozenset(('громкость', 'звук', 'volume', 'sound'))
+VOLUME_NUMBERS = {'десять': 10, 'двадцать': 20, 'тридцать': 30, 'сорок': 40,
+                  'пятьдесят': 50, 'шестьдесят': 60, 'семьдесят': 70,
+                  'восемьдесят': 80, 'девяносто': 90, 'сто': 100,
+                  'ten': 10, 'twenty': 20, 'thirty': 30, 'forty': 40,
+                  'fifty': 50, 'sixty': 60, 'seventy': 70, 'eighty': 80,
+                  'ninety': 90}
 MUSIC_KNOWN = (MUSIC_WORDS | MUSIC_FILLERS | MUSIC_PLAY | MUSIC_PAUSE
                | MUSIC_STOP_ANY | MUSIC_STOP_MUSIC | set(MUSIC_NEXT)
+               | VOLUME_UP | VOLUME_DOWN | VOLUME_WORD | set(VOLUME_NUMBERS)
                | {'следующ', 'предыдущ', 'назад', 'turn', 'off', 'on'})
 
 
@@ -2392,6 +2411,7 @@ def music_control_text(text, lang='en'):
     """Convert voice text to a music command.
 
     Returns 'play' (her own library), 'pause', 'stop', 'next', 'previous',
+    'volume_up', 'volume_down', 'volume N' (the system volume, 10..100),
     or None if not a music command. Whole words only: «включи музыку» plays,
     «выключи музыку» stops, and «включи свет» or the telly in the background
     is not hers to mind. The bare toggle 'play_pause' is for the hotkey only.
@@ -2415,6 +2435,25 @@ def music_control_text(text, lang='en'):
             any(t in MUSIC_STOP_MUSIC for t in toks)
             or ('turn' in toks and 'off' in toks and 'on' not in toks)):
         return 'stop'                  # «выключи музыку», but «выключи свет» is not hers
+
+    # the system volume: «тише», «громче», «громкость 50» (a digit or a word)
+    if any(t in VOLUME_DOWN or t.startswith(('тише', 'тихо', 'потише'))
+           for t in toks) and not any(t in VOLUME_UP for t in toks):
+        return 'volume_down'
+    if any(t in VOLUME_UP or t.startswith(('громче', 'погромче', 'повыс'))
+           for t in toks):
+        return 'volume_up'
+
+    def spoken_number(t):              # «50», «50%», «пятьдесят», «fifty»
+        if t.rstrip('%').isdigit():
+            return int(t.rstrip('%'))
+        return VOLUME_NUMBERS.get(t)
+
+    if any(t in VOLUME_WORD for t in toks):
+        for t in toks:
+            n = spoken_number(t)
+            if n is not None:
+                return f'volume {n}'
     if any(t in MUSIC_PAUSE for t in toks):
         return 'pause'
     if any(t in MUSIC_NEXT[2:] or t.startswith('следующ') for t in toks):
