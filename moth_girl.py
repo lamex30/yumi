@@ -1000,7 +1000,7 @@ class App(Gtk.Application):
                     continue            # quiet, called off or the ears are away
                 if res.get('stop'):
                     # «стоп» overrides everything: even mid-word, asleep or thinking
-                    GLib.idle_add(self.stop_all)
+                    GLib.idle_add(lambda: self.ev(lambda b: b.stop_all()) and False)
                     continue
                 tail = res.get('text') or ''
                 busy = (b.sleeping or b.thinking or b.listening
