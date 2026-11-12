@@ -153,14 +153,19 @@ def listen(lang='ru', secs=7, size='small', mic=None, ear=None):
     return data.get('text') if isinstance(data.get('text'), str) else ''
 
 
-def wake(lang='ru', word='юми', secs=20, size='small', mic=None, ear=None):
+def wake(lang='ru', word='юми', secs=20, size='small', mic=None, ear=None,
+         sensitivity='normal', confirm=True, model_size=None, judge_log=False):
     """wait for the wake word (say «Юми» and she is all ears): a dict
     {'woke': bool, 'text': what came after the word, '' when it was said alone},
     or None when the ears cannot work at all. A manual listen takes the mic over."""
     info = _ensure()
     if not info:
         return None
-    q = {'lang': lang, 'word': word, 'secs': round(secs, 1), 'size': size}
+    q = {'lang': lang, 'word': word, 'secs': round(secs, 1), 'size': size,
+         'sensitivity': sensitivity, 'confirm': '1' if confirm else '0',
+         'judge_log': '1' if judge_log else '0'}
+    if model_size:
+        q['model_size'] = model_size
     if mic:
         q['mic'] = mic
     if ear:

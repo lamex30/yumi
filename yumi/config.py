@@ -41,6 +41,10 @@ DEFAULT_SETTINGS = {
     'wake_word': 'юми',       # the wake word itself (say it, then the question);
                               # the ears learn its hear-says into
                               # ~/.local/share/yumi/stt/hearsay.json, edit freely
+    'wake_sensitivity': 'normal',   # normal / strict: how sharply the wake word must match
+    'wake_confirm': True,   # let whisper double-check every vosk guess before waking
+    'wake_model_size': 'small',   # small / big: the model the wake ear listens with
+    'wake_judge_log': True,    # write what the judge hears into /tmp/yumi/judge.log
     'stt_size': 'small',      # her hearing: small (45 MB) / big (a sharper ~1.8 GB model)
     'stt_mic': None,          # which microphone the ears hear with: None = auto (the desktop's pick)
     'ears_range': 'mid',      # how far the ears reach: near / mid / far (the noise gate decides)
@@ -212,6 +216,9 @@ UI = {
         'chat_refresh': 'Find the model',
         'wake_ears': 'Wake on «Yumi»', 'stt_size': 'Hearing accuracy', 'e_small': 'Lite',
         'e_big': 'Sharp (downloads ~1.8 GB)', 'cat_ears': 'Her ears', 'stt_mic': 'Microphone',
+        'wake_sensitivity': 'Wake strictness', 'wake_sensitivity_normal': 'Normal',
+        'wake_sensitivity_strict': 'Strict', 'wake_confirm': 'Judge each guess',
+        'wake_model_size': 'Wake model', 'wake_judge_log': 'Log the judge to /tmp/yumi',
         'mic_refresh': 'Find the microphone', 'mic_auto': 'auto', 'chat_provider': 'Mind provider',
         'polza_url': 'Polza.ai address', 'polza_api_key': 'Polza.ai API key',
         'tap_ears': 'Ears diary (/tmp/yumi)', 'ears_range': 'Ear range',
@@ -257,6 +264,9 @@ UI = {
         'chat_refresh': 'Найти модель',
         'wake_ears': 'Будить по «Юми»', 'stt_size': 'Точность ушей', 'e_small': 'Лёгкая',
         'e_big': 'Точная (скачает ~1.8 ГБ)', 'cat_ears': 'Её ушки', 'stt_mic': 'Микрофон',
+        'wake_sensitivity': 'Строгость пробуждения', 'wake_sensitivity_normal': 'Обычная',
+        'wake_sensitivity_strict': 'Строгая', 'wake_confirm': 'Проверять судом',
+        'wake_model_size': 'Модель пробуждения', 'wake_judge_log': 'Лог суда в /tmp/yumi',
         'mic_refresh': 'Найти микрофон', 'mic_auto': 'авто',
         'chat_provider': 'Провайдер мозгов', 'polza_url': 'Адрес Polza.ai', 'polza_api_key': 'Ключ Polza.ai',
         'tap_ears': 'Дневник ушек (/tmp/yumi)', 'ears_range': 'Дальность ушек',

@@ -37,11 +37,13 @@ for said in ('юмизнает', 'конюми', 'таймер', 'привет �
     assert stt.wake_at(said, spellings) == (None, None), said
 
 # near(): one letter for short words, two for the long ones, never the length gap
-assert stt.near('уми', 'юми')
-assert not stt.near('дни', 'юми')
-assert not stt.near('привет', 'приветмир')
-assert not stt.near('записка', 'заметка')          # three slips and it is another word
-assert stt.near('приветсур', 'приветмир')          # two slips in a long word are ok
+# now returns the edit distance (0 = identical), or lim+1 when over budget
+assert stt.near('уми', 'юми') == 1
+assert stt.near('юми', 'юми') == 0
+assert stt.near('дни', 'юми') > 1
+assert stt.near('привет', 'приветмир') > 1       # length gap over budget
+assert stt.near('записка', 'заметка') > 2         # three slips and it is another word
+assert stt.near('приветсур', 'приветмир') <= 2    # two slips in a long word are ok
 
 # the learning: a spelling one letter from the name gets remembered for next time,
 # but a sound two slips away (a video's word) must not grow into the name

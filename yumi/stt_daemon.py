@@ -66,9 +66,10 @@ WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the siz
                 'big': 'large-v3'}
 VERSION = 11                            # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
-WAKE_TAPE = RATE * 6 * 2                # bytes of the recent sound the judge reads: ~6 s
+WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge reads: ~8 s
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
 VAD_TAIL = 700                          # ms of quiet after speech: the phrase is really over
+WAKE_SENSITIVITY = {'normal': 1, 'strict': 0}  # edit-distance budget for a wake match
 TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
 TAP_SEGMENT = 600.0                     # s of tape in one wav, then the next file starts
 TAP_MAX_BYTES = 10 * 1024 * 1024        # a segment is no bigger than this: the diary is small
@@ -472,7 +473,7 @@ def hearsay_save(word, heard):
     heard = ' '.join(heard.split()).lower().replace('ё', 'е')
     if not heard or ' ' in heard or len(heard) > 12:
         return                # the spelling is one token: «ю ми» is matched by the windows
-    if len(heard) < 3 or not any(near(heard, s) for s in variants(word)):
+    if len(heard) < 3 or not any(near(heard, s) <= 1 for s in variants(word)):
         return                # a stray sound must not grow into the name: «на» is not «юми»
     try:
         data = json.loads(HEARSAY_FILE.read_text()) if HEARSAY_FILE.exists() else {}
@@ -487,13 +488,14 @@ def hearsay_save(word, heard):
 
 
 def near(a, b):
-    """True when the two words differ by at most a couple of letters (the hearsay of
-    Vosk): one letter forgiven to short words, two to the long ones where one slips in anyway"""
+    """How many letters separate the two words (the hearsay of Vosk): one letter forgiven
+    to short words, two to the long ones where one slips in anyway. Returns the edit
+    distance, or lim+1 when it is already over the budget."""
     if a == b:
-        return True
+        return 0
     lim = 2 if min(len(a), len(b)) >= 6 else 1
     if abs(len(a) - len(b)) > lim:
-        return False
+        return lim + 1
     # a plain edit distance, cut short: a substitution, insertion or deletion is fine
     prev = list(range(len(b) + 1))
     for i, ca in enumerate(a, 1):
@@ -501,9 +503,9 @@ def near(a, b):
         for j, cb in enumerate(b, 1):
             cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
             if min(cur) > lim and min(prev) > lim:
-                return False
+                return lim + 1
         prev = cur
-    return prev[-1] <= lim
+    return prev[-1]
 
 
 class Utterance:
@@ -534,17 +536,18 @@ class Utterance:
         return out
 
 
-def wake_at(text, spellings):
+def wake_at(text, spellings, budget=1):
     """what came after the wake word and the spelling the ears wrote it with, or (None, None);
-    whole words only, anywhere in the first words of the phrase («юми» or behind a filler
-    «а можно ми»), glued hear-say like «ю и ми» counts too: «юмизнает» must not wake her"""
+    whole words only, right at the start of the phrase («юми» or behind a filler
+    «а можно ми»), glued hear-say like «ю и ми» counts too: «юмизнает» must not wake her.
+    budget is how many letters may differ from any known spelling (0 = exact only)."""
     toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
             for t in text.split()]
     toks = [t for t in toks if t]
     for n in (3, 2, 1):                     # the fullest hear-say first, near the start:
-        for i in range(min(len(toks), 8) - n + 1):   # a name is said first, not deep
-            said = ''.join(toks[i:i + n])                # inside a video's speech stream
-            if any(near(said, s) for s in spellings):
+        for i in range(0, min(len(toks), 8) - n + 1):   # a name is said first, not deep
+            said = ''.join(toks[i:i + n])                # glued hear-say like «ю и ми»
+            if any(near(said, s) <= budget for s in spellings):
                 return ' '.join(toks[i + n:]), said
     return None, None
 
@@ -722,7 +725,8 @@ class Ears:
                         pass
                 self.busy = False
 
-    def wake(self, lang, word, secs, size='small', mic=None, ear=None):
+    def wake(self, lang, word, secs, size='small', mic=None, ear=None,
+             sensitivity='normal', confirm=True, model_size=None, judge_log=False):
         """wait for the wake word, keeping the microphone on:
         {'woke': True, 'text': the phrase after it} — the name was heard, the rest came
         {'woke': True, 'text': ''} — the name alone, a phrase may still come
@@ -739,8 +743,9 @@ class Ears:
         name, cmd = recorder_cmd(echo or mic)
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
-        model = self.model(lang, size)
+        model = self.model(lang, model_size or size)
         word = ' '.join(str(word).split()).lower() or 'юми'
+        budget = WAKE_SENSITIVITY.get(sensitivity, WAKE_SENSITIVITY['normal'])
         spellings = variants(word) | hearsay_load(word)
         # whisper is the judge: loaded here, while the lock is ours, because the judge
         # thread may not ask for it — an RLock is open to its own thread only
@@ -760,6 +765,10 @@ class Ears:
                 except Exception as e:  # noqa: BLE001 - a failed verdict is no verdict
                     log('the judge failed, vosk answers alone: ' + str(e)[-120:])
                     text = ''
+                if judge_log:
+                    TAP_DIR.mkdir(parents=True, exist_ok=True)
+                    with open(TAP_DIR / 'judge.log', 'a', encoding='utf-8') as f:
+                        f.write(f'{time.strftime("%H:%M:%S")} {text!r}\n')
                 after, said = wake_at(text, spellings)
                 with judge_lock:
                     verdict.update(busy=False, ok=after is not None, after=after or '',
@@ -830,7 +839,7 @@ class Ears:
                     last = words
                     if woken and det.speech_ms and det.silence_ms >= VAD_TAIL:
                         # the voice died down after the name: whatever came after is the phrase
-                        hit, _src = wake_at(words, spellings)
+                        hit, _src = wake_at(words, spellings, budget)
                         said = hit if hit is not None else words
                         said = ' '.join(said.split())
                         if not said and heard_after:
@@ -862,6 +871,12 @@ class Ears:
                     if not words.strip():
                         continue
                     hit, src = wake_at(words, spellings)
+                    # always write to judge_log if enabled, regardless of whisper availability
+                    if judge_log:
+                        TAP_DIR.mkdir(parents=True, exist_ok=True)
+                        with open(TAP_DIR / 'judge.log', 'a', encoding='utf-8') as f:
+                            # mark that voice was heard but whisper not available
+                            f.write(f'{time.strftime("%H:%M:%S")} VAD_ONLY\n')
                     if not woken and hit is not None and wmodel is not None:
                         # a candidate: the tape goes to the judge; a fresh reading only
                         # when the last one is answered and the wait between reads has passed
@@ -1136,8 +1151,14 @@ class Handler(BaseHTTPRequestHandler):
             size = (q.get('size') or ['small'])[0]
             mic = (q.get('mic') or [None])[0] or None
             ear = (q.get('ear') or ['mid'])[0]
+            sensitivity = (q.get('sensitivity') or ['normal'])[0]
+            confirm = q.get('confirm') and q['confirm'][0] not in ('', '0', 'false', 'no')
+            model_size = (q.get('model_size') or ['small'])[0]
+            judge_log = q.get('judge_log') and q['judge_log'][0] not in ('', '0', 'false', 'no')
             try:
-                res = self.ears.wake(lang, word, secs, size=size, mic=mic, ear=ear)
+                res = self.ears.wake(lang, word, secs, size=size, mic=mic, ear=ear,
+                                     sensitivity=sensitivity, confirm=confirm,
+                                     model_size=model_size, judge_log=judge_log)
             except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
                 self.ears.error = str(e)
                 return self._json({'error': str(e)}, 500)

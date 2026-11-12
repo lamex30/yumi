@@ -500,6 +500,10 @@ class Brain(Extras):
                 'stt_size': ['small', 'big'],
                 'stt_mic': [None] + [m['name'] for m in self.mics],
                 'ears_range': ['near', 'mid', 'far'],
+                'wake_sensitivity': ['normal', 'strict'],
+                'wake_confirm': [True, False],
+                'wake_model_size': ['small', 'big'],
+                'wake_judge_log': [True, False],
                 'chat_provider': ['ollama', 'polza.ai'],
                 'chat_model': self.chat_models or [self.settings.get('chat_model')]}
 
@@ -519,6 +523,14 @@ class Brain(Extras):
             return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
         if arg == 'ears_range':
             return t('r_' + str(val)) if f'r_{val}' in UI['en'] else str(val)
+        if arg == 'wake_sensitivity':
+            return t('wake_sensitivity_' + str(val)) if f'wake_sensitivity_{val}' in UI['en'] else str(val)
+        if arg == 'wake_confirm':
+            return t('on') if val else t('off')
+        if arg == 'wake_model_size':
+            return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
+        if arg == 'wake_judge_log':
+            return t('on') if val else t('off')
         if arg == 'stt_mic':
             if not val:
                 return t('mic_auto')
@@ -879,7 +891,9 @@ class Brain(Extras):
                 self.requests.append(('mics',))
             rows = [('set', 'wake_ears', t('wake_ears')), ('set', 'stt_size', t('stt_size')),
                     ('set', 'stt_mic', t('stt_mic')), ('set', 'ears_range', t('ears_range')),
-                    ('set', 'tap_ears', t('tap_ears'))]
+                    ('set', 'tap_ears', t('tap_ears')), ('set', 'wake_sensitivity', t('wake_sensitivity')),
+                    ('set', 'wake_confirm', t('wake_confirm')), ('set', 'wake_model_size', t('wake_model_size')),
+                    ('set', 'wake_judge_log', t('wake_judge_log'))]
             if self.mics:
                 rows.append(('mic_refresh', None, t('mic_refresh')))
             rows.append(('menu', 'settings', t('back')))

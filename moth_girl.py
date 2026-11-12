@@ -910,7 +910,11 @@ class App(Gtk.Application):
                                 word=self.settings.get('wake_word', 'юми'), secs=120,
                                 size=self.settings.get('stt_size', 'small'),
                                 mic=self.settings.get('stt_mic'),
-                                ear=self.settings.get('ears_range', 'mid'))
+                                ear=self.settings.get('ears_range', 'mid'),
+                                sensitivity=self.settings.get('wake_sensitivity', 'normal'),
+                                confirm=self.settings.get('wake_confirm', True),
+                                model_size=self.settings.get('wake_model_size', 'small'),
+                                judge_log=self.settings.get('wake_judge_log', True))
                 if not self.wake_on or not res or not res.get('woke'):
                     continue            # quiet, called off or the ears are away
                 tail = res.get('text') or ''
