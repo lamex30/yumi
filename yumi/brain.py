@@ -1310,9 +1310,10 @@ class Brain(Extras):
         """Handle music control commands.
 
         Args:
-            cmd: One of 'play_pause', 'next', 'previous', 'stop'
+            cmd: One of 'play', 'pause', 'play_pause', 'next', 'previous', 'stop'
         """
-        phrases = {'play_pause': 'music_toggle', 'next': 'music_next',
+        phrases = {'play_pause': 'music_toggle', 'play': 'music_play',
+                   'pause': 'music_pause', 'next': 'music_next',
                    'previous': 'music_previous', 'stop': 'music_stop'}
         if cmd in phrases:
             self.say(phrases[cmd])
@@ -2364,61 +2365,68 @@ class Brain(Extras):
         return None
 
 
-STOP_COMMANDS = {'стоп', 'стопи', 'останови', 'остановись', 'прекрати', 'stop'}
+# «стоп» is heard by two ears: the wake word wait (stt_daemon's own process) and the
+# click-listen (here, a different process). One shared stop_at, so both are as kind.
+from .stt_daemon import stop_at as stop_command
 
 
-def stop_command(text):
-    """True when a whole word of the phrase is one of her stop commands;
-    mirrors stt_daemon's stop_at (the two run in different processes)"""
-    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
-            for t in (text or '').split()]
-    return any(t in STOP_COMMANDS for t in toks if t)
+MUSIC_WORDS = frozenset((
+    'музыка', 'музыку', 'музыки', 'музыке', 'музыкой', 'песня', 'песню', 'песни',
+    'трек', 'трека', 'треки', 'плейлист', 'плейлиста', 'рок', 'рока',
+    'music', 'songs', 'song', 'track', 'tracks', 'playlist', 'rock'))
+MUSIC_FILLERS = frozenset(('юми', 'yumi', 'а', 'и', 'ну', 'давай', 'пожалуйста',
+                           'please', 'the', 'a', 'an', 'my', 'some'))
+MUSIC_PLAY = frozenset((
+    'включи', 'включить', 'включай', 'запусти', 'запустить', 'играй', 'играть',
+    'продолжай', 'продолжить', 'play', 'resume', 'start'))
+MUSIC_PAUSE = frozenset(('пауза', 'паузу', 'приостанови', 'приостановить', 'pause'))
+MUSIC_STOP_ANY = frozenset(('стоп', 'стопи', 'останови', 'остановить', 'stop'))
+MUSIC_STOP_MUSIC = frozenset(('выключи', 'выключить', 'выруби', 'выруб'))
+MUSIC_NEXT = ('переключи', 'переключить', 'next', 'skip')
+MUSIC_KNOWN = (MUSIC_WORDS | MUSIC_FILLERS | MUSIC_PLAY | MUSIC_PAUSE
+               | MUSIC_STOP_ANY | MUSIC_STOP_MUSIC | set(MUSIC_NEXT)
+               | {'следующ', 'предыдущ', 'назад', 'turn', 'off', 'on'})
 
 
 def music_control_text(text, lang='en'):
-    """Convert voice text to music control command.
+    """Convert voice text to a music command.
 
-    Returns one of: 'play_pause', 'next', 'previous', 'stop', or None if not a music command.
+    Returns 'play' (her own library), 'pause', 'stop', 'next', 'previous',
+    or None if not a music command. Whole words only: «включи музыку» plays,
+    «выключи музыку» stops, and «включи свет» or the telly in the background
+    is not hers to mind. The bare toggle 'play_pause' is for the hotkey only.
     """
-    text_lower = text.lower().strip()
+    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
+            for t in str(text or '').split()]
+    toks = [t for t in toks if t]
+    if not toks:
+        return None
+    has_music = any(t in MUSIC_WORDS for t in toks)
+    if 'не' in toks or 'not' in toks or "don't" in toks:
+        return None                    # «не включай музыку» is not a wish, it is the opposite
 
-    # Russian commands
-    ru_commands = {
-        'play': 'play_pause',
-        'включи': 'play_pause',
-        'включить': 'play_pause',
-        'пауза': 'play_pause',
-        'паузировать': 'play_pause',
-        'стоп': 'stop',
-        'стопи': 'stop',
-        'остановить': 'stop',
-        'следующий': 'next',
-        'next': 'next',
-        'переключи на следующий': 'next',
-        'предыдущий': 'previous',
-        'previous': 'previous',
-        'переключи на предыдущий': 'previous',
-    }
+    def strangers():                   # words this skill knows nothing about
+        return set(toks) - MUSIC_KNOWN - {
+            t for t in toks if t.startswith(('следующ', 'предыдущ'))}
 
-    # English commands
-    en_commands = {
-        'play': 'play_pause',
-        'pause': 'play_pause',
-        'stop': 'stop',
-        'next': 'next',
-        'previous': 'previous',
-        'skip': 'next',
-        'rewind': 'previous',
-    }
-
-    # Check Russian commands first
-    for cmd, action in ru_commands.items():
-        if cmd in text_lower:
-            return action
-
-    # Then check English commands
-    for cmd, action in en_commands.items():
-        if cmd in text_lower:
-            return action
-
+    if any(t in MUSIC_STOP_ANY for t in toks):
+        return 'stop'
+    if has_music and not strangers() and (
+            any(t in MUSIC_STOP_MUSIC for t in toks)
+            or ('turn' in toks and 'off' in toks and 'on' not in toks)):
+        return 'stop'                  # «выключи музыку», but «выключи свет» is not hers
+    if any(t in MUSIC_PAUSE for t in toks):
+        return 'pause'
+    if any(t in MUSIC_NEXT[2:] or t.startswith('следующ') for t in toks):
+        return 'next'
+    if any(t.startswith('предыдущ') or t in ('previous', 'rewind', 'назад') for t in toks):
+        return 'previous'
+    if any(t in MUSIC_NEXT[:2] for t in toks):     # «переключи музыку»: the next one
+        return 'next' if has_music else None
+    if any(t in MUSIC_PLAY for t in toks):
+        if has_music or not strangers():
+            return 'play'
+        return None                    # «включи свет» is not hers to do
+    if has_music and not strangers():  # just «музыку»: her library, please
+        return 'play'
     return None

@@ -69,5 +69,17 @@ stt.HEARSAY_FILE = _hearsay
 assert stt.wake_at('привет как дела сегодня погода хорошая совсем неплохо ну юми',
                    spellings) == (None, None)
 
+# stop_at: «стоп» overrides everything, and a one-letter slip over the music still counts
+assert stt.stop_at('стоп')
+assert stt.stop_at('стопи')
+assert stt.stop_at('остановись')
+assert stt.stop_at('юми стоп')
+assert stt.stop_at('стол')            # the ears' slip over the playing music
+assert stt.stop_at('стой')
+assert not stt.stop_at('включи музыку')
+assert not stt.stop_at('')
+assert not stt.stop_at('столько')     # two slips and more: not a stop
+assert not stt.stop_at('стопор')
+
 print('test_wake: ok')
 sys.exit(0)

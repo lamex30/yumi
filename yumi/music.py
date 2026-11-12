@@ -283,15 +283,35 @@ def service_stop():
 
 
 def music_control(cmd):
-    """One entry for her voice and menu: 'play_pause', 'next', 'previous', 'stop'.
+    """One entry for her voice and menu: 'play', 'pause', 'play_pause',
+    'next', 'previous', 'stop'.
 
-    When an MPRIS player is around and busy with media, it gets the command;
-    otherwise she plays her own library (mpd, or ffplay as a last resort).
+    «Включи музыку» ('play') is always her own library: never a toggle of some
+    other player that happens to be around. The true toggle 'play_pause' is
+    kept for the hotkey and the menu button. 'pause' only quiets what plays.
     """
     if cmd == 'stop':
         return stop_music(force=True)
 
-    if cmd == 'play_pause':
+    if cmd == 'play':                  # «включи музыку»: hers, from the top
+        if is_mpd_playing():
+            return True
+        if _mpd_ready():               # her library was paused: resume it
+            r = _mpc('play')
+            return r is not None and r.returncode == 0 and is_mpd_playing()
+        return play_music()            # nothing of hers going: start the library
+                                       # (play_music silences the other players first)
+
+    if cmd == 'pause':                 # «пауза»: quiet, without losing the track
+        if _player_status().lower().startswith('playing'):
+            r = _playerctl('pause')
+            return r is not None and r.returncode == 0
+        if '[playing]' in (get_mpd_status() or '').lower():
+            r = _mpc('pause')
+            return r is not None and r.returncode == 0
+        return False
+
+    if cmd == 'play_pause':           # the hotkey and the menu: a true toggle
         state = _player_status().lower()
         if state.startswith(('playing', 'paused')):   # a player with media: just toggle it
             r = _playerctl('play-pause')

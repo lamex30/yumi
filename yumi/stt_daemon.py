@@ -64,7 +64,7 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 11                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 12                            # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge reads: ~8 s
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
@@ -582,25 +582,36 @@ def _stop_words():
 
 def stop_at(text):
     """True when a whole word of the phrase is one of her stop commands: «стоп»
-    overrides everything she is busy with, even her own voice mid-word"""
+    overrides everything she is busy with, even her own voice mid-word. A word one
+    letter from a short command counts too: over the playing music the ears slip
+    a letter («стоп» comes back as «стол», «стой»), and a shout that must stop her
+    is not lost to one slip"""
     words = _stop_words()
     toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
             for t in (text or '').split()]
-    return any(t in words for t in toks if t)
+    return any(t in words or (len(t) >= 4 and any(near(t, w) <= 1
+               for w in words if len(w) <= 6)) for t in toks if t)
 
 
 _judge = threading.Lock()   # one whisper reading at a time, wake to wake
 
 
-def transcribe_model(model, pcm, lang):
+def transcribe_model(model, pcm, lang, hotwords=None):
     """s16 mono through a whisper that is already in hand ('' for silence): a function
     of its own so a thread may read with a model the lock will not hand out again
-    (an RLock is open to its own thread only)"""
+    (an RLock is open to its own thread only). hotwords leans the reading toward
+    the wake word: the small whisper keeps dropping a short name said into the
+    room — «юми» comes back as «умень» or not at all"""
     import numpy as np
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-    segments, _info = model.transcribe(
-        audio, language=lang or None, beam_size=1, vad_filter=True,
-        condition_on_previous_text=False)
+    try:
+        segments, _info = model.transcribe(
+            audio, language=lang or None, beam_size=1, vad_filter=True,
+            condition_on_previous_text=False, hotwords=hotwords)
+    except TypeError:           # an older faster-whisper knows no hotwords
+        segments, _info = model.transcribe(
+            audio, language=lang or None, beam_size=1, vad_filter=True,
+            condition_on_previous_text=False)
     return ' '.join(s.text for s in segments).strip()
 
 
@@ -793,19 +804,28 @@ class Ears:
             log('whisper will not judge, vosk answers alone: ' + str(e)[-120:])
         judge_lock = threading.Lock()
 
+        def judge_note(what):
+            """one line into the wake's diary (judge.log): what vosk heard, what went
+            to the judge and what came back — without it a failed wake is a guess"""
+            if not judge_log:
+                return
+            TAP_DIR.mkdir(parents=True, exist_ok=True)
+            try:
+                with open(TAP_DIR / 'judge.log', 'a', encoding='utf-8') as f:
+                    f.write(f'{time.strftime("%H:%M:%S")} {what}\n')
+            except OSError:
+                pass
+
         def judge(says):
             """whisper reads the tape in its own thread (the words come in while the
             judge still reads) and leaves its answer for the wake loop to find"""
             with _judge:                # wake to wake: one whisper reading at a time
                 try:
-                    text = transcribe_model(wmodel, says, lang)
+                    text = transcribe_model(wmodel, says, lang, hotwords=word)
                 except Exception as e:  # noqa: BLE001 - a failed verdict is no verdict
                     log('the judge failed, vosk answers alone: ' + str(e)[-120:])
                     text = ''
-                if judge_log:
-                    TAP_DIR.mkdir(parents=True, exist_ok=True)
-                    with open(TAP_DIR / 'judge.log', 'a', encoding='utf-8') as f:
-                        f.write(f'{time.strftime("%H:%M:%S")} {text!r}\n')
+                judge_note(f'JUDGE {text!r}')
                 after, said = wake_at(text, spellings)
                 with judge_lock:
                     verdict.update(busy=False, ok=after is not None, after=after or '',
@@ -832,6 +852,7 @@ class Ears:
                 woken = False               # the wake word has passed by already
                 since = t0                  # when the heard words last changed
                 last = ''                   # the previous half-heard words, to notice staleness
+                logged = ''                 # the words the wake's diary last wrote, one line each
                 tape = bytearray()          # the judge's tape: the newest clean sound stays
                 verdict = {'busy': False, 'ok': None, 'after': '', 'said': None,
                            't': 0.0}        # whisper's fresh answer lives here
@@ -889,10 +910,8 @@ class Ears:
                             return {'woke': True, 'text': said}
                         return {'woke': True, 'text': ''}   # her turn to greet
                     if woken and time.monotonic() - since > WAKE_AFTER:
-                        # the name passed by and quiet followed: her turn to greet
-                        return {'woke': True, 'text': ''}
-                    if woken and time.monotonic() - since > WAKE_AFTER:
-                        # the name passed by and quiet followed: her turn to greet
+                        # the name passed by and quiet followed: what the judge heard
+                        # past the name stands, even when vosk's own words went quiet
                         return {'woke': True, 'text': heard_after}
                     # the judge's answer, when it has come: a yes wakes her, a no means
                     # the letters were a dream of vosk's (a name in a video's stream);
@@ -911,19 +930,17 @@ class Ears:
                                 hearsay_save(word, said)    # a hear-say the judge approved
                     if not words.strip():
                         continue
+                    if words != logged:         # every fresh half-heard once, not each chunk
+                        logged = words
+                        judge_note(f'VOSK {words!r}')
                     hit, src = wake_at(words, spellings)
-                    # always write to judge_log if enabled, regardless of whisper availability
-                    if judge_log:
-                        TAP_DIR.mkdir(parents=True, exist_ok=True)
-                        with open(TAP_DIR / 'judge.log', 'a', encoding='utf-8') as f:
-                            # mark that voice was heard but whisper not available
-                            f.write(f'{time.strftime("%H:%M:%S")} VAD_ONLY\n')
                     if not woken and hit is not None and wmodel is not None:
                         # a candidate: the tape goes to the judge; a fresh reading only
                         # when the last one is answered and the wait between reads has passed
                         if not verdict['busy'] and verdict['ok'] is None \
                                 and time.monotonic() - verdict['t'] > WAKE_REJUDGE:
                             verdict['busy'] = True
+                            judge_note(f'SENT {src!r}')
                             threading.Thread(target=judge, args=(bytes(tape),),
                                              daemon=True).start()
                     if not woken and hit is not None and wmodel is None:
