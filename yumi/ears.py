@@ -29,6 +29,19 @@ STATE = DIR / 'port.json'
 LOG = config.STATE_DIR / 'stt.log'      # what the daemon printed, for the troubleshooting
 _sys_py_ok = None
 _spawn_lock = threading.Lock()          # ears start from several threads: one daemon at a time
+_proc = None          # the daemon Yumi started (not one already running)
+
+
+def close():
+    """stop the STT daemon Yumi started, if it is still ours; safe to call more than once"""
+    global _proc
+    p = _proc
+    _proc = None
+    if p:
+        try:
+            p.terminate()
+        except (OSError, AttributeError):
+            pass
 
 
 def _ping(port, timeout=0.4):
@@ -94,9 +107,10 @@ def _ensure():
         try:
             LOG.parent.mkdir(parents=True, exist_ok=True)
             log = open(LOG, 'ab')           # the daemon's prints live here, for the troubleshooting
-            subprocess.Popen([str(py), str(DAEMON)], start_new_session=True,
-                             stdout=log, stderr=log)
+            _proc = subprocess.Popen([str(py), str(DAEMON)], start_new_session=True,
+                                     stdout=log, stderr=log)
         except OSError:
+            _proc = None
             return None
         for _ in range(50):                 # 10 s: importing vosk is quick, the first model download is not
             info = _state()

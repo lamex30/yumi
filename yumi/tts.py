@@ -66,6 +66,21 @@ def _python():
     return sys.executable if _sys_py_ok else None
 
 
+_proc = None          # the daemon Yumi started (not one already running)
+
+
+def close():
+    """stop the TTS daemon Yumi started, if it is still ours; safe to call more than once"""
+    global _proc
+    p = _proc
+    _proc = None
+    if p:
+        try:
+            p.terminate()
+        except (OSError, AttributeError):
+            pass
+
+
 def _ensure():
     """the running daemon's port and profile, starting it if needed; None if it cannot be"""
     DIR.mkdir(parents=True, exist_ok=True)
@@ -76,9 +91,10 @@ def _ensure():
     if not py:
         return None
     try:
-        subprocess.Popen([str(py), str(DAEMON)], start_new_session=True,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _proc = subprocess.Popen([str(py), str(DAEMON)], start_new_session=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
+        _proc = None
         return None
     for _ in range(100):               # 20 s: importing torch is the slow part
         info = _state()

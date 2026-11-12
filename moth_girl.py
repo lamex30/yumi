@@ -550,12 +550,20 @@ class App(Gtk.Application):
         self.apply_palette(self.effective_palette(), Meta(config.SPRITES, name))
         self.ev(lambda b: b.set_face('happy', 2.5))
 
+    def close(self):
+        """let all her companion services go before she does: the TTS daemon,
+        the STT daemon and anything else that outlives her process."""
+        tts.close()
+        ears.close()
+        self.stop_timer_sound()
+
     def do_activate(self):
         if not LayerShell.is_supported():
             sys.stderr.write('yumi: this desktop has no wlr-layer-shell (GNOME and X11 are not '
                              'supported yet). She lives on sway, Hyprland, niri, river, Wayfire, '
                              'labwc, KDE Plasma, COSMIC...\n')
             self.failed = True
+            self.close()
             self.quit()
             return
         if not self.windows:
@@ -651,6 +659,7 @@ class App(Gtk.Application):
         elif name == 'sleep':
             self.ev(lambda b: b.requests.append(('dnd', not b.sleeping)))
         elif name == 'quit':
+            self.close()
             self.quit()
 
     # ---- the loop: every event and every frame goes through here
@@ -762,9 +771,11 @@ class App(Gtk.Application):
                 self.apply_palette(self.effective_palette())
             elif kind == 'quit':
                 self.state.save()
+                self.close()
                 self.quit()
             elif kind == 'restart':
                 self.state.save()
+                self.close()
                 self.restart()
 
     def restart(self):
@@ -777,6 +788,7 @@ class App(Gtk.Application):
                               exe, str(os.getpid())], start_new_session=True,
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
+        self.close()
         self.quit()
 
     # ---- timer sound: her 8-bit chime, or a file chosen in the settings
