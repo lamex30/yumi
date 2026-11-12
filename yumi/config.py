@@ -38,6 +38,7 @@ DEFAULT_SETTINGS = {
     'polza_url': 'https://polza.ai/api/v1',   # Polza.ai OpenAI-compatible endpoint
     'polza_api_key': '',   # Polza.ai API key (get it at polza.ai)
     'wake_ears': True,        # she starts listening the moment you say the wake word
+    'music_skill': True,      # music control via voice commands
     'wake_word': 'юми',       # the wake word itself (say it, then the question);
                               # the ears learn its hear-says into
                               # ~/.local/share/yumi/stt/hearsay.json, edit freely
@@ -263,6 +264,7 @@ UI = {
         'joke': 'Анекдот',
         'chat_refresh': 'Найти модель',
         'wake_ears': 'Будить по «Юми»', 'stt_size': 'Точность ушей', 'e_small': 'Лёгкая',
+    'music_skill': 'Умение управлять музыкой',
         'e_big': 'Точная (скачает ~1.8 ГБ)', 'cat_ears': 'Её ушки', 'stt_mic': 'Микрофон',
         'wake_sensitivity': 'Строгость пробуждения', 'wake_sensitivity_normal': 'Обычная',
         'wake_sensitivity_strict': 'Строгая', 'wake_confirm': 'Проверять судом',

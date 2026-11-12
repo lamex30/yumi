@@ -176,7 +176,8 @@ def wake(lang='ru', word='юми', secs=20, size='small', mic=None, ear=None,
             data = json.loads(r.read().decode())
     except (urllib.error.URLError, OSError, ValueError):
         return None
-    return {'woke': bool(data.get('woke')), 'text': str(data.get('text') or '')}
+    return {'woke': bool(data.get('woke')), 'text': str(data.get('text') or ''),
+            'stop': bool(data.get('stop'))}
 
 
 def tap(on, lang='ru', size='small', mic=None, ear=None):

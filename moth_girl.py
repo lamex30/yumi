@@ -40,7 +40,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from yumi import chat, config, ears, files, jobs, pixfont, pixui, system, tts, voice  # noqa: E402
+from yumi import chat, config, ears, files, jobs, music, pixfont, pixui, system, tts, voice  # noqa: E402
 from yumi.brain import UI_PX, Brain  # noqa: E402
 from yumi.phrases import Speech  # noqa: E402
 from yumi.sprites import Meta, palette_delta, palette_from_hue, recolor_bgra, ui_colors  # noqa: E402
@@ -527,6 +527,7 @@ class App(Gtk.Application):
         self.wake_thread = None
         self.wake_set(bool(self.settings.get('wake_ears')))   # «Юми» works out of the box
         self.tap_set(bool(self.settings.get('tap_ears')))     # the diary, too, if it was asked
+        threading.Thread(target=music.service_start, daemon=True).start()   # mpd lives with her
         self.fetch_chat_models()        # her answer model for the settings, in the background
         self.on_caps(initial=True)
         GLib.timeout_add_seconds(3600, lambda: self.apply_outfit() or True)    # the calendar moves on
@@ -552,10 +553,14 @@ class App(Gtk.Application):
 
     def close(self):
         """let all her companion services go before she does: the TTS daemon,
-        the STT daemon and anything else that outlives her process."""
+        the STT daemon, her music and anything else that outlives her process."""
         tts.close()
         ears.close()
         self.stop_timer_sound()
+        try:
+            music.service_stop()
+        except Exception:
+            pass
 
     def do_activate(self):
         if not LayerShell.is_supported():
@@ -723,8 +728,6 @@ class App(Gtk.Application):
                 self.world.set_dnd(r[1])
                 b.set_sleep(r[1])          # the notification daemon will confirm; act now
             elif kind == 'search_files':
-                from . import files as F
-                from . import jobs as J
                 query = r[1] if len(r) > 1 else ''
                 if query:
                     # Search for files using find or fd
@@ -766,12 +769,9 @@ class App(Gtk.Application):
                 # Display search results in a menu
                 results = r[1]
                 if results:
-                    from . import config as C
-                    from . import phrases as P
-                    
                     # Create a menu with search results
                     lang = b.settings.get('ui_lang', 'en')
-                    ui = C.UI.get(lang, C.UI['en'])
+                    ui = config.UI.get(lang, config.UI['en'])
                     
                     rows = []
                     for i, path in enumerate(results[:10]):  # Show max 10 results
@@ -827,12 +827,19 @@ class App(Gtk.Application):
                 self.weather_ask(r[1])
             elif kind == 'hourly_ask':
                 self.hourly_ask(r[1])
-            elif kind == 'joke_ask':
-                self.joke_ask(r[1])
-            elif kind == 'chat_models':
-                self.fetch_chat_models()
-            elif kind == 'mics':
-                self.fetch_mics()
+            elif kind == 'music_control':
+                cmd = r[1]
+                try:
+                    music.music_control(cmd)
+                except Exception:
+                    pass
+            elif kind == 'stop_all':
+                self.hush()                    # her voice dies mid-word
+                self.stop_timer_sound()
+                try:
+                    music.music_control('stop')
+                except Exception:
+                    pass
             elif kind == 'pick_sound':
                 self.pick_sound()
             elif kind == 'form_pick':
@@ -978,10 +985,8 @@ class App(Gtk.Application):
             b = self.brain
             while self.wake_on:
                 time.sleep(0.15)
-                busy = (b.sleeping or b.thinking or b.listening
-                        or b.now < b.talk_until or self.talking())
-                if not self.wake_on or busy:
-                    continue            # not while she sleeps, answers or listens on request
+                if b.listening:
+                    continue            # the mic is lent to a click-listen: not ours now
                 res = ears.wake(lang=self.settings.get('speech_lang', 'en'),
                                 word=self.settings.get('wake_word', 'юми'), secs=120,
                                 size=self.settings.get('stt_size', 'small'),
@@ -991,8 +996,12 @@ class App(Gtk.Application):
                                 confirm=self.settings.get('wake_confirm', True),
                                 model_size=self.settings.get('wake_model_size', 'small'),
                                 judge_log=self.settings.get('wake_judge_log', True))
-                if not self.wake_on or not res or not res.get('woke'):
+                if not self.wake_on or not res:
                     continue            # quiet, called off or the ears are away
+                if res.get('stop'):
+                    # «стоп» overrides everything: even mid-word, asleep or thinking
+                    GLib.idle_add(self.stop_all)
+                    continue
                 tail = res.get('text') or ''
                 busy = (b.sleeping or b.thinking or b.listening
                         or b.now < b.talk_until or self.talking())

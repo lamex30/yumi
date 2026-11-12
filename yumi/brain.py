@@ -1020,6 +1020,10 @@ class Brain(Extras):
             elif self.say('listening'):
                 self.listening = True
                 self.requests.append(('listen', 15))
+        elif action == 'music_control':
+            self.music_control(arg)
+            self.menu = None
+            self.close_radial()
         elif action == 'sleep':
             self.menu = None
             self.close_radial()
@@ -1166,6 +1170,9 @@ class Brain(Extras):
         if not text:
             self.say('heard_nothing')
             return
+        if stop_command(text):             # «стоп» overrides everything, even her own voice
+            self.stop_all()
+            return
         lang = self.settings.get('speech_lang', 'en')
         self.say_text(text, voice=False)   # back to you, quietly: you just said it
         if chat.time_question(text):       # the clock she reads herself, no mind needed
@@ -1183,6 +1190,13 @@ class Brain(Extras):
             self.thinking = True
             self.requests.append(('joke_ask', {'lang': lang}))
             return
+        # Music control commands (only if music skill is enabled)
+        if self.settings.get('music_skill', True):
+            music_cmd = music_control_text(text, lang)
+            if music_cmd:
+                self.music_control(music_cmd)
+                return
+        # Fall through to normal text processing if music skill is disabled
         self.chat_history.append({'role': 'user', 'content': text})
         del self.chat_history[:-10]     # she remembers her last five turns
         self.thinking = True
@@ -1278,6 +1292,31 @@ class Brain(Extras):
         self.requests.append(('copy', hexc))
         self.requests.append(('save',))
         self.say('pipette_done', hex=hexc)
+
+    def stop_all(self):
+        """«стоп»: everything she was busy with stops now — her line mid-word, her
+        waiting for a phrase, her thinking, the music and the timer's chime"""
+        self.bubble = None
+        self.talk_until = self.now
+        self.thinking = False
+        self.listening = False
+        self.timer = None
+        self.kb_hover = False
+        self.requests.clear()              # nothing queued may keep running past the stop
+        self.requests.append(('stop_all',))
+        self.say('stop_all')
+
+    def music_control(self, cmd):
+        """Handle music control commands.
+
+        Args:
+            cmd: One of 'play_pause', 'next', 'previous', 'stop'
+        """
+        phrases = {'play_pause': 'music_toggle', 'next': 'music_next',
+                   'previous': 'music_previous', 'stop': 'music_stop'}
+        if cmd in phrases:
+            self.say(phrases[cmd])
+            self.requests.append(('music_control', cmd))
 
     def dnd_motion(self, x, y):
         """an outside drag hovers: True when she would take it"""
@@ -2323,3 +2362,63 @@ class Brain(Extras):
             if c['path'] and inside(c['rect'], x, y):
                 return c['path']
         return None
+
+
+STOP_COMMANDS = {'стоп', 'стопи', 'останови', 'остановись', 'прекрати', 'stop'}
+
+
+def stop_command(text):
+    """True when a whole word of the phrase is one of her stop commands;
+    mirrors stt_daemon's stop_at (the two run in different processes)"""
+    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
+            for t in (text or '').split()]
+    return any(t in STOP_COMMANDS for t in toks if t)
+
+
+def music_control_text(text, lang='en'):
+    """Convert voice text to music control command.
+
+    Returns one of: 'play_pause', 'next', 'previous', 'stop', or None if not a music command.
+    """
+    text_lower = text.lower().strip()
+
+    # Russian commands
+    ru_commands = {
+        'play': 'play_pause',
+        'включи': 'play_pause',
+        'включить': 'play_pause',
+        'пауза': 'play_pause',
+        'паузировать': 'play_pause',
+        'стоп': 'stop',
+        'стопи': 'stop',
+        'остановить': 'stop',
+        'следующий': 'next',
+        'next': 'next',
+        'переключи на следующий': 'next',
+        'предыдущий': 'previous',
+        'previous': 'previous',
+        'переключи на предыдущий': 'previous',
+    }
+
+    # English commands
+    en_commands = {
+        'play': 'play_pause',
+        'pause': 'play_pause',
+        'stop': 'stop',
+        'next': 'next',
+        'previous': 'previous',
+        'skip': 'next',
+        'rewind': 'previous',
+    }
+
+    # Check Russian commands first
+    for cmd, action in ru_commands.items():
+        if cmd in text_lower:
+            return action
+
+    # Then check English commands
+    for cmd, action in en_commands.items():
+        if cmd in text_lower:
+            return action
+
+    return None

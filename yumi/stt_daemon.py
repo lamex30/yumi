@@ -547,9 +547,46 @@ def wake_at(text, spellings, budget=1):
     for n in (3, 2, 1):                     # the fullest hear-say first, near the start:
         for i in range(0, min(len(toks), 8) - n + 1):   # a name is said first, not deep
             said = ''.join(toks[i:i + n])                # glued hear-say like «ю и ми»
-            if any(near(said, s) <= budget for s in spellings):
-                return ' '.join(toks[i + n:]), said
+            dist = min(near(said, s) for s in spellings)
+            if dist > budget:
+                continue
+            # a common word one letter from the name's hear-say («иди», «или», «уже»)
+            # must not wake her: it counts as the name only when a true spelling of the
+            # name fits the sound no worse than the stop word does
+            if any(near(said, w) < dist for w in WAKE_STOPS):
+                continue
+            return ' '.join(toks[i + n:]), said
     return None, None
+
+
+WAKE_STOPS = {'иди', 'или', 'уже', 'ели', 'юли', 'умер'}    # the ears' false names: never wake on these
+STOP_COMMANDS = {'стоп', 'стопи', 'останови', 'остановись', 'прекрати', 'stop'}
+STOP_FILE = HOME / 'stop_words.json'       # extra stop words the user may add (a json list)
+_stops_cache = {'t': 0.0, 'words': frozenset(STOP_COMMANDS)}
+
+
+def _stop_words():
+    """her stop commands plus the ones the user added on disk (reread at most twice a second)"""
+    now = time.monotonic()
+    if now - _stops_cache['t'] > 5.0:
+        words = set(STOP_COMMANDS)
+        try:
+            extra = json.loads(STOP_FILE.read_text())
+            words.update(w.lower().replace('ё', 'е').strip()
+                         for w in (extra if isinstance(extra, list) else []) if isinstance(w, str))
+        except (OSError, ValueError):
+            pass
+        _stops_cache.update(t=now, words=words)
+    return _stops_cache['words']
+
+
+def stop_at(text):
+    """True when a whole word of the phrase is one of her stop commands: «стоп»
+    overrides everything she is busy with, even her own voice mid-word"""
+    words = _stop_words()
+    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
+            for t in (text or '').split()]
+    return any(t in words for t in toks if t)
 
 
 _judge = threading.Lock()   # one whisper reading at a time, wake to wake
@@ -837,6 +874,10 @@ class Ears:
                     if woken and words != last:
                         since = time.monotonic()    # the half-heard moves on: the wait restarts
                     last = words
+                    if stop_at(words):
+                        # «стоп» overrides everything: she stops whatever she is busy
+                        # with, even her own voice mid-word, wake word or not
+                        return {'woke': False, 'stop': True, 'text': words}
                     if woken and det.speech_ms and det.silence_ms >= VAD_TAIL:
                         # the voice died down after the name: whatever came after is the phrase
                         hit, _src = wake_at(words, spellings, budget)
@@ -1162,7 +1203,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
                 self.ears.error = str(e)
                 return self._json({'error': str(e)}, 500)
-            return self._json({'ok': True, 'woke': res['woke'], 'text': res.get('text')})
+            return self._json({'ok': True, 'woke': res['woke'], 'text': res.get('text'),
+                               'stop': bool(res.get('stop'))})
         if u.path != '/listen':
             return self._json({'error': 'no such path'}, 404)
         if self.ears.busy and self.ears.kind == 'wake':

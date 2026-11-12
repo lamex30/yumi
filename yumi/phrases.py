@@ -139,6 +139,11 @@ LINES = {
         'timer_done': [("Time's up!", 'surprised'), ("Ding! The timer's done.", 'happy'),
                        ("Hey, that's {mins}. Time!", 'surprised'), ("Timer's over~", 'wink')],
         'hourly': [("It's {time}.", None), ("{time} on the clock.", 'wink'), ("The time is {time}.", None)],
+        'music_toggle': [("Play or pause... there.", 'happy'), ("Toggled it.", None)],
+        'music_next': [("Next track.", None), ("Skipping ahead~", 'wink')],
+        'music_previous': [("Back to the previous one.", None), ("Rewound a bit.", None)],
+        'music_stop': [("Quiet, then.", None), ("Music stopped.", None)],
+        'stop_all': [("Stopped.", None), ("All quiet.", None)],
     },
     'ru': {
         'hello': [("Мм... я тут. Почти.", None), ("Привет. Я буду в уголке.", 'happy'),
@@ -251,6 +256,11 @@ LINES = {
         'timer_done': [("Время вышло!", 'surprised'), ("Дзинь! Таймер сработал.", 'happy'),
                        ("Эй, прошло {mins}. Время!", 'surprised'), ("Таймер закончился~", 'wink')],
         'hourly': [("Сейчас {time}.", None), ("На часах {time}.", 'wink'), ("Время — {time}.", None)],
+        'music_toggle': [("Играть или на паузу... вот так.", 'happy'), ("Переключила.", None)],
+        'music_next': [("Следующий трек.", None), ("Перематываю дальше~", 'wink')],
+        'music_previous': [("Назад, к предыдущему.", None), ("Немного отмотала.", None)],
+        'music_stop': [("Тишина, значит.", None), ("Музыка остановлена.", None)],
+        'stop_all': [("Остановилась.", None), ("Тишина.", None)],
     },
 }
 
