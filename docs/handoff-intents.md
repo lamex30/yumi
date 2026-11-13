@@ -58,18 +58,29 @@ onnxruntime** в основном процессе приложения.
 - [x] Окружение проверено: системный python 3.14 (приложение), onnxruntime
       1.29.0 уже установлен, numpy есть; для обучения python3.12 + uv есть
       (tokenizers в систему НЕ ставится: Arch PEP 668 — заменён своим wordpiece)
-- [x] `data/intents-corpus.json` — корпус (5 меток, 255 фраз; Terminal, Search,
-      Notes, Play / pause, chat)
+- [x] `data/intents-corpus.json` — корпус (5 меток, 287 фраз: Terminal, Search,
+      Notes, Play / pause, chat с негативами «команды не-кнопки»)
 - [x] `tools/intents_train.py` + `tools/intents_setup.sh`
-- [ ] обучение выполнено, метрики записаны ниже
-- [x] `yumi/intents.py` (рантайм: onnxruntime + tokenizers, БЕЗ transformers)
+- [x] обучение выполнено (попытка 3), метрики ниже; модель в
+      `~/.local/share/yumi/intents/` (вне репо, как TTS/STT)
+- [x] `yumi/intents.py` (рантайм: onnxruntime + wordpiece чистым питоном)
 - [x] интеграция: `nlu.match(..., use_intents=True)` третий уровень;
       `brain.voice_intent` передаёт настройку `intents`; в меню
       Settings → Mind добавлен переключатель (config.py, en+ru)
-- [x] `tests/test_intents.py` (офлайн-часть проходит; модельные пробы — скип
-      без модели)
-- [ ] README (ru+en) обновлён
-- [ ] всё закоммичено в ветке `intents-model`
+- [x] `tests/test_intents.py` + `tests/test_nlu.py` — проходят
+- [x] README (ru+en) обновлён
+- [x] всё закоммичено в ветке `intents-model` (4c9f650, 49a9915, c6fb80b)
+
+## Что осталось СОБРАННОМУ агенту (если продолжать)
+
+1. Пользователь не перезапускал Yumi после установки модели — проверить вживую
+   (`yumi --quit && yumi`), настройки → Её мозги → Распознавание фраз.
+2. Лог промахов в чат (идея «judge.log») → расширение корпуса живыми фразами.
+3. Слоты `{query}`: после выбора классификатором интента Search резать запрос
+   старым `_slots()` из nlu.py — тогда поиск голосом заработает и на
+   переформулировках.
+4. При желании: `--epochs`/`--base` флаги уже есть; больше негативов в chat
+   — самый дешёвый способ улучшить поведение.
 
 ### Метрики (заполнить после обучения)
 
