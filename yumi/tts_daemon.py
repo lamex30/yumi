@@ -7,7 +7,9 @@ downloads the voices (~100 MB), after that a line takes a moment. The models liv
 ~/.local/share/yumi/tts; the speakers and the pitch are tweaked in ~/.config/yumi/tts.json:
 {"ru_speaker": "kseniya", "en_speaker": "en_0", "pitch": 1.15}   (1.0 = as recorded)
 
-Speakers, Russian: kseniya, baya, xenia, aidar, eugene; English: en_0 … en_117.
+The Russian model is "v5_6_ru" (questions and exclamations); write "ru_model": "v4_ru"
+into the same tts.json to roll back — both models live in the cache side by side, no
+re-download needed. Speakers, Russian: kseniya, baya, xenia, aidar, eugene; English: en_0 … en_117.
 """
 import argparse
 import atexit
@@ -28,8 +30,9 @@ MODELS_HOME = Path(os.environ.get('YUMI_TTS_HOME') or Path.home() / '.local/shar
 CONF = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'yumi' / 'tts.json'
 STATE = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'yumi' / 'tts' / 'port.json'
 HUB = 'snakers4/silero-models'
-LANGS = {'ru': ('v4_ru', 24000), 'en': ('v3_en', 24000)}   # (model tag, sample rate)
-DEFAULTS = {'ru_speaker': 'kseniya', 'en_speaker': 'en_0', 'pitch': 1.15}
+LANGS = {'ru': ('v4_ru', 24000), 'en': ('v3_en', 24000)}   # fallback tags and sample rates
+DEFAULTS = {'ru_speaker': 'kseniya', 'en_speaker': 'en_0', 'pitch': 1.15,
+            'ru_model': 'v5_6_ru'}   # «ru_model»: «v4_ru» in tts.json rolls the voice back
 MAX_TEXT = 500
 
 
@@ -68,12 +71,21 @@ class Engine:
         if lang not in self.models:
             import torch
             torch.hub.set_dir(str(MODELS_HOME / 'hub'))
-            tag = LANGS[lang][0]
-            log(f'loading the {lang} voice ({tag})...')
-            model, _ = torch.hub.load(HUB, 'silero_tts', language=lang, speaker=tag,
-                                      device='cpu', trust_repo=True, skip_validation=True)
-            self.models[lang] = model
-            log(f'the {lang} voice is loaded')
+            tag = self.conf.get('ru_model') if lang == 'ru' else LANGS[lang][0]
+            tags = [tag] if tag == LANGS[lang][0] else [tag, LANGS[lang][0]]
+            last = None
+            for tag in tags:           # a model that would not come: the previous one stays
+                try:
+                    log(f'loading the {lang} voice ({tag})...')
+                    model, _ = torch.hub.load(HUB, 'silero_tts', language=lang, speaker=tag,
+                                              device='cpu', trust_repo=True, skip_validation=True)
+                    self.models[lang] = model
+                    log(f'the {lang} voice is loaded ({tag})')
+                    return model
+                except Exception as e:  # noqa: BLE001
+                    last = e
+                    log(f'could not load {tag}: {e}')
+            raise last
         return self.models[lang]
 
     def synth(self, text, lang, vol):

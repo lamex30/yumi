@@ -286,6 +286,10 @@ voices warm up in the background; after that she answers at once, and her lines 
 {"ru_speaker": "kseniya", "en_speaker": "en_0", "pitch": 1.15}
 ```
 
+The Russian voice is Silero `v5_6_ru` (it hears questions and exclamations); if it says something
+you like less, write `"ru_model": "v4_ru"` into the same `tts.json` and restart the voice — both
+models sit in the cache side by side, so no re-download.
+
 `pitch` is 1.0 as recorded, 1.2 a proper squeak. After editing the file, restart the voice:
 `pkill -f yumi/tts_daemon.py`. Without the setup she simply keeps her blips.
 
