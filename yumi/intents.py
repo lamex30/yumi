@@ -20,9 +20,12 @@ from pathlib import Path
 
 HOME = Path(os.environ.get('YUMI_INTENTS_HOME') or Path.home() / '.local/share/yumi/intents')
 MIN_PROB = 0.85           # under this the answer is «not mine»: the chat takes the phrase
-COS_MIN = 0.90            # how close the phrase must sit to its class's center: softmax
-                          # alone is too brave on the phrases it never saw («открой
-                          # окно» scores 0.95 for the terminal), the cosine is not
+COS_MIN = 0.75            # the floor of the honesty check: the softmax alone is too
+                          # brave on the phrases it never saw, but the «not a
+                          # button» negatives in the corpus carry most of the
+                          # weight now (the chat class wins them); this only
+                          # catches the stray far-away winner (0.75 keeps the
+                          # bent sayings like «вруби песню» in, 0.90 would not)
 MAX_LEN = 32              # tokens per phrase, the same the training kept
 NEGATERS = frozenset(('не', 'not', "don't", 'dont', 'никогда', 'never'))
 
