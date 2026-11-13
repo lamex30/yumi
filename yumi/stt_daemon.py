@@ -70,6 +70,9 @@ WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge re
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
 VAD_TAIL = 700                          # ms of quiet after speech: the phrase is really over
 WAKE_SENSITIVITY = {'normal': 1, 'strict': 0}  # edit-distance budget for a wake match
+WAKE_WIDE = 3                 # when the judge is on duty, the pre-filter forgives three
+                              # letters: over music vosk writes «юноша» for «юми», and
+                              # only whisper reading the tape tells a name from a dream
 TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
 TAP_SEGMENT = 600.0                     # s of tape in one wav, then the next file starts
 TAP_MAX_BYTES = 10 * 1024 * 1024        # a segment is no bigger than this: the diary is small
@@ -515,13 +518,15 @@ def hearsay_save(word, heard):
         pass
 
 
-def near(a, b):
+def near(a, b, lim=None):
     """How many letters separate the two words (the hearsay of Vosk): one letter forgiven
-    to short words, two to the long ones where one slips in anyway. Returns the edit
-    distance, or lim+1 when it is already over the budget."""
+    to short words, two to the long ones where one slips in anyway. lim overrides that
+    (the judge's wide pre-filter). Returns the edit distance, or lim+1 when it is already
+    over the budget."""
     if a == b:
         return 0
-    lim = 2 if min(len(a), len(b)) >= 6 else 1
+    if lim is None:
+        lim = 2 if min(len(a), len(b)) >= 6 else 1
     if abs(len(a) - len(b)) > lim:
         return lim + 1
     # a plain edit distance, cut short: a substitution, insertion or deletion is fine
@@ -575,13 +580,19 @@ def wake_at(text, spellings, budget=1):
     for n in (3, 2, 1):                     # the fullest hear-say first, near the start:
         for i in range(0, min(len(toks), 8) - n + 1):   # a name is said first, not deep
             said = ''.join(toks[i:i + n])                # glued hear-say like «ю и ми»
-            dist = min(near(said, s) for s in spellings)
-            if dist > budget:
+            # the wide filter runs behind the judge, and it forgives one letter more
+            # when the hear-say begins with the name's own letter: over music the first
+            # letter is the one that survives («юноша», «юный» for «юми»), while words
+            # far from the name by their first letter stay outside the strict budget
+            slack = 1 if budget > 1 and any(said[:1] == s[:1] for s in spellings) else 0
+            dist = min(near(said, s, budget + slack) for s in spellings)
+            if dist > budget + slack:
                 continue
             # a common word one letter from the name's hear-say («иди», «или», «уже»)
             # must not wake her: it counts as the name only when a true spelling of the
-            # name fits the sound no worse than the stop word does
-            if any(near(said, w) < dist for w in WAKE_STOPS):
+            # name fits the sound no worse than the stop word does (the same budget both
+            # ways, so a wide pre-filter does not let the stop words win by a shorter cap)
+            if any(near(said, w, budget + slack) < dist for w in WAKE_STOPS):
                 continue
             return ' '.join(toks[i + n:]), said
     return None, None
@@ -845,6 +856,10 @@ class Ears:
             wmodel = None
             log('whisper will not judge, vosk answers alone: ' + str(e)[-120:])
         judge_lock = threading.Lock()
+        # the wide pre-filter is only safe behind the judge: when whisper reads the tape
+        # anyway, letting more hear-says through costs seconds, not false wakes; without
+        # the judge vosk's word is taken as it comes, and the strict budget stands
+        wake_budget = WAKE_WIDE if (confirm and wmodel is not None) else 1
 
         def judge_note(what):
             """one line into the wake's diary (judge.log): what vosk heard, what went
@@ -975,7 +990,7 @@ class Ears:
                     if words != logged:         # every fresh half-heard once, not each chunk
                         logged = words
                         judge_note(f'VOSK {words!r}')
-                    hit, src = wake_at(words, spellings)
+                    hit, src = wake_at(words, spellings, wake_budget)
                     if not woken and hit is not None and wmodel is None:
                         # no judge today: vosk's word is taken as it comes
                         woken = True                # she hears her name: keep on recording

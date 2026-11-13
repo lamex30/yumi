@@ -1002,9 +1002,10 @@ class App(Gtk.Application):
         try:
             saved = music.read_volume()
             if saved is None:
+                print('yumi: the duck could not read the volume, it stays as it is')
                 return
             self.duck_saved = saved
-            music.system_volume(f'volume {self.DUCK_LEVEL}')
+            music.system_volume(f'volume {min(saved, self.DUCK_LEVEL)}')
         except Exception:
             self.duck_saved = None
 
@@ -1053,19 +1054,21 @@ class App(Gtk.Application):
                                 model_size=self.settings.get('wake_model_size', 'small'),
                                 judge_log=self.settings.get('wake_judge_log', True))
                 if not self.wake_on or not res:
-                    continue            # quiet, called off or the ears are away
+                    continue            # called off or the ears are away
                 if res.get('stop'):
                     # «стоп» overrides everything: even mid-word, asleep or thinking
                     GLib.idle_add(lambda: self.ev(lambda b: b.stop_all()) and False)
                     continue
+                if not res.get('woke'):
+                    continue            # quiet: nobody called her name
                 tail = res.get('text') or ''
+                GLib.idle_add(self.duck_begin)   # her name passed: quiet now, whatever comes
                 busy = (b.sleeping or b.thinking or b.listening)
                 if busy:
                     continue            # she got busy in those seconds: the word is spent
                 if b.now < b.talk_until or self.talking():
                     self.hush()         # her own line was still sounding: it dies, your turn now
-                GLib.idle_add(lambda t=tail: (self.duck_begin(),          # quiet, so she
-                                              self.ev(lambda br: br.wake_up(t))) and False)
+                GLib.idle_add(lambda t=tail: self.ev(lambda br: br.wake_up(t)) and False)
 
         self.wake_thread = threading.Thread(target=work, daemon=True)
         self.wake_thread.start()
