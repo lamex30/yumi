@@ -177,13 +177,17 @@ def _slots(entry, text, toks, forms_list):
     return {'query': ' '.join(query)}
 
 
-def match(text, actions):
+def match(text, actions, use_intents=True):
     """(action, score, slots) of the best intent for the phrase, or None when
     nothing earns its keep; actions are the entries actions.json gives (those
     with a command or a url); a tie goes to the button written first. slots
     carries {'query': '...'} for an url entry, the words said beside the
     trigger — an entry whose query came out empty does not fire: «найди в
-    интернете» said alone is a wish with no subject, the chat takes it"""
+    интернете» said alone is a wish with no subject, the chat takes it.
+
+    When the rules end with nothing, the tiny mind (yumi/intents.py, if it was
+    trained: tools/intents_setup.sh) gets one look at the phrase; it answers
+    with a probability, and only a sure answer counts"""
     toks = normalize(text)
     if not toks or any(t in NEGATERS for t in toks):
         return None
@@ -196,6 +200,9 @@ def match(text, actions):
         if score is not None and (best is None or score > best[1]):
             best = (a, score)
     if not best:
+        from . import intents
+        if use_intents:
+            return intents.classify(text, actions)
         return None
     slots = _slots(best[0], text, toks, forms_list)
     if '{query}' in str(best[0].get('url') or ''):

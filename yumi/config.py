@@ -43,6 +43,8 @@ DEFAULT_SETTINGS = {
     'wake_ears': True,        # she starts listening the moment you say the wake word
     'music_skill': True,      # music control via voice commands
     'nlu': True,              # her own voice commands: the phrases in actions.json
+    'intents': True,          # the tiny trained mind (yumi/intents.py) hears the
+                              # phrases the sayings miss; tools/intents_setup.sh
     'wake_word': 'юми',       # the wake word itself (say it, then the question);
                               # the ears learn its hear-says into
                               # ~/.local/share/yumi/stt/hearsay.json, edit freely
@@ -231,6 +233,7 @@ UI = {
         'tour_title': 'Hello!',
         'listen': 'Listen', 'cat_chat': 'Her mind', 'chat_model': 'Answer model',
         'nlu': 'Voice commands',
+        'intents': 'Intents mind',
         'joke': 'Joke',
         'chat_refresh': 'Find the model',
         'chat_think': 'Let her think first',
@@ -281,6 +284,7 @@ UI = {
         'tour_title': 'Привет!',
         'listen': 'Послушать', 'cat_chat': 'Её мозги', 'chat_model': 'Модель ответов',
         'nlu': 'Голосовые команды',
+        'intents': 'Распознавание фраз',
         'joke': 'Анекдот',
         'chat_refresh': 'Найти модель',
         'chat_think': 'Дать ей подумать',

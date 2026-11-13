@@ -916,7 +916,8 @@ class Brain(Extras):
             if not self.chat_models and 'chat_model' not in self.unavailable:
                 self.requests.append(('chat_models',))
             rows = [('set', 'chat_provider', t('chat_provider')), ('set', 'chat_model', t('chat_model')),
-                    ('set', 'chat_think', t('chat_think')), ('set', 'nlu', t('nlu'))]
+                    ('set', 'chat_think', t('chat_think')), ('set', 'nlu', t('nlu')),
+                    ('set', 'intents', t('intents'))]
             if self.chat_models:        # the list may have grown stale: a way to look again
                 rows.append(('chat_refresh', None, t('chat_refresh')))
             rows.append(('menu', 'settings', t('back')))
@@ -1236,9 +1237,11 @@ class Brain(Extras):
         self.actions_check()            # actions.json edited by hand: no restart needed
         if not self.custom:
             return False
-        hit = nlu.match(text, self.custom)
+        hit = nlu.match(text, self.custom,
+                        use_intents=self.settings.get('intents', True))
         if not hit and alt and alt != text:
-            hit = nlu.match(alt, self.custom)
+            hit = nlu.match(alt, self.custom,
+                            use_intents=self.settings.get('intents', True))
         if not hit:
             return False
         action, score, slots = hit
