@@ -80,7 +80,42 @@ if nlu._lemmatizer():
     hit = nlu.match('открой терминалом', ACTIONS)
     assert hit and hit[0] is TERMINAL and hit[1] == nlu.SCORE_PHRASE, hit
 
-# the whole actions.json pipeline: what load_actions keeps of the voice fields
+# ---- the search: a url entry with {query}, the words said beside the trigger
+SEARCH = {'command': 'xdg-open https://yandex.ru', 'url': 'https://yandex.ru/search/?text={query}',
+          'phrases': ['найди в интернете', 'поищи в интернете', 'search the web'],
+          'keywords': ['погугли', 'интернет'], 'speak': 'Ищу {query}'}
+NET = [SEARCH]
+
+# the trigger said whole, the subject after it
+hit = nlu.match('найди в интернете ёжиков', NET)
+assert hit and hit[1] == nlu.SCORE_PHRASE
+assert hit[2] == {'query': 'ёжиков'}, hit[2]        # ё and the case stay: a search wants real words
+
+# the subject said first, the trigger after: the keywords catch it, the verbs
+# and the «в» go, wherever they stand in the phrase
+hit = nlu.match('поищи котиков в интернете', NET)
+assert hit and hit[1] >= nlu.MIN_SCORE            # 0.80 with pymorphy2, 0.60 without
+assert hit[2] == {'query': 'котиков'}, hit[2]
+
+# the polite words and the verbs are not the subject
+hit = nlu.match('ну найди в интернете пожалуйста мне котиков', NET)
+assert hit[2] == {'query': 'котиков'}, hit[2]
+hit = nlu.match('search the web for pixel moths', NET)
+assert hit and hit[2] == {'query': 'pixel moths'}, hit[2]
+
+# the trigger alone carries no subject: it does not fire, the chat takes it
+assert nlu.match('найди в интернете', NET) is None
+assert nlu.match('погугли', NET) is None
+assert nlu.match('что происходит в интернете', NET) is None
+
+# an entry without {query} gets no slots at all
+hit = nlu.match('найди в интернете ёжиков', [{'command': 'x', 'phrases': ['найди в интернете']}])
+assert hit[2] == {}
+
+# the negation holds for the search too
+assert nlu.match('не ищи в интернете котиков', NET) is None
+
+# ---- the whole actions.json pipeline: what load_actions keeps of the voice fields
 from yumi import config  # noqa: E402
 sample = _root / 'actions.example.json'
 loaded = config.load_actions(sample)
@@ -88,7 +123,10 @@ assert loaded[0]['command'] == 'foot'
 assert 'открой терминал' in loaded[0]['phrases']
 assert 'терминал' in loaded[0]['keywords']
 assert loaded[0]['speak'] == 'Открываю терминал'
-assert loaded[1]['phrases'] == [] and loaded[1]['speak'] == ''   # no voice, still a button
+assert loaded[1]['url'] == 'https://yandex.ru/search/?text={query}'   # the search is kept
+assert loaded[2]['phrases'] == [] and loaded[2]['speak'] == ''   # no voice, still a button
 assert nlu.match('открой терминал', loaded)[0]['command'] == 'foot'
+hit = nlu.match('найди в интернете юми мотылёк', loaded)
+assert hit[0]['url'].endswith('{query}') and hit[2] == {'query': 'юми мотылёк'}, hit
 
 print('tests/test_nlu.py: ok')

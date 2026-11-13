@@ -143,7 +143,9 @@ def load_actions(path=None):
                         # the voice side (nlu.py): the sayings that run this button
                         'phrases': [str(p) for p in (a.get('phrases') or []) if str(p).strip()],
                         'keywords': [str(k) for k in (a.get('keywords') or []) if str(k).strip()],
-                        'speak': str(a.get('speak') or '').strip()})
+                        'speak': str(a.get('speak') or '').strip(),
+                        # a web address instead of a command ({query} = the words said beside the trigger)
+                        'url': str(a.get('url') or '').strip()})
     return out
 
 

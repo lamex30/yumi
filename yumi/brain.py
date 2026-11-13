@@ -10,6 +10,7 @@ Her position is her "foot": bottom-centre of the current frame image.
 import math
 import random
 import time
+import urllib.parse
 from pathlib import Path
 
 from . import jobs as J
@@ -1226,8 +1227,10 @@ class Brain(Extras):
     def voice_intent(self, text, alt=''):
         """the user's own voice commands: the «phrases» and «keywords» written
         into actions.json (see nlu.py), matched on the words alone, no mind
-        needed — a button's command runs and, when «speak» is written, she says
-        so; True when one fired. `alt` is the other ear's reading of the phrase"""
+        needed — a button's command runs (or its url opens in the browser, the
+        {query} filled with the words said beside the trigger) and, when
+        «speak» is written, she says so; True when one fired. `alt` is the
+        other ear's reading of the phrase"""
         if not self.settings.get('nlu', True):
             return False
         self.actions_check()            # actions.json edited by hand: no restart needed
@@ -1238,11 +1241,18 @@ class Brain(Extras):
             hit = nlu.match(alt, self.custom)
         if not hit:
             return False
-        action, score = hit
-        _mind_log(f'intent {action["command"]!r} (score {score:.2f})')
-        self.requests.append(('run', action['command']))
+        action, score, slots = hit
+        _mind_log(f'intent {action.get("url") or action["command"]!r} (score {score:.2f})')
         self.set_face('happy', 1.5)
-        speak = action.get('speak') or ''
+        speak = str(action.get('speak') or '')
+        query = slots.get('query') or ''
+        if '{query}' in speak:
+            speak = speak.replace('{query}', query)
+        if action.get('url'):
+            url = str(action['url']).replace('{query}', urllib.parse.quote(query, safe=''))
+            self.requests.append(('url', url))
+        else:
+            self.requests.append(('run', action['command']))
         if speak:
             self.say_text(speak)
         return True

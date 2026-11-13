@@ -39,6 +39,11 @@ def spawn(*cmd):
         return False
 
 
+def open_url(url):
+    """a web address in whatever browser the desktop prefers"""
+    return spawn('xdg-open', str(url))
+
+
 def main(fn, *args):
     GLib.idle_add(lambda: fn(*args) and False)
 

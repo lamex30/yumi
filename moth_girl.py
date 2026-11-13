@@ -812,6 +812,8 @@ class App(Gtk.Application):
                     Gdk.Display.get_default().get_clipboard().set(r[1])
             elif kind == 'run':
                 system.spawn('sh', '-c', r[1])
+            elif kind == 'url':
+                system.open_url(r[1])
             elif kind == 'monitor_next':
                 self.cycle_monitor()
             elif kind == 'outfit':

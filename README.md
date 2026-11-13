@@ -262,6 +262,23 @@ Voice commands**.
 ]
 ```
 
+A button may also carry a `"url"` with `{query}` in it — a search: the words said beside the
+trigger fill it in and the browser opens at the address («найди в интернете котиков» searches
+for котиков). The verbs and the polite words («найди», «пожалуйста», «в»...) are not the
+subject; the trigger said alone («найди в интернете» with nothing after) does not fire, and a
+keyword-triggered search wants a search verb in the phrase — «что происходит в интернете» is
+somebody talking, not a wish. `"speak"` may carry `{query}` too.
+
+```json
+[
+  {"label": "Search", "label_ru": "Поиск", "icon": "search",
+   "command": "xdg-open https://yandex.ru", "url": "https://yandex.ru/search/?text={query}",
+   "phrases": ["найди в интернете", "поищи в интернете", "search the web", "google"],
+   "keywords": ["погугли", "интернет", "internet"],
+   "speak": "Ищу {query}"}
+]
+```
+
 ## Outfits
 
 Settings → Look → Outfit: **auto** follows the calendar (Halloween Oct 24 – Nov 2, New Year Dec 15 –

@@ -18,17 +18,36 @@ matching goes in three steps and the first sure score counts:
 A «не» / «not» in the phrase kills the match: «не открывай терминал» is the
 opposite of a wish. pymorphy2, when it is installed, folds the word forms
 together («терминалом» is «терминал»); without it the fuzzy matching is enough.
+
+An entry may carry, instead of a command, a "url" with {query} in it: the words
+said beside the trigger fill it in, and the browser opens at the address
+(«найди в интернете котиков» → yandex.ru/search/?text=котиков); "speak" may
+carry {query} too («Ищу котиков»).
 """
 import re
 
 from .stt_daemon import near
 
 SCORE_PHRASE = 1.0        # the phrase said whole
-SCORE_KEYWORD = 0.8       # every keyword heard
+SCORE_KEYWORD = 0.8       # one of the keywords heard
 SCORE_FUZZY = 0.6         # the same, one bent letter here and there
 MIN_SCORE = SCORE_FUZZY   # the line under which an intent is no intent
 
 NEGATERS = frozenset(('не', 'not', "don't", 'dont', 'никогда', 'never'))
+
+# the polite words and the search verbs that are neither the trigger nor the
+# subject of a search: they go when the query is cut out of the phrase
+# (url entries with {query}), wherever they stand in the phrase
+QUERY_FILLERS = frozenset((
+    'в', 'во', 'на', 'по', 'ну', 'а', 'и', 'про', 'об', 'обо', 'давай',
+    'пожалуйста', 'please', 'the', 'a', 'an', 'for', 'about',
+    'найди', 'найти', 'поищи', 'поищите', 'поискать', 'найдите', 'мне', 'нам',
+    'search', 'find', 'look', 'me', 'us'))
+
+# a url entry fired by a keyword alone wants one of these in the phrase too:
+# «что происходит в интернете» is somebody talking, not a wish to search;
+# a phrase trigger («найди в интернете») carries its verb and needs no more
+SEARCH_VERB = ('найд', 'поищ', 'поиск', 'погугл', 'search', 'find', 'googl', 'look')
 
 _CYR = re.compile(r'[а-яё]')
 
@@ -90,32 +109,34 @@ def _lists(items):
 
 
 def _seq(p, forms_list):
-    """the phrase sits whole inside the words, letter for letter: a contiguous
-    run where every word of it is the word said there (any of its forms)"""
+    """where the phrase sits whole inside the words, letter for letter: a
+    contiguous run where every word of it is the word said there (any of its
+    forms); the start index, or None"""
     n = len(p)
     for i in range(len(forms_list) - n + 1):
         if all(p[j] in forms_list[i + j] for j in range(n)):
-            return True
-    return False
+            return i
+    return None
 
 
 def _seq_bent(p, toks):
-    """the phrase sits whole inside the words, with the ears' slips forgiven:
-    a contiguous run where every word is one bent letter from the word said there"""
+    """where the phrase sits whole inside the words, with the ears' slips
+    forgiven: a contiguous run where every word is one bent letter from the
+    word said there; the start index, or None"""
     n = len(p)
     for i in range(len(toks) - n + 1):
         if all(_bent(p[j], toks[i + j]) for j in range(n)):
-            return True
-    return False
+            return i
+    return None
 
 
 def _score(entry, toks, forms_list):
     """the best score this entry earns on the phrase (None under MIN_SCORE)"""
     best = None
     for p in _lists(entry.get('phrases')):
-        if _seq(p, forms_list):
+        if _seq(p, forms_list) is not None:
             return SCORE_PHRASE          # a sure win: nothing later can beat it
-        if _seq_bent(p, toks):
+        if _seq_bent(p, toks) is not None:
             best = max(best or 0, SCORE_FUZZY)
     words = _lists(entry.get('keywords'))
     if words:
@@ -126,19 +147,61 @@ def _score(entry, toks, forms_list):
     return best
 
 
+def _slots(entry, text, toks, forms_list):
+    """{'query': 'котиков'} for an entry whose url carries {query}: the words
+    that are neither the trigger («найди в интернете») nor the polite words
+    around it — wherever they stand in the phrase («поищи котиков в интернете»
+    works too), as they were said: with ё and the case kept, a search wants
+    real words; {} when the url wants no query"""
+    if '{query}' not in str(entry.get('url') or ''):
+        return {}
+    raw = [w.strip('.,!?"«»…:;()[]-—') for w in str(text or '').split()]
+    drop = set()
+    for p in _lists(entry.get('phrases')):
+        i = _seq(p, forms_list)
+        if i is not None:
+            drop.update(range(i, i + len(p)))
+    if not drop:                         # the keywords fired: they are the trigger
+        for k in _lists(entry.get('keywords')):
+            for w in k:
+                for j, fl in enumerate(forms_list):
+                    if w in fl or _bent(w, toks[j]):
+                        drop.add(j)
+                        break
+    query = []
+    for j, w in enumerate(raw):
+        nt = normalize(w)
+        if not nt or j in drop or nt[0] in QUERY_FILLERS:
+            continue
+        query.append(w)
+    return {'query': ' '.join(query)}
+
+
 def match(text, actions):
-    """(action, score) of the best intent for the phrase, or None when nothing
-    earns its keep; actions are the entries actions.json gives (those with
-    phrases and keywords); a tie goes to the button written first"""
+    """(action, score, slots) of the best intent for the phrase, or None when
+    nothing earns its keep; actions are the entries actions.json gives (those
+    with a command or a url); a tie goes to the button written first. slots
+    carries {'query': '...'} for an url entry, the words said beside the
+    trigger — an entry whose query came out empty does not fire: «найди в
+    интернете» said alone is a wish with no subject, the chat takes it"""
     toks = normalize(text)
     if not toks or any(t in NEGATERS for t in toks):
         return None
     forms_list = [forms(t) for t in toks]
     best = None
     for a in actions or []:
-        if not isinstance(a, dict) or not a.get('command'):
+        if not isinstance(a, dict) or not (a.get('command') or a.get('url')):
             continue
         score = _score(a, toks, forms_list)
         if score is not None and (best is None or score > best[1]):
             best = (a, score)
-    return best
+    if not best:
+        return None
+    slots = _slots(best[0], text, toks, forms_list)
+    if '{query}' in str(best[0].get('url') or ''):
+        if not slots.get('query'):
+            return None                      # no subject in the phrase: not a search
+        if best[1] != SCORE_PHRASE and not any(
+                t.startswith(SEARCH_VERB) for t in toks):
+            return None                      # a keyword alone is somebody talking
+    return best[0], best[1], slots
