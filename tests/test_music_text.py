@@ -36,10 +36,20 @@ assert m('стоп') == 'stop'
 assert m('следующий трек') == 'next'
 assert m('переключи на следующий') == 'next'
 assert m('переключи музыку') == 'next'
+assert m('включи следующий трек') == 'next'
 assert m('предыдущий') == 'previous'
 assert m('назад') == 'previous'
 assert m('rewind') == 'previous'
 assert m('play music') == 'play'
+
+# «дальше»: her word for the next one, and the ears' slips over the playing music
+assert m('дальше') == 'next'
+assert m('юми дальше') == 'next'
+assert m('дальш') == 'next'                       # a letter the music ate
+assert m('перемотай дальше') == 'next'
+assert m('продолжай дальше') == 'play'            # a resume, not a skip
+assert m('следуший') == 'next'                    # the same slip in «следующий»
+assert m('предъидущий') == 'previous'
 assert m('запусти плейлист') == 'play'
 assert m('') is None
 assert m('юми') is None

@@ -2449,7 +2449,7 @@ VOLUME_ONES = {'один': 10, 'одна': 10, 'два': 20, 'две': 20, 'тр
 MUSIC_KNOWN = (MUSIC_WORDS | MUSIC_FILLERS | MUSIC_PLAY | MUSIC_PAUSE
                | MUSIC_STOP_ANY | MUSIC_STOP_MUSIC | set(MUSIC_NEXT)
                | VOLUME_UP | VOLUME_DOWN | VOLUME_WORD | set(VOLUME_NUMBERS)
-               | {'следующ', 'предыдущ', 'назад', 'turn', 'off', 'on'})
+               | {'следующ', 'предыдущ', 'дальше', 'назад', 'turn', 'off', 'on'})
 VERB_ALL = (MUSIC_PLAY | MUSIC_PAUSE | MUSIC_STOP_MUSIC
             | {'переключи', 'переключить'})
 
@@ -2482,6 +2482,36 @@ def _verbs(toks, verbs):
     and up, so «да» never leans into anything)"""
     return any(t in verbs or (len(t) >= 4 and any(_near1(t, v) for v in verbs))
                for t in toks)
+
+
+def _next_track_words(toks):
+    """the words that name the next track: «следующий», «next», «skip» — they ask
+    for it even with a whole play verb around («включи следующий трек»). Over the
+    playing music the ears soften the sounds («следуший» for «следующий»), so any
+    bent «следу…» counts too — but the chatting words that begin the same way
+    («следует», «следуй за мной») are not her next track"""
+    return any(t in MUSIC_NEXT[2:]
+               or (t.startswith('следу') and len(t) >= 7
+                   and not t.startswith(('следует', 'следуйте', 'следуй',
+                                         'следуя', 'следова')))
+               or (len(t) >= 5 and _near1(t, 'следующий')) for t in toks)
+
+
+def _next_words(toks):
+    """the words that ask to move on: the track words above, plus «дальше» — but a
+    play verb nearby turns «дальше» into a resume («продолжай дальше»), not a skip"""
+    return (_next_track_words(toks)
+            or (any(t.startswith(('дальш', 'далш'))
+                    or (len(t) >= 5 and _near1(t, 'дальше')) for t in toks)
+                and not _verbs(toks, MUSIC_PLAY)))
+
+
+def _prev_words(toks):
+    """the words that ask for the track before: «предыдущий», «назад», «previous»,
+    with the same ears' slips over the music forgiven"""
+    return any(t.startswith(('предыдущ', 'предидущ', 'предъидущ'))
+               or t in ('previous', 'rewind', 'назад')
+               or (len(t) >= 5 and _near1(t, 'предыдущий')) for t in toks)
 
 
 def _mind_log(what):
@@ -2540,14 +2570,15 @@ def music_control_text(text, lang='en'):
     if (any(t in MUSIC_WHO_ASK for t in toks)
             and not (_verbs(toks, MUSIC_PLAY) or _verbs(toks, MUSIC_PAUSE)
                      or any(t in MUSIC_STOP_ANY or t in MUSIC_STOP_MUSIC
-                            or t.startswith(('следующ', 'предыдущ')) for t in toks))
+                            for t in toks))
+            and not (_next_track_words(toks) or _prev_words(toks))
             and (_verbs(toks, MUSIC_WHO_PLAY) or has_music)):
         return 'who'
 
     def strangers():                   # words this skill knows nothing about
         return {t for t in toks
                 if t not in MUSIC_KNOWN
-                and not t.startswith(('следующ', 'предыдущ'))
+                and not t.startswith(('следующ', 'предыдущ', 'дальш', 'далш'))
                 and not (len(t) >= 4 and any(_near1(t, v) for v in VERB_ALL))}
 
     if any(t in MUSIC_STOP_ANY for t in toks):
@@ -2573,9 +2604,11 @@ def music_control_text(text, lang='en'):
                 return f'volume {n}'
     if _verbs(toks, MUSIC_PAUSE):
         return 'pause'
-    if any(t in MUSIC_NEXT[2:] or t.startswith('следующ') for t in toks):
+    if _next_track_words(toks):
         return 'next'
-    if any(t.startswith('предыдущ') or t in ('previous', 'rewind', 'назад') for t in toks):
+    if _next_words(toks):              # «дальше», when it is not «продолжай дальше»
+        return 'next'
+    if _prev_words(toks):
         return 'previous'
     if _verbs(toks, MUSIC_NEXT[:2]):               # «переключи музыку»: the next one
         return 'next' if has_music else None
