@@ -94,8 +94,16 @@ cd yumi
 yumi
 ```
 
-Можно запускать и прямо из папки: `./bin/yumi`. Удалить: `./install.sh --uninstall`.
+Можно запускать и прямо из папки: `./bin/yumi`.
 Для сборщиков пакетов в [`packaging/`](packaging) лежат `PKGBUILD` и `template` для Void.
+
+### Удалить полностью
+
+```sh
+yumi --quit                                      # остановить, если она запущена
+./install.sh --uninstall                         # программа (тот же PREFIX, что при установке; sudo для /usr/local)
+rm -rf ~/.config/yumi ~/.local/state/yumi        # настройки, кнопки, сохранённое состояние, лог
+```
 
 **NixOS:** `nix run github:lamex30/yumi` — попробовать; чтобы установить, добавь flake во входы и
 положи `inputs.yumi.packages.${system}.default` в `environment.systemPackages` (или возьми

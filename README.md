@@ -95,9 +95,16 @@ cd yumi
 yumi
 ```
 
-You can also run her straight from the folder: `./bin/yumi`. `./install.sh --uninstall` removes
-her again. Packagers: `PREFIX=/usr DESTDIR="$pkgdir" ./install.sh`; there is a `PKGBUILD` and a
+You can also run her straight from the folder: `./bin/yumi`. Packagers: `PREFIX=/usr DESTDIR="$pkgdir" ./install.sh`; there is a `PKGBUILD` and a
 Void `template` in [`packaging/`](packaging).
+
+### Remove her completely
+
+```sh
+yumi --quit                                      # stop her if she is running
+./install.sh --uninstall                         # program (same PREFIX as when installing; sudo for /usr/local)
+rm -rf ~/.config/yumi ~/.local/state/yumi        # settings, buttons, saved state, log
+```
 
 **NixOS:** `nix run github:lamex30/yumi` tries her out; to install, add the flake as an input and
 put `inputs.yumi.packages.${system}.default` in `environment.systemPackages` (or use
