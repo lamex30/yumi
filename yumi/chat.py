@@ -10,6 +10,7 @@ endpoint (settings 'polza_url', 'polza_api_key') instead.
 If the provider is not running or has no models, ask() returns '' and she says so.
 """
 import json
+import random
 import re
 import time
 import urllib.error
@@ -65,15 +66,33 @@ def models(settings):
     return sorted(out)
 
 
+MOODS = (
+    # (name, manner) — her mood of the moment, drawn fresh for every reply:
+    # one sleepy out of four, not the sleepy default she used to be
+    ('сонной', 'дружелюбно и чуть-чуть сонно, можно зевнуть'),
+    ('бодрой', 'весело и живо, полна сил'),
+    ('игривой', 'игриво и чуть дразняще, с озорством'),
+    ('задумчивой', 'спокойно и задумчиво, будто размышляешь'),
+)
+MOODS_EN = (
+    ('sleepy', 'friendly and a little sleepy, a yawn is allowed'),
+    ('lively', 'cheerful and lively, full of energy'),
+    ('playful', 'playful and a little teasing, with mischief'),
+    ('pensive', 'calm and thoughtful, as if musing'),
+)
+
+
 def system_prompt(lang):
-    """who she is: short answers, her language, her sleepy character"""
+    """who she is: short answers, her language, and the mood of this very reply"""
     if str(lang) == 'ru':
-        return ('Ты — Юми, сонная девочка-мотылёк в пиксельном виде, живёшь у нижнего края экрана '
-                'и помогаешь с мелочами на компьютере. Отвечай по-русски, одно-два коротких '
-                'предложения, дружелюбно и чуть-чуть сонно. Без эмодзи и без списков.')
-    return ('You are Yumi, a sleepy pixel-art moth girl living at the bottom edge of the screen, '
-            'helping with little things on this computer. Answer in English, one or two short '
-            'sentences, friendly and a little sleepy. No emoji, no lists.')
+        mood, manner = random.choice(MOODS)
+        return (f'Ты — Юми, девочка-мотылёк в пиксельном виде, живёшь у нижнего края экрана '
+                f'и помогаешь с мелочами на компьютере. Сейчас ты {mood}: отвечай по-русски, '
+                f'одно-два коротких предложения, {manner}. Без эмодзи и без списков.')
+    mood, manner = random.choice(MOODS_EN)
+    return (f'You are Yumi, a pixel-art moth girl living at the bottom edge of the screen, '
+            f'helping with little things on this computer. Right now you are {mood}: answer in '
+            f'English, one or two short sentences, {manner}. No emoji, no lists.')
 
 
 def _think(settings):
@@ -222,11 +241,14 @@ def weather_when(text):
     return 'today'
 
 
-def _one_shot(settings, user, tokens, lang='en', timeout=90):
+def _one_shot(settings, user, tokens, lang='en', timeout=90, temp=None):
     """one reply for one user line, no conversation behind it (the hour joke, a joke, ...);
     the reply text, or '' when the mind is out of reach"""
     if _provider(settings) == 'polza.ai' and not str(settings.get('polza_api_key') or '').strip():
         return ''          # no key: Polza.ai would hang or refuse, she says so at once
+    options = {'num_predict': tokens} if _provider(settings) != 'polza.ai' else {'max_tokens': tokens}
+    if temp is not None:
+        options['temperature'] = temp      # the jokes and the hour lines want a loose hand
     req_body = {
         'model': settings.get('chat_model') or (POLZA_MODEL if _provider(settings) == 'polza.ai' else DEFAULT_MODEL),
         'messages': [
@@ -234,8 +256,10 @@ def _one_shot(settings, user, tokens, lang='en', timeout=90):
             {'role': 'user', 'content': user}
         ],
         'stream': False,
-        'options': {'num_predict': tokens} if _provider(settings) != 'polza.ai' else {'max_tokens': tokens}
+        'options': options,
     }
+    if temp is not None and _provider(settings) == 'polza.ai':
+        req_body['temperature'] = temp     # the openai-style body carries it on top
     if _provider(settings) != 'polza.ai':
         req_body['think'] = _think(settings)    # off: the joke comes right away
     body = json.dumps(req_body).encode()
@@ -268,14 +292,35 @@ def hourly_joke(settings, hour, lang='en', timeout=90):
     return _one_shot(settings, user, 120, lang, timeout)
 
 
+JOKE_TOPICS = (
+    # a fresh theme each time: the tiny models otherwise tell the same penguin
+    # joke for the rest of their lives
+    'программистах и коде', 'мотыльках и лампочках', 'котов и их дела',
+    'лени и понедельниках', 'буднях за компьютером', 'музыке и наушниках',
+    'погоде и временах года', 'пингвинах и линуксе', 'еде и холодильнике',
+    'пиксельных героев',
+)
+JOKE_TOPICS_EN = (
+    'programmers and code', 'moths and light bulbs', 'cats and their business',
+    'laziness and Mondays', 'everydays at the computer', 'music and headphones',
+    'weather and seasons', 'penguins and Linux', 'food and the fridge',
+    'pixel heroes',
+)
+
+
 def joke(settings, lang='en', timeout=90):
     """ask the mind for a short joke («анекдот»), one or two sentences, no emoji,
-    no lists; '' when the mind is out of reach"""
-    user = ('Расскажи короткий смешной анекдот, одно-два предложения, по-русски, '
-            'без эмодзи и списков.'
-            if str(lang) == 'ru' else
-            'Tell me a short funny joke, one or two sentences, in English, no emoji, no lists.')
-    return _one_shot(settings, user, 160, lang, timeout)
+    no lists; a topic is drawn by lot, so the jokes do not rhyme; '' when the
+    mind is out of reach"""
+    if str(lang) == 'ru':
+        user = (f'Расскажи короткий смешной анекдот про {random.choice(JOKE_TOPICS)}, '
+                'одно-два предложения, по-русски, без эмодзи и списков. Каждый раз '
+                'придумывай новый, не повторяй старые.')
+    else:
+        user = (f'Tell me a short funny joke about {random.choice(JOKE_TOPICS_EN)}, one or '
+                'two sentences, in English, no emoji, no lists. Invent a new one every '
+                'time, do not repeat the old ones.')
+    return _one_shot(settings, user, 160, lang, timeout, temp=0.9)
 
 
 def _degrees_ru(n):

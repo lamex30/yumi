@@ -134,7 +134,8 @@ def mics():
 
 
 def listen(lang='ru', secs=7, size='small', mic=None, ear=None):
-    """hear one phrase: the text, '' for silence, None when the ears are not set up"""
+    """hear one phrase: {'text': the words whisper read, 'vosk': the words vosk read}
+    ('' for silence, None when the ears are not set up); the mind tries both readings"""
     info = _ensure()
     if not info:
         return None
@@ -150,7 +151,9 @@ def listen(lang='ru', secs=7, size='small', mic=None, ear=None):
             data = json.loads(r.read().decode())
     except (urllib.error.URLError, OSError, ValueError):
         return None
-    return data.get('text') if isinstance(data.get('text'), str) else ''
+    if 'error' in data:
+        return None
+    return {'text': str(data.get('text') or ''), 'vosk': str(data.get('vosk') or '')}
 
 
 def wake(lang='ru', word='юми', secs=20, size='small', mic=None, ear=None,

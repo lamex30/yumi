@@ -64,7 +64,7 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 13                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 14                            # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge reads: ~8 s
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
@@ -798,14 +798,15 @@ class Ears:
                         break                             # nothing but quiet: do not wait
                 said = utt.take()
                 text = ''
+                vtext = ' '.join(json.loads(rec.FinalResult() or '{}').get('text', '').split())
                 if len(said) >= RATE:         # under a second is a breath, not a phrase
                     try:
                         text = self.transcribe(said, lang, size)   # whisper reads the tape
                     except Exception as e:    # noqa: BLE001 - whisper is best effort
                         log('whisper failed, vosk answers instead: ' + str(e)[-120:])
                 if not text:                  # whisper silent or away: vosk's words stand in
-                    text = ' '.join(json.loads(rec.FinalResult() or '{}').get('text', '').split())
-                return text
+                    text = vtext
+                return {'text': text, 'vosk': vtext}   # both readings: the mind will choose
             finally:
                 try:
                     proc.terminate()
@@ -1300,12 +1301,12 @@ class Handler(BaseHTTPRequestHandler):
         mic = (q.get('mic') or [None])[0] or None
         ear = (q.get('ear') or ['mid'])[0]
         try:
-            text = self.ears.listen(lang, secs, quiet=min(6.0, secs), size=size, mic=mic,
-                                    ear=ear)
+            res = self.ears.listen(lang, secs, quiet=min(6.0, secs), size=size, mic=mic,
+                                   ear=ear)
         except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
             self.ears.error = str(e)
             return self._json({'error': str(e)}, 500)
-        self._json({'ok': True, 'text': text})
+        self._json({'ok': True, 'text': res['text'], 'vosk': res.get('vosk', '')})
 
     def log_message(self, *_a):         # the log stays for real problems
         pass

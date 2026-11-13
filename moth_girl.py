@@ -976,11 +976,13 @@ class App(Gtk.Application):
             if not b.listening:
                 return
             self.hush()                     # still sounding after the wait: she gives way to you
-            text = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs,
-                               size=self.settings.get('stt_size', 'small'),
-                               mic=self.settings.get('stt_mic'),
-                               ear=self.settings.get('ears_range', 'mid'))
-            GLib.idle_add(lambda: self.ev(lambda b: b.heard(text)) and False)
+            res = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs,
+                              size=self.settings.get('stt_size', 'small'),
+                              mic=self.settings.get('stt_mic'),
+                              ear=self.settings.get('ears_range', 'mid'))
+            text = res.get('text') if isinstance(res, dict) else res
+            vtxt = res.get('vosk', '') if isinstance(res, dict) else ''
+            GLib.idle_add(lambda t=text, v=vtxt: self.ev(lambda b: b.heard(t, v)) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def talking(self):

@@ -1145,12 +1145,13 @@ class Brain(Extras):
         self.requests.append(('pipette',))
 
     # ------------------------------------------------------------------ her ears and her chat
-    def heard(self, text):
-        """the microphone gave its best: text is the phrase, '' for silence, None for no ears"""
+    def heard(self, text, alt=None):
+        """the microphone gave its best: text is the phrase, '' for silence, None for no
+        ears; alt is what vosk read while whisper read the tape — two ears, one phrase"""
         if not self.listening:
             return
         self.listening = False
-        self.heard_text(text)
+        self.heard_text(text, wake=True, alt=alt)
 
     def wake_up(self, text):
         """her name was heard («юми»): text is what was said after it, '' when it was said alone"""
@@ -1163,13 +1164,16 @@ class Brain(Extras):
             self.listening = True
             self.requests.append(('listen', 15))
 
-    def heard_text(self, text, wake=False):
+    def heard_text(self, text, wake=False, alt=None):
         """into her mind, whatever the ears' way was; wake is True when the phrase
-        came right after her name («юми ...»)"""
+        came right after her name («юми ...») or after she asked what you wanted;
+        alt is the other reading (vosk's) when the first one was whisper's"""
         if text is None:                # the ears are not set up (tools/stt_setup.sh)
             self.say('ears_fail')
             return
         text = ' '.join(str(text or '').split())
+        alt = ' '.join(str(alt or '').split()) if alt else ''
+        _mind_log(f'heard {text!r} (vosk: {alt!r}, wake: {wake})')
         if not text:
             self.say('heard_nothing')
             return
@@ -1196,12 +1200,16 @@ class Brain(Extras):
         # Music control commands (only if music skill is enabled)
         if self.settings.get('music_skill', True):
             music_cmd = music_control_text(text, lang)
+            if not music_cmd and alt and alt != text:
+                music_cmd = music_control_text(alt, lang)   # the other ear's reading
             if not music_cmd and wake:      # only the number made it through the ears:
-                n = bare_volume(text)       # «юми» and a level — that is a volume wish
+                n = bare_volume(text) or (bare_volume(alt) if alt else None)
                 music_cmd = f'volume {n}' if n else None
             if music_cmd:
+                _mind_log(f'music {music_cmd}')
                 self.music_control(music_cmd)
                 return
+        _mind_log('chat')
         # Fall through to normal text processing if music skill is disabled
         self.chat_history.append({'role': 'user', 'content': text})
         del self.chat_history[:-10]     # she remembers her last five turns
@@ -1543,8 +1551,8 @@ class Brain(Extras):
                 head = 'oh'
             elif face in ('blink', 'sleeping', 'happy', 'wink'):
                 head = 'closed'
-            elif int(t / 9) % 5 == 4 and (t % 9) < 1.4:
-                head = 'yawn'
+            elif int(t / 17) % 3 == 2 and (t % 17) < 1.4:
+                head = 'yawn'              # a yawn once in a while, not every other breath
             if head:
                 ops.append(('spr', f'sit:head:{head}', 0, ix, iy, 1.0, 0.0, 0, 0))
         if self.pipette and pose in ('stand', 'hover'):
@@ -2392,11 +2400,12 @@ MUSIC_WORDS = frozenset((
 MUSIC_FILLERS = frozenset(('юми', 'yumi', 'а', 'и', 'ну', 'давай', 'пожалуйста',
                            'please', 'the', 'a', 'an', 'my', 'some'))
 MUSIC_PLAY = frozenset((
-    'включи', 'включить', 'включай', 'запусти', 'запустить', 'играй', 'играть',
+    'включи', 'включить', 'включай', 'включать', 'запусти', 'запустить',
+    'запускай', 'запускать', 'поставь', 'поставить', 'играй', 'играть',
     'продолжай', 'продолжить', 'play', 'resume', 'start'))
 MUSIC_PAUSE = frozenset(('пауза', 'паузу', 'приостанови', 'приостановить', 'pause'))
 MUSIC_STOP_ANY = frozenset(('стоп', 'стопи', 'останови', 'остановить', 'stop'))
-MUSIC_STOP_MUSIC = frozenset(('выключи', 'выключить', 'выруби', 'выруб'))
+MUSIC_STOP_MUSIC = frozenset(('выключи', 'выключить', 'выключать', 'выруби', 'выруб'))
 MUSIC_NEXT = ('переключи', 'переключить', 'next', 'skip')
 VOLUME_UP = frozenset(('громче', 'повысь', 'повысить', 'louder', 'up'))
 VOLUME_DOWN = frozenset(('тише', 'тихо', 'quieter', 'softer', 'lower'))
@@ -2416,6 +2425,8 @@ MUSIC_KNOWN = (MUSIC_WORDS | MUSIC_FILLERS | MUSIC_PLAY | MUSIC_PAUSE
                | MUSIC_STOP_ANY | MUSIC_STOP_MUSIC | set(MUSIC_NEXT)
                | VOLUME_UP | VOLUME_DOWN | VOLUME_WORD | set(VOLUME_NUMBERS)
                | {'следующ', 'предыдущ', 'назад', 'turn', 'off', 'on'})
+VERB_ALL = (MUSIC_PLAY | MUSIC_PAUSE | MUSIC_STOP_MUSIC
+            | {'переключи', 'переключить'})
 
 
 def volume_tokens(text):
@@ -2424,6 +2435,38 @@ def volume_tokens(text):
     toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
             for t in str(text or '').split()]
     return [t for t in toks if t]
+
+
+def _near1(a, b):
+    """True when the two words are one bent letter apart, and the bend is at the tail
+    or a letter swapped: «сключи» and «включим» are «включи» through the ears' fingers,
+    but «выключи» is the opposite verb — its extra «вы» stands at the head, never a pass"""
+    if a == b:
+        return True
+    if len(a) == len(b):
+        return sum(ca != cb for ca, cb in zip(a, b)) <= 1
+    if abs(len(a) - len(b)) != 1:
+        return False
+    if len(a) > len(b):
+        a, b = b, a                # b is one letter longer now
+    return b[:-1] == a             # only a tail letter may appear or vanish
+
+
+def _verbs(toks, verbs):
+    """a token is one of the verbs, whole word or one bent letter away (four letters
+    and up, so «да» never leans into anything)"""
+    return any(t in verbs or (len(t) >= 4 and any(_near1(t, v) for v in verbs))
+               for t in toks)
+
+
+def _mind_log(what):
+    """one line in the mind's diary (/tmp/yumi/mind.log): what she heard and what
+    she made of it — without it a silence is a guess"""
+    try:
+        with open('/tmp/yumi/mind.log', 'a', encoding='utf-8') as f:
+            f.write(f'{time.strftime("%H:%M:%S")} {what}\n')
+    except OSError:
+        pass
 
 
 def spoken_number(t):
@@ -2467,13 +2510,15 @@ def music_control_text(text, lang='en'):
         return None                    # «не включай музыку» is not a wish, it is the opposite
 
     def strangers():                   # words this skill knows nothing about
-        return set(toks) - MUSIC_KNOWN - {
-            t for t in toks if t.startswith(('следующ', 'предыдущ'))}
+        return {t for t in toks
+                if t not in MUSIC_KNOWN
+                and not t.startswith(('следующ', 'предыдущ'))
+                and not (len(t) >= 4 and any(_near1(t, v) for v in VERB_ALL))}
 
     if any(t in MUSIC_STOP_ANY for t in toks):
         return 'stop'
     if has_music and not strangers() and (
-            any(t in MUSIC_STOP_MUSIC for t in toks)
+            _verbs(toks, MUSIC_STOP_MUSIC)
             or ('turn' in toks and 'off' in toks and 'on' not in toks)):
         return 'stop'                  # «выключи музыку», but «выключи свет» is not hers
 
@@ -2491,15 +2536,15 @@ def music_control_text(text, lang='en'):
             n = spoken_number(t)
             if n is not None:
                 return f'volume {n}'
-    if any(t in MUSIC_PAUSE for t in toks):
+    if _verbs(toks, MUSIC_PAUSE):
         return 'pause'
     if any(t in MUSIC_NEXT[2:] or t.startswith('следующ') for t in toks):
         return 'next'
     if any(t.startswith('предыдущ') or t in ('previous', 'rewind', 'назад') for t in toks):
         return 'previous'
-    if any(t in MUSIC_NEXT[:2] for t in toks):     # «переключи музыку»: the next one
+    if _verbs(toks, MUSIC_NEXT[:2]):               # «переключи музыку»: the next one
         return 'next' if has_music else None
-    if any(t in MUSIC_PLAY for t in toks):
+    if _verbs(toks, MUSIC_PLAY):
         if has_music or not strangers():
             return 'play'
         return None                    # «включи свет» is not hers to do
