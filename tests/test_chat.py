@@ -15,9 +15,12 @@ from yumi import chat  # noqa: E402
 
 # the clock questions she recognizes
 for t in ('Который час?', 'сколько времени', 'Юми, какое сейчас время?', 'сколько уже времени',
-          "what time is it", "What's the time?", "what is the time", "how late is it"):
+          "what time is it", "What's the time?", "what is the time", "how late is it",
+          'время', 'Время!', 'времени', 'скажи время', 'а время сейчас', 'времечко',
+          'time'):
     assert chat.time_question(t), t
-for t in ('какая погода', 'открой файл', 'привет', 'set a timer'):
+for t in ('какая погода', 'открой файл', 'привет', 'set a timer',
+          'рабочее время', 'время летит', 'не хватает времени'):
     assert not chat.time_question(t), t
 
 # the clock as she says it: 24 hours in Russian, sleepy lowercase am/pm in English

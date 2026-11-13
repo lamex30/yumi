@@ -156,6 +156,11 @@ WEATHER_Q_RE = re.compile(
     r'|\bweather\b|\bforecast\b|is\s+it\s+(?:raining|snowing)'
     r'|how\s+(?:hot|warm|cold|sunny)')
 
+# the polite words around a bare clock word («скажи время», «а время сейчас») —
+# once they are gone, a lone «время» is still the clock asking to be read
+TIME_FILLERS = {'скажи', 'подскажи', 'сейчас', 'пожалуйста', 'ну', 'а',
+                'tell', 'me', 'please', 'now'}
+
 # words that may trail a place name in a phrase but are not the place itself
 TRAILING = {'сегодня', 'сейчас', 'теперь', 'завтра', 'вечером', 'утром', 'днём', 'ночью',
             'now', 'today', 'tonight', 'tomorrow', 'right', 'please', 'outside'}
@@ -188,9 +193,16 @@ WMO = {
 
 
 def time_question(text):
-    """True when the phrase asks for the time: her eyes and the clock are enough"""
+    """True when the phrase asks for the time: her eyes and the clock are enough.
+    A bare clock word counts too («время», «времени»): the wake ear often keeps
+    only the tail of «юми время», the polite words around it are not a question
+    about anything else"""
     t = ' '.join(str(text or '').lower().split()).strip(' ?!.,')
-    return bool(TIME_Q_RE.search(t))
+    if TIME_Q_RE.search(t):
+        return True
+    toks = [w.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е') for w in t.split()]
+    return [w for w in toks if w and w not in TIME_FILLERS] in (
+        ['время'], ['времени'], ['времечко'], ['time'])
 
 
 JOKE_Q_RE = re.compile(

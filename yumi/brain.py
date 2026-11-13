@@ -1173,6 +1173,10 @@ class Brain(Extras):
             return
         text = ' '.join(str(text or '').split())
         alt = ' '.join(str(alt or '').split()) if alt else ''
+        # the ears sometimes keep her name in the phrase («Юми, время!», «юмию»
+        # for «юми»): a first word that is her name goes, the rest is the question
+        name = ' '.join(str(self.settings.get('wake_word') or 'юми').split()).lower()
+        text, alt = drop_name(text, name), drop_name(alt, name)
         _mind_log(f'heard {text!r} (vosk: {alt!r}, wake: {wake})')
         if not text:
             self.say('heard_nothing')
@@ -2460,6 +2464,18 @@ def volume_tokens(text):
     toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
             for t in str(text or '').split()]
     return [t for t in toks if t]
+
+
+def drop_name(text, word='юми'):
+    """the phrase without her name at the head: the ears' readings sometimes keep
+    it («Юми, время!», «юмию время», «юмит») — whisper leans on the name so hard
+    it will not let go. Only the first word is judged: a name deep in the phrase
+    is somebody's talking, not her cue"""
+    toks = volume_tokens(text)
+    w = volume_tokens(word)
+    if toks and _near1(toks[0], w[0] if w else 'юми'):
+        toks = toks[1:]
+    return ' '.join(toks)
 
 
 def _near1(a, b):

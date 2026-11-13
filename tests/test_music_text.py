@@ -11,6 +11,16 @@ from yumi import brain  # noqa: E402
 
 m = brain.music_control_text
 
+# the name the ears keep at the head of a phrase (whisper leans on it so hard
+# it will not let go): it goes, the question stays
+assert brain.drop_name('Юми, время!') == 'время'
+assert brain.drop_name('юмию время', 'юми') == 'время'
+assert brain.drop_name('юмит то играет') == 'то играет'      # a bent tail counts too
+assert brain.drop_name('включи музыку') == 'включи музыку'   # no name, nothing goes
+assert brain.drop_name('пока права пучка') == 'пока права пучка'   # not her name
+assert brain.drop_name('юми') == ''                         # the name alone is no question
+assert brain.drop_name('') == ''
+
 # her own phrases from the ears' diary, 17:54, the evening it all went wrong
 assert m('юми включи музыку') == 'play'
 assert m('включи музыку') == 'play'
