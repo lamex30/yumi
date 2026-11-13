@@ -64,11 +64,11 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 14                            # bumped when the protocol changes: stale twins are restarted
-WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
+VERSION = 15                            # bumped when the protocol changes: stale twins are restarted
+WAKE_AFTER = 1.5                        # s of quiet after the name before she asks what you wanted
 WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge reads: ~8 s
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
-VAD_TAIL = 700                          # ms of quiet after speech: the phrase is really over
+VAD_TAIL = 1200                         # ms of quiet after speech: the phrase is really over
 WAKE_SENSITIVITY = {'normal': 1, 'strict': 0}  # edit-distance budget for a wake match
 WAKE_WIDE = 3                 # when the judge is on duty, the pre-filter forgives three
                               # letters: over music vosk writes «юноша» for «юми», and
@@ -130,6 +130,21 @@ def _echo_enabled():
         return bool(st.get('stt_echo', True))
     except (OSError, ValueError):
         return True
+
+
+def _ear_tuning():
+    """the phrase's timing can be the user's own: 'phrase_tail_ms' (the quiet after
+    speech that ends a phrase) and 'wake_after' (the quiet after the name) in
+    ~/.config/yumi/settings.json"""
+    try:
+        st = json.loads((Path.home() / '.config' / 'yumi' / 'settings.json').read_text())
+        return (max(300, min(3000, int(st.get('phrase_tail_ms') or VAD_TAIL))),
+                max(0.5, min(5.0, float(st.get('wake_after') or WAKE_AFTER))))
+    except (OSError, ValueError):
+        return VAD_TAIL, WAKE_AFTER
+
+
+VAD_TAIL, WAKE_AFTER = _ear_tuning()    # the user's own timing, when settings.json says so
 
 
 def _default_sink():
@@ -967,9 +982,12 @@ class Ears:
                         if said:
                             return {'woke': True, 'text': said}
                         return {'woke': True, 'text': ''}   # her turn to greet
-                    if woken and time.monotonic() - since > WAKE_AFTER:
+                    if woken and time.monotonic() - since > WAKE_AFTER and \
+                            (not det.speech_ms or det.silence_ms >= VAD_TAIL):
                         # the name passed by and quiet followed: what the judge heard
-                        # past the name stands, even when vosk's own words went quiet
+                        # past the name stands, even when vosk's own words went quiet;
+                        # while the voice is still on (vosk stalled mid-phrase) she
+                        # keeps on waiting for the real end of the phrase
                         return {'woke': True, 'text': heard_after}
                     # the judge's answer, when it has come: a yes wakes her, a no means
                     # the letters were a dream of vosk's (a name in a video's stream);

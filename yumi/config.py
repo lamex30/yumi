@@ -56,6 +56,9 @@ DEFAULT_SETTINGS = {
     'stt_size': 'small',      # her hearing: small (45 MB) / big (a sharper ~1.8 GB model)
     'stt_mic': None,          # which microphone the ears hear with: None = auto (the desktop's pick)
     'stt_echo': True,         # the webrtc echo canceller around the mic; false = plain mic only
+    'phrase_tail_ms': 1200,   # ms of quiet that ends a phrase: raise it when she cuts you
+                              # off during your pauses, lower it when answers come too slow
+    'wake_after': 1.5,        # s of quiet after the name before the half-heard words count
     'ears_range': 'mid',      # how far the ears reach: near / mid / far (the noise gate decides)
     'tap_ears': False,        # a diary of everything the ears hear: /tmp/yumi (sound + words)
     'hourly_chimes': True,    # she speaks the time with a joke every hour
