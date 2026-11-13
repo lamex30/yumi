@@ -287,6 +287,16 @@ voices warm up in the background; after that she answers at once, and her lines 
 `pitch` is 1.0 as recorded, 1.2 a proper squeak. After editing the file, restart the voice:
 `pkill -f yumi/tts_daemon.py`. Without the setup she simply keeps her blips.
 
+She puts the stress on the wrong syllable? Fix it in `~/.config/yumi/stress.json`: a word and
+the stressed vowel with a `+` after it. The file is re-read for every phrase, no restart needed:
+
+```json
+{"торты": "т+орты", "звонит": "звон+ит", "договора": "догов+ора"}
+```
+
+A small starter set is there out of the box — add your own words: a `+`-marked word is spoken
+with your stress, and her built-in accentor leaves such words alone.
+
 ## She listens and answers
 
 The mic button on her ring (**Listen**) makes her hear you: click it, say a phrase, click again to

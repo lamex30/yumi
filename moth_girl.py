@@ -472,6 +472,9 @@ window.moth-girl drawingarea { background: none; }
 '''
 
 class App(Gtk.Application):
+    DUCK_LEVEL = 30                 # percent, while the ears wait for the phrase after her name
+    DUCK_BACK_MS = 12000            # the loudness comes back this long after the name went by
+
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.windows = []
@@ -484,6 +487,8 @@ class App(Gtk.Application):
         self.outfit_want = None         # the outfit she wears or is changing into
         self.sound_procs = []
         self.pending = []
+        self.duck_saved = None          # the loudness before the duck (the name_duck setting)
+        self.duck_restore = None        # the timer that brings the loudness back
         self.form_picking = False       # the file dialog of the button form is open
         for name in ACTIONS:
             a = Gio.SimpleAction.new(name, None)
@@ -535,7 +540,7 @@ class App(Gtk.Application):
         self.ops = []
         self.timer = None
         self.hold()                                  # keep running without a mapped window too
-        GLib.timeout_add(1500, lambda: self.ev(lambda b: b.say('hello')) and False)
+        GLib.timeout_add(1500, lambda: self.ev(lambda b: b.say('hello', force=True)) and False)
 
     def pick_outfit(self):
         """the outfit folder to wear now: by the calendar, or the one chosen in the settings"""
@@ -554,6 +559,10 @@ class App(Gtk.Application):
     def close(self):
         """let all her companion services go before she does: the TTS daemon,
         the STT daemon, her music and anything else that outlives her process."""
+        self.duck_end()                 # the ducked loudness comes back before she goes
+        if self.duck_restore:
+            GLib.source_remove(self.duck_restore)
+            self.duck_restore = None
         tts.close()
         ears.close()
         self.stop_timer_sound()
@@ -812,6 +821,7 @@ class App(Gtk.Application):
             elif kind == 'sound_stop':
                 self.stop_timer_sound()
             elif kind == 'voice':
+                self.duck_end()     # her answer sounds at your loudness, not the ducked one
                 self.speak(r[1], r[2], r[3], r[4] if len(r) > 4 else 0.5, r[5] if len(r) > 5 else '')
             elif kind == 'listen':
                 self.listen_ears(r[1])
@@ -827,8 +837,16 @@ class App(Gtk.Application):
                 self.weather_ask(r[1])
             elif kind == 'hourly_ask':
                 self.hourly_ask(r[1])
+            elif kind == 'joke_ask':
+                self.joke_ask(r[1])
+            elif kind == 'chat_models':
+                self.fetch_chat_models()
+            elif kind == 'mics':
+                self.fetch_mics()
             elif kind == 'music_control':
                 cmd = r[1]
+                if cmd.startswith('volume'):
+                    self.duck_keep()    # the level you asked for is the one that stays
                 try:
                     music.music_control(cmd)
                 except Exception:
@@ -970,6 +988,44 @@ class App(Gtk.Application):
         p = self.voice_proc
         return bool(p) and p.poll() is None
 
+    def duck_begin(self):
+        """her name was heard: the sounds duck so the ears hear the phrase.
+        The loudness before the duck is remembered and comes back in a while,
+        unless you set the volume yourself — then the new level stays"""
+        if not self.settings.get('name_duck'):
+            return
+        if self.duck_restore:
+            GLib.source_remove(self.duck_restore)
+        self.duck_restore = GLib.timeout_add(self.DUCK_BACK_MS, self.duck_end)
+        if self.duck_saved is not None:
+            return                      # already low: the first loudness is the one to keep
+        try:
+            saved = music.read_volume()
+            if saved is None:
+                return
+            self.duck_saved = saved
+            music.system_volume(f'volume {self.DUCK_LEVEL}')
+        except Exception:
+            self.duck_saved = None
+
+    def duck_keep(self):
+        """a volume command went through: the level she just named is the one that stays"""
+        if self.duck_restore:
+            GLib.source_remove(self.duck_restore)
+        self.duck_restore = None
+        self.duck_saved = None
+
+    def duck_end(self):
+        """the phrase is over: the loudness you had comes back"""
+        self.duck_restore = None
+        saved, self.duck_saved = self.duck_saved, None
+        if saved is not None:
+            try:
+                music.system_volume(f'volume {saved}')
+            except Exception:
+                pass
+        return False
+
     def wake_set(self, on):
         """the wake word: while it is on, a loop keeps the daemon listening for her name
         and, the moment it passes by, the phrase that follows goes straight to her mind"""
@@ -1003,11 +1059,13 @@ class App(Gtk.Application):
                     GLib.idle_add(lambda: self.ev(lambda b: b.stop_all()) and False)
                     continue
                 tail = res.get('text') or ''
-                busy = (b.sleeping or b.thinking or b.listening
-                        or b.now < b.talk_until or self.talking())
+                busy = (b.sleeping or b.thinking or b.listening)
                 if busy:
                     continue            # she got busy in those seconds: the word is spent
-                GLib.idle_add(lambda t=tail: self.ev(lambda br: br.wake_up(t)) and False)
+                if b.now < b.talk_until or self.talking():
+                    self.hush()         # her own line was still sounding: it dies, your turn now
+                GLib.idle_add(lambda t=tail: (self.duck_begin(),          # quiet, so she
+                                              self.ev(lambda br: br.wake_up(t))) and False)
 
         self.wake_thread = threading.Thread(target=work, daemon=True)
         self.wake_thread.start()

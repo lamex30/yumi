@@ -33,6 +33,8 @@ DEFAULT_SETTINGS = {
     'ring': [],               # order of her round buttons ([] = the default order)
     'ring_off': [],           # the buttons switched off
     'chat_provider': 'ollama',   # ollama or polza.ai: who answers when she listens
+    'chat_think': False,      # her mind thinks out loud before answering (deepseek-r1,
+                              # qwen3 and friends); off = the answer comes right away
     'chat_model': 'lakomoor/vikhr-llama-3.2-1b-instruct:1b',   # who answers when she listens
     'ollama_url': 'http://127.0.0.1:11434',   # where her local Ollama lives
     'polza_url': 'https://polza.ai/api/v1',   # Polza.ai OpenAI-compatible endpoint
@@ -46,8 +48,12 @@ DEFAULT_SETTINGS = {
     'wake_confirm': True,   # let whisper double-check every vosk guess before waking
     'wake_model_size': 'small',   # small / big: the model the wake ear listens with
     'wake_judge_log': True,    # write what the judge hears into /tmp/yumi/judge.log
+    'name_duck': False,        # when her name is heard, the sounds duck so she can
+                               # hear the phrase; the old loudness returns after it,
+                               # a volume command she keeps
     'stt_size': 'small',      # her hearing: small (45 MB) / big (a sharper ~1.8 GB model)
     'stt_mic': None,          # which microphone the ears hear with: None = auto (the desktop's pick)
+    'stt_echo': True,         # the webrtc echo canceller around the mic; false = plain mic only
     'ears_range': 'mid',      # how far the ears reach: near / mid / far (the noise gate decides)
     'tap_ears': False,        # a diary of everything the ears hear: /tmp/yumi (sound + words)
     'hourly_chimes': True,    # she speaks the time with a joke every hour
@@ -215,8 +221,9 @@ UI = {
         'listen': 'Listen', 'cat_chat': 'Her mind', 'chat_model': 'Answer model',
         'joke': 'Joke',
         'chat_refresh': 'Find the model',
+        'chat_think': 'Let her think first',
         'wake_ears': 'Wake on «Yumi»', 'stt_size': 'Hearing accuracy', 'e_small': 'Lite',
-        'e_big': 'Sharp (downloads ~1.8 GB)', 'cat_ears': 'Her ears', 'stt_mic': 'Microphone',
+        'name_duck': 'Quiet when she hears «Yumi»', 'e_big': 'Sharp (downloads ~1.8 GB)', 'cat_ears': 'Her ears', 'stt_mic': 'Microphone',
         'wake_sensitivity': 'Wake strictness', 'wake_sensitivity_normal': 'Normal',
         'wake_sensitivity_strict': 'Strict', 'wake_confirm': 'Judge each guess',
         'wake_model_size': 'Wake model', 'wake_judge_log': 'Log the judge to /tmp/yumi',
@@ -263,8 +270,10 @@ UI = {
         'listen': 'Послушать', 'cat_chat': 'Её мозги', 'chat_model': 'Модель ответов',
         'joke': 'Анекдот',
         'chat_refresh': 'Найти модель',
+        'chat_think': 'Дать ей подумать',
         'wake_ears': 'Будить по «Юми»', 'stt_size': 'Точность ушей', 'e_small': 'Лёгкая',
     'music_skill': 'Умение управлять музыкой',
+        'name_duck': 'Тишина, когда слышит «Юми»',
         'e_big': 'Точная (скачает ~1.8 ГБ)', 'cat_ears': 'Её ушки', 'stt_mic': 'Микрофон',
         'wake_sensitivity': 'Строгость пробуждения', 'wake_sensitivity_normal': 'Обычная',
         'wake_sensitivity_strict': 'Строгая', 'wake_confirm': 'Проверять судом',

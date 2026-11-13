@@ -43,3 +43,19 @@ assert m('play music') == 'play'
 assert m('запусти плейлист') == 'play'
 assert m('') is None
 assert m('юми') is None
+
+# the volume, the way the ears really hear it: падежи and a lone number count
+assert m('юми громкость тридцать') == 'volume 30'
+assert m('громкости 30') == 'volume 30'            # whisper's verdict from the diary
+assert m('громкость девяносто') == 'volume 90'
+assert m('звук на пятьдесят') == 'volume 50'
+assert m('громкость пять') == 'volume 50'          # the tens she obeys
+assert m('30') is None                             # a bare number is a wish only behind her name
+
+# a lone number after the name is a volume wish too (Brain.heard_text, wake=True)
+assert brain.bare_volume('30') == 30
+assert brain.bare_volume('тридцать') == 30
+assert brain.bare_volume('пять') == 50
+assert brain.bare_volume('сколько два плюс два') is None
+assert brain.bare_volume('громкость тридцать') is None   # not alone: the parser's job
+print('ok')

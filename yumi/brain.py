@@ -381,8 +381,8 @@ class Brain(Extras):
         return self.mode != 'docked' or self.out or self.yoff.x < self.hidden_off() - 2
 
     # ------------------------------------------------------------------ speech & faces
-    def say(self, event, **fmt):
-        line = self.speech.say(event, out=self.visible(), asleep=self.sleeping, **fmt)
+    def say(self, event, force=False, **fmt):
+        line = self.speech.say(event, out=self.visible(), asleep=self.sleeping, force=force, **fmt)
         if not line:
             return False
         return self.say_text(line[0], face=line[1])
@@ -889,7 +889,8 @@ class Brain(Extras):
             # the mic list is fetched once: «Find the microphone» looks again after it changed
             if not self.mics and 'stt_mic' not in self.unavailable:
                 self.requests.append(('mics',))
-            rows = [('set', 'wake_ears', t('wake_ears')), ('set', 'stt_size', t('stt_size')),
+            rows = [('set', 'wake_ears', t('wake_ears')), ('set', 'name_duck', t('name_duck')),
+                    ('set', 'stt_size', t('stt_size')),
                     ('set', 'stt_mic', t('stt_mic')), ('set', 'ears_range', t('ears_range')),
                     ('set', 'tap_ears', t('tap_ears')), ('set', 'wake_sensitivity', t('wake_sensitivity')),
                     ('set', 'wake_confirm', t('wake_confirm')), ('set', 'wake_model_size', t('wake_model_size')),
@@ -912,7 +913,8 @@ class Brain(Extras):
         elif kind == 'set_chat':
             if not self.chat_models and 'chat_model' not in self.unavailable:
                 self.requests.append(('chat_models',))
-            rows = [('set', 'chat_provider', t('chat_provider')), ('set', 'chat_model', t('chat_model'))]
+            rows = [('set', 'chat_provider', t('chat_provider')), ('set', 'chat_model', t('chat_model')),
+                    ('set', 'chat_think', t('chat_think'))]
             if self.chat_models:        # the list may have grown stale: a way to look again
                 rows.append(('chat_refresh', None, t('chat_refresh')))
             rows.append(('menu', 'settings', t('back')))
@@ -1152,17 +1154,18 @@ class Brain(Extras):
 
     def wake_up(self, text):
         """her name was heard («юми»): text is what was said after it, '' when it was said alone"""
-        if self.sleeping or self.thinking or self.listening or self.now < self.talk_until:
+        if self.sleeping or self.thinking or self.listening:
             return                          # a stray sound while she was busy: not her name
         if text:
-            self.heard_text(text)           # recognized on the go: the question is whole
+            self.heard_text(text, wake=True)   # recognized on the go: the question is whole
             return
         if self.say('woke_ask'):            # the name alone: she asks right away what you wanted
             self.listening = True
             self.requests.append(('listen', 15))
 
-    def heard_text(self, text):
-        """into her mind, whatever the ears' way was"""
+    def heard_text(self, text, wake=False):
+        """into her mind, whatever the ears' way was; wake is True when the phrase
+        came right after her name («юми ...»)"""
         if text is None:                # the ears are not set up (tools/stt_setup.sh)
             self.say('ears_fail')
             return
@@ -1193,6 +1196,9 @@ class Brain(Extras):
         # Music control commands (only if music skill is enabled)
         if self.settings.get('music_skill', True):
             music_cmd = music_control_text(text, lang)
+            if not music_cmd and wake:      # only the number made it through the ears:
+                n = bare_volume(text)       # «юми» and a level — that is a volume wish
+                music_cmd = f'volume {n}' if n else None
             if music_cmd:
                 self.music_control(music_cmd)
                 return
@@ -2401,10 +2407,47 @@ VOLUME_NUMBERS = {'десять': 10, 'двадцать': 20, 'тридцать'
                   'ten': 10, 'twenty': 20, 'thirty': 30, 'forty': 40,
                   'fifty': 50, 'sixty': 60, 'seventy': 70, 'eighty': 80,
                   'ninety': 90}
+VOLUME_ONES = {'один': 10, 'одна': 10, 'два': 20, 'две': 20, 'три': 30,
+               'четыре': 40, 'пять': 50, 'шесть': 60, 'семь': 70,
+               'восемь': 80, 'девять': 90, 'one': 10, 'two': 20, 'three': 30,
+               'four': 40, 'five': 50, 'six': 60, 'seven': 70, 'eight': 80,
+               'nine': 90}   # «громкость пять» means fifty: only the tens she obeys
 MUSIC_KNOWN = (MUSIC_WORDS | MUSIC_FILLERS | MUSIC_PLAY | MUSIC_PAUSE
                | MUSIC_STOP_ANY | MUSIC_STOP_MUSIC | set(MUSIC_NEXT)
                | VOLUME_UP | VOLUME_DOWN | VOLUME_WORD | set(VOLUME_NUMBERS)
                | {'следующ', 'предыдущ', 'назад', 'turn', 'off', 'on'})
+
+
+def volume_tokens(text):
+    """the words of a phrase the way the volume skill reads them: lower case,
+    punctuation gone, ё folded into е"""
+    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
+            for t in str(text or '').split()]
+    return [t for t in toks if t]
+
+
+def spoken_number(t):
+    """the level a word or a digit stands for: «50», «50%», «пятьдесят», «fifty»;
+    a lone one («пять», «5») is read as a ten, the tens are all she obeys"""
+    if t.rstrip('%').isdigit():
+        n = int(t.rstrip('%'))
+    else:
+        n = VOLUME_NUMBERS.get(t) or VOLUME_ONES.get(t)
+    if n is not None and 0 < n < 10:
+        n *= 10
+    return n
+
+
+def bare_volume(text):
+    """one lone number said to her (the ears kept «30» and dropped the rest):
+    the volume level that most likely was meant (10..100), or None"""
+    toks = volume_tokens(text)
+    if len(toks) != 1:
+        return None
+    n = spoken_number(toks[0])
+    if n is None or n <= 0:
+        return None
+    return min(100, max(10, n))
 
 
 def music_control_text(text, lang='en'):
@@ -2416,9 +2459,7 @@ def music_control_text(text, lang='en'):
     «выключи музыку» stops, and «включи свет» or the telly in the background
     is not hers to mind. The bare toggle 'play_pause' is for the hotkey only.
     """
-    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
-            for t in str(text or '').split()]
-    toks = [t for t in toks if t]
+    toks = volume_tokens(text)
     if not toks:
         return None
     has_music = any(t in MUSIC_WORDS for t in toks)
@@ -2444,12 +2485,8 @@ def music_control_text(text, lang='en'):
            for t in toks):
         return 'volume_up'
 
-    def spoken_number(t):              # «50», «50%», «пятьдесят», «fifty»
-        if t.rstrip('%').isdigit():
-            return int(t.rstrip('%'))
-        return VOLUME_NUMBERS.get(t)
-
-    if any(t in VOLUME_WORD for t in toks):
+    # «громкости 30» counts too: the ears' падежи and whisper's чуткие уши
+    if any(t in VOLUME_WORD or t.startswith('громкост') for t in toks):
         for t in toks:
             n = spoken_number(t)
             if n is not None:

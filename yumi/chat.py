@@ -76,11 +76,26 @@ def system_prompt(lang):
             'sentences, friendly and a little sleepy. No emoji, no lists.')
 
 
+def _think(settings):
+    """her «thinking mode»: on, she reasons out loud before the answer; off, the
+    answer comes right away (deepseek-r1, qwen3 and friends think by default)"""
+    return bool(settings.get('chat_think', False))
+
+
+def _strip_think(text):
+    """the mind's silent reasoning sometimes leaks into the answer as a
+    «<think>...» block: it never reaches the bubble"""
+    tag = '<' + 'think' + '>'
+    return re.sub(re.escape(tag) + r'.*?' + re.escape(tag) + r'\s*', '',
+                  str(text or ''), flags=re.S | re.I).strip()
+
+
 def _ollama_chat(settings, history, timeout):
-    body = json.dumps({'model': settings.get('chat_model') or DEFAULT_MODEL,
-                       'messages': history, 'stream': False,
-                       'options': {'num_predict': 220}}).encode()
-    return _post(_url(settings) + '/api/chat', body, timeout)
+    body = {'model': settings.get('chat_model') or DEFAULT_MODEL,
+            'messages': history, 'stream': False,
+            'options': {'num_predict': 220},
+            'think': _think(settings)}          # off: the answer comes right away
+    return _post(_url(settings) + '/api/chat', json.dumps(body).encode(), timeout)
 
 
 def _polza_chat(settings, history, timeout):
@@ -104,11 +119,11 @@ def ask(settings, history, timeout=90):
         if _provider(settings) == 'polza.ai':
             data = _polza_chat(settings, history, timeout)
             msg = (data.get('choices') or [{}])[0].get('message') or {}
-            return ' '.join(str(msg.get('content') or '').split())
+            return _strip_think(' '.join(str(msg.get('content') or '').split()))
         data = _ollama_chat(settings, history, timeout)
     except (urllib.error.URLError, OSError, ValueError):
         return ''
-    return ' '.join(str((data.get('message') or {}).get('content') or '').split())
+    return _strip_think(' '.join(str((data.get('message') or {}).get('content') or '').split()))
 
 
 # ---- the little questions she needs no mind for: the clock and the window ----
@@ -212,7 +227,7 @@ def _one_shot(settings, user, tokens, lang='en', timeout=90):
     the reply text, or '' when the mind is out of reach"""
     if _provider(settings) == 'polza.ai' and not str(settings.get('polza_api_key') or '').strip():
         return ''          # no key: Polza.ai would hang or refuse, she says so at once
-    body = json.dumps({
+    req_body = {
         'model': settings.get('chat_model') or (POLZA_MODEL if _provider(settings) == 'polza.ai' else DEFAULT_MODEL),
         'messages': [
             {'role': 'system', 'content': system_prompt(lang)},
@@ -220,7 +235,10 @@ def _one_shot(settings, user, tokens, lang='en', timeout=90):
         ],
         'stream': False,
         'options': {'num_predict': tokens} if _provider(settings) != 'polza.ai' else {'max_tokens': tokens}
-    }).encode()
+    }
+    if _provider(settings) != 'polza.ai':
+        req_body['think'] = _think(settings)    # off: the joke comes right away
+    body = json.dumps(req_body).encode()
     try:
         if _provider(settings) == 'polza.ai':
             headers = {'Content-Type': 'application/json',
@@ -230,14 +248,14 @@ def _one_shot(settings, user, tokens, lang='en', timeout=90):
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 data = json.loads(r.read().decode())
             msg = (data.get('choices') or [{}])[0].get('message') or {}
-            return ' '.join(str(msg.get('content') or '').split())
+            return _strip_think(' '.join(str(msg.get('content') or '').split()))
         req = urllib.request.Request(_url(settings) + '/api/chat', data=body,
                                      headers={'Content-Type': 'application/json'})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             data = json.loads(r.read().decode())
     except (urllib.error.URLError, OSError, ValueError):
         return ''
-    return ' '.join(str((data.get('message') or {}).get('content') or '').split())
+    return _strip_think(' '.join(str((data.get('message') or {}).get('content') or '').split()))
 
 
 def hourly_joke(settings, hour, lang='en', timeout=90):

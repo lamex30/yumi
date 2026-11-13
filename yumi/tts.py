@@ -168,6 +168,7 @@ def speak(text, volume=0.5):
     text = ' '.join(str(text).split())[:500]
     # convert digits like 14:00 to words for better Silero TTS pronunciation
     text = _convert_digits_for_tts(text)
+    text = apply_stress(text)      # the user's stress marks win over the auto-accentor
     if not text:
         return None
     info = _ensure()
@@ -304,6 +305,55 @@ def _convert_digits_for_tts(text):
 
     text = _TIME_RE.sub(time_repl, text)
     return re.sub(r'\d+', num_repl, text)
+
+# ---- stresses: her own dictionary where the auto-accentor gets it wrong ----
+
+STRESS = config.CONFIG_DIR / 'stress.json'   # {'торты': 'т+орты'}; + marks the stressed vowel
+STARTER_STRESS = {                 # the words Silero's accentor keeps getting wrong
+    'торты': 'т+орты', 'тортов': 'т+ортов', 'тортами': 'т+ортами',
+    'звонит': 'звон+ит', 'позвонит': 'позвон+ит', 'позвонишь': 'позвон+ишь',
+    'договор': 'догов+ор', 'договора': 'догов+ора',
+    'каталог': 'катал+ог', 'квартал': 'кварт+ал', 'аппарат': 'аппар+ат',
+}
+_stress_cache = None               # (the file's mtime, {'word': 'stressed'})
+
+
+def stress_map():
+    """the stress dictionary, read anew whenever the file changes (so edits land at once)"""
+    global _stress_cache
+    try:
+        mtime = STRESS.stat().st_mtime
+    except OSError:
+        try:                       # no file yet: her starter set, saved for editing
+            STRESS.parent.mkdir(parents=True, exist_ok=True)
+            STRESS.write_text(json.dumps(STARTER_STRESS, ensure_ascii=False, indent=4) + '\n')
+        except OSError:
+            return {}
+        return dict(STARTER_STRESS)
+    if _stress_cache and _stress_cache[0] == mtime:
+        return _stress_cache[1]
+    try:
+        data = json.loads(STRESS.read_text(encoding='utf-8'))
+        words = {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)
+                 and k.strip() and v.strip()}
+    except (OSError, ValueError):
+        words = {}
+    words = {k: v for k, v in words.items() if not k.startswith('_')}
+    _stress_cache = (mtime, words)
+    return words
+
+
+def apply_stress(text):
+    """the user's stress marks into the line: «торты» becomes «т+орты»; only whole
+    words are touched (a «+» inside them survives the model's own accentor)"""
+    words = stress_map()
+    if not words or not any('\u0400' <= c <= '\u04ff' for c in text):
+        return text
+    for word, stressed in sorted(words.items(), key=lambda kv: -len(kv[0])):
+        text = re.sub(r'(?<![\u0400-\u04ff])' + re.escape(word) + r'(?![\u0400-\u04ff])',
+                      stressed, text, flags=re.IGNORECASE)
+    return text
+
 
 def _evict():
     try:

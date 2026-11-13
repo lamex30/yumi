@@ -310,6 +310,12 @@ def _sink_volume(name=None):
     return min(pcts) if pcts else None
 
 
+def read_volume():
+    """the system loudness right now, in percent, or None when pactl is away"""
+    name = _default_sink()
+    return _sink_volume(name) if name else None
+
+
 def system_volume(cmd):
     """The system loudness: 'volume_up' and 'volume_down' step it by 10,
     'volume N' sets it to N (10..100).

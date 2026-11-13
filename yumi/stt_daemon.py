@@ -64,7 +64,7 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 12                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 13                            # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 0.7                        # s of quiet after the name before she asks what you wanted
 WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge reads: ~8 s
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
@@ -117,6 +117,16 @@ def _echo_want(mic):
     if mic and mic != ECHO_SOURCE and not mic.endswith('.monitor'):
         return mic
     return None
+
+
+def _echo_enabled():
+    """the canceller is best effort, so the user can turn it off: 'stt_echo': false in
+    ~/.config/yumi/settings.json (the ears fall back to the plain chosen mic)"""
+    try:
+        st = json.loads((Path.home() / '.config' / 'yumi' / 'settings.json').read_text())
+        return bool(st.get('stt_echo', True))
+    except (OSError, ValueError):
+        return True
 
 
 def _default_sink():
@@ -214,6 +224,24 @@ def echo_ready(mic=None):
         now = time.monotonic()
         if now - _echo['checked'] >= 20:
             _echo['checked'] = now
+            if not _echo_enabled():     # off in the settings: plain mic only, take the
+                ids = []                # canceller apart and give the desktop its sink back
+                for line in _pactl_short('modules').splitlines():
+                    p = line.split('\t')
+                    if len(p) >= 3 and 'module-echo-cancel' in p[1] and ECHO_SOURCE in p[2]:
+                        ids.append(p[0])
+                for mid in ids:
+                    subprocess.run(['pactl', 'unload-module', mid],
+                                   capture_output=True, timeout=5)
+                if _default_sink() == ECHO_SINK:
+                    real = _echo_sink_master()
+                    if real:
+                        subprocess.run(['pactl', 'set-default-sink', real],
+                                       capture_output=True, timeout=3)
+                if ids or _echo['on']:
+                    log('echo-cancel is off (stt_echo: false in the settings)')
+                _echo['on'] = _echo['master'] = _echo['module'] = None
+                return None
             if ECHO_SOURCE in _pactl_short('sources'):
                 _echo['on'] = True
                 _uncap_real_sink()      # the knob above the real end must not be capped
@@ -557,6 +585,20 @@ def wake_at(text, spellings, budget=1):
                 continue
             return ' '.join(toks[i + n:]), said
     return None, None
+
+
+def name_exact(text, spellings):
+    """True when a full spelling of the name stands verbatim near the start of the
+    phrase: vosk heard it letter for letter, no judge is needed to believe it"""
+    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
+            for t in text.split()]
+    toks = [t for t in toks if t]
+    known = set(spellings)
+    for n in (3, 2, 1):                     # the same glued hear-says wake_at counts
+        for i in range(0, min(len(toks), 8) - n + 1):
+            if ''.join(toks[i:i + n]) in known:
+                return True
+    return False
 
 
 WAKE_STOPS = {'иди', 'или', 'уже', 'ели', 'юли', 'умер'}    # the ears' false names: never wake on these
@@ -934,21 +976,27 @@ class Ears:
                         logged = words
                         judge_note(f'VOSK {words!r}')
                     hit, src = wake_at(words, spellings)
-                    if not woken and hit is not None and wmodel is not None:
-                        # a candidate: the tape goes to the judge; a fresh reading only
-                        # when the last one is answered and the wait between reads has passed
-                        if not verdict['busy'] and verdict['ok'] is None \
-                                and time.monotonic() - verdict['t'] > WAKE_REJUDGE:
-                            verdict['busy'] = True
-                            judge_note(f'SENT {src!r}')
-                            threading.Thread(target=judge, args=(bytes(tape),),
-                                             daemon=True).start()
                     if not woken and hit is not None and wmodel is None:
                         # no judge today: vosk's word is taken as it comes
                         woken = True                # she hears her name: keep on recording
                         since = time.monotonic()
                         if src and src not in spellings:
                             hearsay_save(word, src)     # a hear-say she never met: learn it
+                    elif not woken and hit is not None:
+                        if name_exact(words, spellings):
+                            # the name spelled out whole and right: vosk is sure,
+                            # the judge would only add seconds of waiting
+                            woken = True
+                            since = time.monotonic()
+                        elif not verdict['busy'] and verdict['ok'] is None \
+                                and time.monotonic() - verdict['t'] > WAKE_REJUDGE:
+                            # a near-miss spelling: the tape goes to the judge, a fresh
+                            # reading only when the last one is answered and the wait
+                            # between reads has passed
+                            verdict['busy'] = True
+                            judge_note(f'SENT {src!r}')
+                            threading.Thread(target=judge, args=(bytes(tape),),
+                                             daemon=True).start()
                     if not woken or not ended:
                         continue    # not her name yet, or the phrase is still forming
                     said = hit if hit is not None else words

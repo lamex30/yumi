@@ -10,7 +10,7 @@ Rules (from the plan):
   * idle chatter ("chatter") at most once every 10 minutes and only while she is already out;
   * nothing while she sleeps (Do Not Disturb) except the wake-up line;
   * never the same line as one of the last three for that event.
-  * no sleep-shaming, no remarks about the time of day.
+  * no sleep-shaming; the startup hello fits the time of day (see time_of_day below).
 """
 import random
 import time
@@ -23,7 +23,23 @@ BYPASS = {'battery_low'}
 LINES = {
     'en': {
         'hello': [("Mm... I'm up. Kind of.", None), ("Hi. I'll be in the corner.", 'happy'),
-                  ("Morning... or whatever time it is.", None), ("Present. Mostly.", 'wink')],
+                  ("Up and flapping. Mostly flapping.", None), ("Present. Mostly.", 'wink')],
+        'hello_morning': [("Good morning! It's {hhmm}, I just woke up.", 'happy'),
+                          ("Good morning. The sun is up, and so am I. Sort of.", None),
+                          ("Mm... morning already? Fine, I'm up.", None),
+                          ("Good morning! It's {hhmm} and I made it. Almost.", 'wink')],
+        'hello_day': [("Good afternoon! It's {hhmm}, I'm awake. Mostly.", 'happy'),
+                      ("Good day. I'll be in my corner.", 'happy'),
+                      ("Afternoon. I flapped here all by myself, by the way.", 'wink'),
+                      ("Good afternoon! What are we up to?", 'happy')],
+        'hello_evening': [("Good evening. It's {hhmm}, quiet hours soon.", None),
+                          ("Good evening. My corner, as always.", 'happy'),
+                          ("Evening. Don't turn off the light, I'm a moth.", 'wink'),
+                          ("Good evening! Made it here. No incidents.", 'happy')],
+        'hello_night': [("Good night... to you, I mean. I'm nocturnal.", None),
+                        ("Good night! My favorite time of day.", 'happy'),
+                        ("It's {hhmm} and I'm fully awake. Nights are mine.", 'wink'),
+                        ("Shh. It's night. I like it that way.", None)],
         'pickup': [("Hey! Not by the collar...", 'surprised'), ("Waah, put me down gently!", 'worried'),
                    ("I'm not a kitten, you know.", 'annoyed'), ("Whoa, flying lessons?", 'surprised')],
         'dock': [("Phew. Safe in my corner.", 'happy'), ("Ahh, the edge. Much better.", 'happy'),
@@ -152,7 +168,23 @@ LINES = {
     },
     'ru': {
         'hello': [("Мм... я тут. Почти.", None), ("Привет. Я буду в уголке.", 'happy'),
-                  ("Доброе утро... или что там сейчас.", None), ("На месте. Вроде бы.", 'wink')],
+                  ("Я тут. Летаю. Ну, почти.", None), ("На месте. Вроде бы.", 'wink')],
+        'hello_morning': [("Доброе утро! Сейчас {hhmm}, я уже проснулась.", 'happy'),
+                          ("Доброе утро. Солнце встало, и я — почти.", None),
+                          ("Мм... утро уже? Ладно, я встала.", None),
+                          ("Доброе утро! На часах {hhmm}, я успела. Почти.", 'wink')],
+        'hello_day': [("Добрый день! Сейчас {hhmm}, я бодрствую. В основном.", 'happy'),
+                      ("Добрый день. Я буду в уголке.", 'happy'),
+                      ("День. Я долетела сюда сама, между прочим.", 'wink'),
+                      ("Добрый день! Чем займёмся?", 'happy')],
+        'hello_evening': [("Добрый вечер. Сейчас {hhmm}, скоро тихий час.", None),
+                          ("Добрый вечер. Я буду в своём уголке, как всегда.", 'happy'),
+                          ("Вечер. Не выключай свет, я же мотылёк.", 'wink'),
+                          ("Добрый вечер! Долетела. Без приключений.", 'happy')],
+        'hello_night': [("Доброй ночи... ну, тебе. Я ночная.", None),
+                        ("Доброй ночи! Моё любимое время суток.", 'happy'),
+                        ("На часах {hhmm}, а я в полной готовности. Ночью — моё время.", 'wink'),
+                        ("Тсс. Ночь. Мне так даже лучше.", None)],
         'pickup': [("Эй! Не за шкирку же...", 'surprised'), ("Ааа, аккуратнее!", 'worried'),
                    ("Я тебе не котёнок, вообще-то.", 'annoyed'), ("Ого, учимся летать?", 'surprised')],
         'dock': [("Фух. Снова в своём уголке.", 'happy'), ("Ах, край экрана. Так-то лучше.", 'happy'),
@@ -289,6 +321,17 @@ KIND = {  # which rate limit an event falls under; everything else is an "action
 }
 
 
+def time_of_day(hour):
+    """which part of the day it is: 'morning', 'day', 'evening' or 'night'"""
+    if 5 <= hour <= 11:
+        return 'morning'
+    if 12 <= hour <= 16:
+        return 'day'
+    if 17 <= hour <= 22:
+        return 'evening'
+    return 'night'
+
+
 class Speech:
     def __init__(self, settings, clock=time.monotonic, rng=None):
         self.settings = settings
@@ -303,6 +346,12 @@ class Speech:
         pool = LINES.get(lang, LINES['en']).get(event) or LINES['en'].get(event)
         if not pool:
             return None
+        if event == 'hello':    # the startup hello matches the time of day
+            part = time_of_day(time.localtime().tm_hour)
+            extra = LINES.get(lang, LINES['en']).get('hello_' + part)
+            if extra and self.rng.random() < 0.75:   # mostly the time of day, sometimes shy
+                fmt.setdefault('hhmm', time.strftime('%H:%M'))
+                pool = pool + extra
         seen = self.recent.setdefault((lang, event), deque(maxlen=min(3, len(pool) - 1)))
         choices = [i for i in range(len(pool)) if i not in seen] or list(range(len(pool)))
         i = self.rng.choice(choices)
@@ -316,10 +365,10 @@ class Speech:
             pass
         return text, face
 
-    def allowed(self, event, out=True, asleep=False):
+    def allowed(self, event, out=True, asleep=False, force=False):
         kind = KIND.get(event, 'action')
         now = self.clock()
-        if asleep and event not in ('wake', 'sleep'):
+        if asleep and event not in ('wake', 'sleep') and not force:
             return False
         if kind == 'system':
             if not self.settings.get('reactions', True):
@@ -333,9 +382,10 @@ class Speech:
                 return False
         return True
 
-    def say(self, event, out=True, asleep=False, **fmt):
-        """the line to show, or None when the rules say she stays quiet"""
-        if not self.allowed(event, out, asleep):
+    def say(self, event, out=True, asleep=False, force=False, **fmt):
+        """the line to show, or None when the rules say she stays quiet;
+        force is for the startup hello: it comes even while Do Not Disturb is on"""
+        if not self.allowed(event, out, asleep, force):
             return None
         kind = KIND.get(event, 'action')
         if kind == 'system':

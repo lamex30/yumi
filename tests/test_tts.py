@@ -76,6 +76,22 @@ assert tts._convert_digits_for_tts('В году 2026') == 'В году две т
 p3 = tts.speak('Сейчас 14:05.', 0.5)
 assert p3 and HITS[-1][0] == 'Сейчас четырнадцать часов пять минут.', HITS[-1]
 
+# her stress dictionary: the user's «+» reaches the daemon inside the whole word
+tts.STRESS = Path(tmp) / 'stress.json'
+tts.STRESS.write_text(json.dumps({'торты': 'т+орты', 'тортов': 'т+ортов'}, ensure_ascii=False),
+                      encoding='utf-8')
+tts._stress_cache = None
+assert tts.apply_stress('Торты! Все тортов съела.') == 'т+орты! Все т+ортов съела.'
+assert tts.apply_stress('не тортыво') == 'не тортыво', 'only whole words may be touched'
+assert tts.apply_stress('Hi there!') == 'Hi there!', 'english lines stay as they are'
+assert tts.speak('Торты', 0.5) and HITS[-1][0] == 'т+орты', HITS[-1]
+p_cached = tts.speak('Торты', 0.5)
+assert p_cached and len(HITS) == 4, HITS  # the stressed line is cached like any other
+# the file may be edited while she is awake: the next line follows the new word
+tts.STRESS.write_text(json.dumps({'звонит': 'звон+ит'}, ensure_ascii=False), encoding='utf-8')
+tts._stress_cache = None
+assert tts.apply_stress('звонит') == 'звон+ит'
+
 # a stale port file: nothing answers, and starting a daemon is impossible -> None (blips instead)
 server.shutdown()
 (tts.DIR / 'port.json').write_text('{"port": 1, "profile": "x"}')
