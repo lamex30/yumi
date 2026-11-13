@@ -55,6 +55,8 @@ English · [Русский](README.ru.md)
   [Open-Meteo](https://open-meteo.com). Her own city can be written into
   `~/.config/yumi/settings.json` as `"weather_city": "Yalta"` — then «юми погода» looks
   there (the default is «Anapa», while `""` looks wherever the computer stands).
+  Ask «кто играет» or «что за трек» («who plays», «what's playing») and she names the artist
+  and the track that is sounding — from any MPRIS player (vlc, spotify, a browser) or her own library.
 - English and Russian, picked from your system language.
 
 <img src="docs/colors.png" alt="Yumi on teal, rose, amber and blue wallpapers, recolored to each" width="100%">
@@ -350,7 +352,8 @@ peek at [wttr.in](https://wttr.in) (this one small look needs the internet; ever
 stays offline as before); with a place in the phrase («какая погода в Москве») she looks there,
 otherwise out of her own window — the city where you are, recognized from your network.
 Say «расскажи анекдот» (or «tell me a joke») and she asks her neural net to make one up,
-then tells it out loud.
+then tells it out loud. And «кто играет» («what's playing») she answers by herself too:
+the artist and the track of whatever is sounding right now.
 
 **The wake word.** Say «Yumi» and she is all ears at once, no buttons — the name may come
 behind a filler word («well, Yumi») and a half-heard mush of syllables counts too, so she

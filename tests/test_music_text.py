@@ -44,6 +44,19 @@ assert m('запусти плейлист') == 'play'
 assert m('') is None
 assert m('юми') is None
 
+# «кто играет»: a question about the song, never a wish to start one
+assert m('кто играет') == 'who'
+assert m('что играет') == 'who'
+assert m('что сейчас играет') == 'who'
+assert m('что за трек') == 'who'
+assert m('какая песня играет') == 'who'
+assert m('какой трек играет') == 'who'
+assert m("what's playing") == 'who'
+assert m('what song is this') == 'who'
+assert m('юми кто играет') == 'who'
+assert m('что включи музыку') == 'play'           # a verb nearby: it is a wish, not a question
+assert m('что выключи музыку') is None            # the stray «что» is a stranger to the parser
+
 # the volume, the way the ears really hear it: падежи and a lone number count
 assert m('юми громкость тридцать') == 'volume 30'
 assert m('громкости 30') == 'volume 30'            # whisper's verdict from the diary

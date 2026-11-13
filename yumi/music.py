@@ -252,6 +252,35 @@ def previous_track():
     return False
 
 
+def now_playing():
+    """Who plays right now: (artist, title) of the track that has the sound,
+    or None when the room is quiet or no names are to be had.
+
+    MPRIS players (vlc, spotify, a browser) answer first — they play even when
+    her own mpd is up; her library answers through mpc. A track on pause still
+    has a name: «кто играет» may be asked about it too.
+    """
+    def split(out):
+        artist, _, title = (out or '').strip().partition('\t')
+        if artist or title:
+            return artist, title
+        return None
+
+    if _player_status():
+        r = _playerctl('metadata', '--format', '{{artist}}\t{{title}}')
+        if r is not None and r.returncode == 0:
+            names = split(r.stdout)
+            if names:
+                return names
+    if _mpd_ready():
+        r = _mpc('current', '-f', '%artist%\t%title%')
+        if r is not None and r.returncode == 0:
+            names = split(r.stdout)
+            if names:
+                return names
+    return None
+
+
 def service_start():
     """mpd comes up with her: the systemd user service, or a bare mpd when systemd is away"""
     if _mpd_ready():

@@ -851,6 +851,8 @@ class App(Gtk.Application):
                     music.music_control(cmd)
                 except Exception:
                     pass
+            elif kind == 'music_who':
+                self.music_who()
             elif kind == 'stop_all':
                 self.hush()                    # her voice dies mid-word
                 self.stop_timer_sound()
@@ -1099,6 +1101,14 @@ class App(Gtk.Application):
             lang = self.settings.get('speech_lang', 'en')
             reply = chat.weather_report(ask.get('where', ''), lang, ask.get('when', 'today'))
             GLib.idle_add(lambda: self.ev(lambda b: b.said_weather(reply)) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def music_who(self):
+        """the «кто играет» question: the player is asked in its own thread
+        (playerctl and mpc take a moment), the names go back into her bubble"""
+        def work():
+            playing = music.now_playing()
+            GLib.idle_add(lambda: self.ev(lambda b: b.said_now_playing(playing)) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def hourly_ask(self, payload):

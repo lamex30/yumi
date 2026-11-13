@@ -1216,6 +1216,22 @@ class Brain(Extras):
         self.thinking = True
         self.requests.append(('chat_ask', list(self.chat_history)))
 
+    def said_now_playing(self, playing):
+        """the player answered the «кто играет» question: she names the artist and
+        the track (playing is (artist, title), or None when the room is quiet);
+        what the ears hear matches what the bubble shows"""
+        self.thinking = False
+        if not playing:
+            self.say('music_who_none')
+            return
+        artist, title = playing
+        if artist and title:
+            self.say('music_who', artist=artist, title=title)
+        elif title:
+            self.say('music_who_title', title=title)
+        else:
+            self.say('music_who_artist', artist=artist)
+
     def said_weather(self, report):
         """the clouds answered through wttr.in / Open-Meteo (report is '' when the net was away);
         the bubble keeps «+5°C», the ears hear «плюс 5 градусов»"""
@@ -1325,8 +1341,13 @@ class Brain(Extras):
 
         Args:
             cmd: One of 'play', 'pause', 'play_pause', 'next', 'previous',
-                 'stop', 'volume_up', 'volume_down', 'volume N' (10..100)
+                 'stop', 'who' (кто играет: she names the artist and the track),
+                 'volume_up', 'volume_down', 'volume N' (10..100)
         """
+        if cmd == 'who':               # the player is asked away from her main thread
+            self.thinking = True
+            self.requests.append(('music_who',))
+            return
         phrases = {'play_pause': 'music_toggle', 'play': 'music_play',
                    'pause': 'music_pause', 'next': 'music_next',
                    'previous': 'music_previous', 'stop': 'music_stop',
@@ -2407,6 +2428,10 @@ MUSIC_PAUSE = frozenset(('пауза', 'паузу', 'приостанови', '
 MUSIC_STOP_ANY = frozenset(('стоп', 'стопи', 'останови', 'остановить', 'stop'))
 MUSIC_STOP_MUSIC = frozenset(('выключи', 'выключить', 'выключать', 'выруби', 'выруб'))
 MUSIC_NEXT = ('переключи', 'переключить', 'next', 'skip')
+MUSIC_WHO_ASK = frozenset(('кто', 'что', 'какая', 'какой', 'чей',
+                           'what', "what's", 'whats', 'who', 'which'))
+MUSIC_WHO_PLAY = ('играет', 'играют', 'играла', 'играет', 'звучит', 'звучат',
+                  'поёт', 'поет', 'playing', 'plays')
 VOLUME_UP = frozenset(('громче', 'повысь', 'повысить', 'louder', 'up'))
 VOLUME_DOWN = frozenset(('тише', 'тихо', 'quieter', 'softer', 'lower'))
 VOLUME_WORD = frozenset(('громкость', 'звук', 'volume', 'sound'))
@@ -2497,6 +2522,7 @@ def music_control_text(text, lang='en'):
     """Convert voice text to a music command.
 
     Returns 'play' (her own library), 'pause', 'stop', 'next', 'previous',
+    'who' (just the question «кто играет»: she names the artist and the track),
     'volume_up', 'volume_down', 'volume N' (the system volume, 10..100),
     or None if not a music command. Whole words only: «включи музыку» plays,
     «выключи музыку» stops, and «включи свет» or the telly in the background
@@ -2508,6 +2534,15 @@ def music_control_text(text, lang='en'):
     has_music = any(t in MUSIC_WORDS for t in toks)
     if 'не' in toks or 'not' in toks or "don't" in toks:
         return None                    # «не включай музыку» is not a wish, it is the opposite
+
+    # «кто играет», «что за трек»: a question, not a wish — she names the song.
+    # A command verb nearby («что включи музыку») is a wish, so the question yields.
+    if (any(t in MUSIC_WHO_ASK for t in toks)
+            and not (_verbs(toks, MUSIC_PLAY) or _verbs(toks, MUSIC_PAUSE)
+                     or any(t in MUSIC_STOP_ANY or t in MUSIC_STOP_MUSIC
+                            or t.startswith(('следующ', 'предыдущ')) for t in toks))
+            and (_verbs(toks, MUSIC_WHO_PLAY) or has_music)):
+        return 'who'
 
     def strangers():                   # words this skill knows nothing about
         return {t for t in toks
