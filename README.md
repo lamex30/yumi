@@ -102,7 +102,7 @@ Optional, for the extras (install what you like):
 | `pipewire` (`pw-play`), `paplay`, `aplay` or `ffplay` | the timer bell |
 | `tools/tts_setup.sh` (a venv with torch, ~450 MB) | her real voice: a local Silero TTS |
 | `tools/stt_setup.sh` (a small venv with vosk) | her ears: local speech recognition |
-| `tools/intents_setup.sh` (a venv with torch, ~500 MB, once; a ~30 MB model) | her tiny mind for the voice commands: the rephrasings the sayings miss |
+| `tools/intents_setup.sh` (a ~20 MB model off the releases page, or a venv with torch to teach one anew) | her tiny mind for the voice commands: the rephrasings the sayings miss |
 
 ### 2. Yumi herself
 
