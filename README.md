@@ -244,6 +244,24 @@ from the list or an absolute path to a picture:
 
 Commands run with `sh -c`.
 
+### Voice commands
+
+A button may carry the words that summon it by voice — no code, no mind, she answers at once:
+`"phrases"` are whole sayings («открой терминал», «open terminal»), `"keywords"` are the one
+words that are enough («терминал», «консоль» — any one of them), and `"speak"` is what she says
+as she runs it. The ears' slips are forgiven («терминай» is still the terminal); a «не» in the
+phrase («не открывай терминал») is the opposite of a wish. Toggle: **Settings → Her mind →
+Voice commands**.
+
+```json
+[
+  {"label": "Terminal", "label_ru": "Терминал", "icon": "gear", "command": "foot",
+   "phrases": ["открой терминал", "запусти консоль", "open terminal"],
+   "keywords": ["терминал", "консоль", "terminal"],
+   "speak": "Открываю терминал"}
+]
+```
+
 ## Outfits
 
 Settings → Look → Outfit: **auto** follows the calendar (Halloween Oct 24 – Nov 2, New Year Dec 15 –

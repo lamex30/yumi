@@ -1,5 +1,8 @@
 [
-  {"label": "Terminal", "label_ru": "Терминал", "icon": "gear", "command": "foot"},
+  {"label": "Terminal", "label_ru": "Терминал", "icon": "gear", "command": "foot",
+   "phrases": ["открой терминал", "запусти консоль", "open terminal", "launch terminal"],
+   "keywords": ["терминал", "консоль", "terminal"],
+   "speak": "Открываю терминал"},
   {"label": "Notes", "label_ru": "Заметки", "icon": "doc", "command": "gnome-text-editor"},
   {"label": "Play / pause", "label_ru": "Пауза", "icon": "play", "command": "playerctl play-pause"}
 ]

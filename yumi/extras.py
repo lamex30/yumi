@@ -9,7 +9,7 @@ actions 'custom', 'tour_next', 'tour_skip', 'tour_again' through extras_do.
 import math
 import random
 
-from .config import RING_SLOTS, load_actions, tr
+from .config import RING_SLOTS, ACTIONS_FILE, load_actions, tr
 from .pixui import ICONS
 
 PET_WINDOW = 1.6        # s: strokes counted within this long
@@ -49,7 +49,12 @@ class Extras:
         self.user_idle = False
         self.break_next, self.break_i = None, 0
         self.tour = None
-        self.custom = load_actions()
+        self.custom = load_actions(ACTIONS_FILE)
+        self.actions_path = ACTIONS_FILE
+        try:
+            self.actions_mtime = self.actions_path.stat().st_mtime
+        except OSError:
+            self.actions_mtime = 0.0
         self.ring_edit = False           # the button editor is open on the ring
         self.ring_drag = None            # id of the button pressed there...
         self.ring_moved = False          # ...and whether it has been pulled away yet
@@ -305,6 +310,17 @@ class Extras:
         return ops
 
     # ---------------------------------------------------------------- actions
+    def actions_check(self):
+        """actions.json, edited by hand, is picked up without a restart: one
+        stat per phrase, the whole reload only when the file really changed"""
+        try:
+            m = self.actions_path.stat().st_mtime
+        except OSError:
+            m = 0.0
+        if m != self.actions_mtime:
+            self.actions_mtime = m
+            self.custom = load_actions(self.actions_path)
+
     def extras_do(self, action, arg):
         """True when the action was one of ours"""
         if action == 'custom':

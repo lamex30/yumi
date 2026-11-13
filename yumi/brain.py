@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import jobs as J
 from . import chat
+from . import nlu
 from .config import RING_SLOTS, UI, tr
 from .extras import Extras
 from .sprites import ARCHIVES, DOCS, KIND_COLOR, SWATCHES, swatch_hex
@@ -914,7 +915,7 @@ class Brain(Extras):
             if not self.chat_models and 'chat_model' not in self.unavailable:
                 self.requests.append(('chat_models',))
             rows = [('set', 'chat_provider', t('chat_provider')), ('set', 'chat_model', t('chat_model')),
-                    ('set', 'chat_think', t('chat_think'))]
+                    ('set', 'chat_think', t('chat_think')), ('set', 'nlu', t('nlu'))]
             if self.chat_models:        # the list may have grown stale: a way to look again
                 rows.append(('chat_refresh', None, t('chat_refresh')))
             rows.append(('menu', 'settings', t('back')))
@@ -1186,6 +1187,8 @@ class Brain(Extras):
             return
         lang = self.settings.get('speech_lang', 'en')
         self.say_text(text, voice=False)   # back to you, quietly: you just said it
+        if self.voice_intent(text, alt):   # the user's own commands, no mind needed
+            return
         if chat.time_question(text):       # the clock she reads herself, no mind needed
             self.say('chat_time', time=chat.the_time(lang))
             return
@@ -1219,6 +1222,30 @@ class Brain(Extras):
         del self.chat_history[:-10]     # she remembers her last five turns
         self.thinking = True
         self.requests.append(('chat_ask', list(self.chat_history)))
+
+    def voice_intent(self, text, alt=''):
+        """the user's own voice commands: the «phrases» and «keywords» written
+        into actions.json (see nlu.py), matched on the words alone, no mind
+        needed — a button's command runs and, when «speak» is written, she says
+        so; True when one fired. `alt` is the other ear's reading of the phrase"""
+        if not self.settings.get('nlu', True):
+            return False
+        self.actions_check()            # actions.json edited by hand: no restart needed
+        if not self.custom:
+            return False
+        hit = nlu.match(text, self.custom)
+        if not hit and alt and alt != text:
+            hit = nlu.match(alt, self.custom)
+        if not hit:
+            return False
+        action, score = hit
+        _mind_log(f'intent {action["command"]!r} (score {score:.2f})')
+        self.requests.append(('run', action['command']))
+        self.set_face('happy', 1.5)
+        speak = action.get('speak') or ''
+        if speak:
+            self.say_text(speak)
+        return True
 
     def said_now_playing(self, playing):
         """the player answered the «кто играет» question: she names the artist and
@@ -2458,12 +2485,9 @@ VERB_ALL = (MUSIC_PLAY | MUSIC_PAUSE | MUSIC_STOP_MUSIC
             | {'переключи', 'переключить'})
 
 
-def volume_tokens(text):
-    """the words of a phrase the way the volume skill reads them: lower case,
-    punctuation gone, ё folded into е"""
-    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
-            for t in str(text or '').split()]
-    return [t for t in toks if t]
+# the words of a phrase the way the skills read them: lower case, punctuation gone,
+# ё folded into е — one normalization for everything (nlu.py keeps it)
+volume_tokens = nlu.normalize
 
 
 def drop_name(text, word='юми'):

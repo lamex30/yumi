@@ -12,6 +12,7 @@ _cfg = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
 _state = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local' / 'state')
 _cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
 CONFIG_DIR = _cfg / 'yumi'
+ACTIONS_FILE = CONFIG_DIR / 'actions.json'
 STATE_DIR = _state / 'yumi'
 CACHE_DIR = _cache / 'yumi'
 
@@ -41,6 +42,7 @@ DEFAULT_SETTINGS = {
     'polza_api_key': '',   # Polza.ai API key (get it at polza.ai)
     'wake_ears': True,        # she starts listening the moment you say the wake word
     'music_skill': True,      # music control via voice commands
+    'nlu': True,              # her own voice commands: the phrases in actions.json
     'wake_word': 'юми',       # the wake word itself (say it, then the question);
                               # the ears learn its hear-says into
                               # ~/.local/share/yumi/stt/hearsay.json, edit freely
@@ -119,7 +121,7 @@ RING_SLOTS = 10            # places on her ring in the button editor
 def load_actions(path=None):
     """her own round buttons from ~/.config/yumi/actions.json:
     [{"label": "Terminal", "label_ru": "Терминал", "icon": "gear", "command": "foot"}]"""
-    path = Path(path) if path else CONFIG_DIR / 'actions.json'
+    path = Path(path) if path else ACTIONS_FILE
     try:
         data = json.loads(path.read_text())
         if not isinstance(data, list):
@@ -137,12 +139,16 @@ def load_actions(path=None):
         if isinstance(a, dict) and a.get('command'):
             out.append({'label': str(a.get('label') or a['command'])[:18],
                         'label_ru': str(a.get('label_ru') or a.get('label') or a['command'])[:18],
-                        'icon': str(a.get('icon') or 'star'), 'command': str(a['command'])})
+                        'icon': str(a.get('icon') or 'star'), 'command': str(a['command']),
+                        # the voice side (nlu.py): the sayings that run this button
+                        'phrases': [str(p) for p in (a.get('phrases') or []) if str(p).strip()],
+                        'keywords': [str(k) for k in (a.get('keywords') or []) if str(k).strip()],
+                        'speak': str(a.get('speak') or '').strip()})
     return out
 
 
 def save_actions(actions, path=None):
-    path = Path(path) if path else CONFIG_DIR / 'actions.json'
+    path = Path(path) if path else ACTIONS_FILE
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix('.tmp')
@@ -219,6 +225,7 @@ UI = {
         'restart': 'Restart', 'tour_again': 'Show the tour', 'tour_next': 'Next', 'tour_skip': 'Skip', 'tour_done': 'Got it!',
         'tour_title': 'Hello!',
         'listen': 'Listen', 'cat_chat': 'Her mind', 'chat_model': 'Answer model',
+        'nlu': 'Voice commands',
         'joke': 'Joke',
         'chat_refresh': 'Find the model',
         'chat_think': 'Let her think first',
@@ -268,6 +275,7 @@ UI = {
         'restart': 'Перезапустить', 'tour_again': 'Показать знакомство', 'tour_next': 'Дальше', 'tour_skip': 'Пропустить', 'tour_done': 'Поняла!',
         'tour_title': 'Привет!',
         'listen': 'Послушать', 'cat_chat': 'Её мозги', 'chat_model': 'Модель ответов',
+        'nlu': 'Голосовые команды',
         'joke': 'Анекдот',
         'chat_refresh': 'Найти модель',
         'chat_think': 'Дать ей подумать',
