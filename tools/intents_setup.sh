@@ -47,17 +47,16 @@ fi
 echo 'Teaching the tiny mind (rubert-tiny2, ~110 MB download once, a few minutes)...'
 "$DIR/bin/python" tools/intents_train.py "$@" --out "$OUT"
 
-# the runtime bits for the app's own Python (onnxruntime is light; tokenizers too)
+# the runtime bit for the app's own Python (the wordpiece is pure Python in
+# yumi/intents.py, so only onnxruntime is wanted; it is light)
 echo
-for PKG in onnxruntime tokenizers; do
-    if python3 -c "import $PKG" >/dev/null 2>&1; then
-        echo "$PKG: already here"
-    else
-        echo "$PKG: installing into the user site (pip install --user)..."
-        python3 -m pip install --user --quiet "$PKG" || \
-            echo "Could not install $PKG: run «python3 -m pip install --user $PKG» by hand." >&2
-    fi
-done
+if python3 -c 'import onnxruntime' >/dev/null 2>&1; then
+    echo 'onnxruntime: already here'
+else
+    echo 'onnxruntime: installing into the user site (pip install --user)...'
+    python3 -m pip install --user --quiet onnxruntime || \
+        echo 'Could not install onnxruntime: run «python3 -m pip install --user onnxruntime» by hand.' >&2
+fi
 
 echo
 echo "Done: the model lives in $OUT."

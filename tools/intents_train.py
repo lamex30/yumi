@@ -186,28 +186,71 @@ def report(model, tok, val_set, labels):
             print(f'  «{t}»: want {want}, got {got}')
 
 
-def export(model, tok, labels, out_dir, base):
-    """fp32 → ONNX → int8 (dynamic quantization): ~110 MB becomes ~30 MB"""
+def centroids(model, tok, data, labels):
+    """the center of every label: the mean of the phrases' embeddings (the last
+    hidden state, masked mean). The runtime compares a fresh phrase with them
+    (cosine): softmax alone is too brave on a phrase it has never seen —
+    «открой окно» scores 0.95 for the terminal — while its cosine sits far
+    below the real sayings (0.78 against 0.94 and up)"""
     import torch
+    enc = tok([t for t, _ in data], padding=True, truncation=True,
+              max_length=MAX_LEN, return_tensors='pt')
+    with torch.no_grad():
+        out = model(input_ids=enc['input_ids'], attention_mask=enc['attention_mask'],
+                    output_hidden_states=True)
+        h = out.hidden_states[-1]
+        m = enc['attention_mask'].unsqueeze(-1).float()
+        pooled = (h * m).sum(1) / m.sum(1)
+    rows = []
+    for label in labels:
+        idx = [i for i, (_, l) in enumerate(data) if l == label]
+        v = pooled[idx].mean(0)
+        rows.append((v / v.norm()).tolist())
+    return rows
+
+
+def export(model, tok, labels, cents, out_dir, base):
+    """fp32 → ONNX → int8 (dynamic quantization): ~110 MB becomes ~30 MB.
+    The export answers with two things: the logits and the phrase's embedding
+    (the last hidden state, masked mean) — the cosine against `cents` is the
+    runtime's honesty check on phrases it has never seen"""
+    import torch
+
+    class Mind(torch.nn.Module):
+        """the model with its embedding out: onnx wants a plain forward"""
+
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, input_ids, attention_mask):
+            out = self.inner(input_ids=input_ids, attention_mask=attention_mask,
+                             output_hidden_states=True)
+            h = out.hidden_states[-1]
+            m = attention_mask.unsqueeze(-1).to(h.dtype)
+            pooled = (h * m).sum(1) / m.sum(1)
+            return out.logits, pooled
 
     model.eval()
     out_dir.mkdir(parents=True, exist_ok=True)
     fp32 = out_dir / 'model.fp32.onnx'
     enc = tok('открой терминал', return_tensors='pt', max_length=MAX_LEN)
     args = (enc['input_ids'], enc['attention_mask'])
+    axes = {'input_ids': {0: 'batch', 1: 'seq'},
+            'attention_mask': {0: 'batch', 1: 'seq'}}
     try:
-        torch.onnx.export(model, args, str(fp32), input_names=['input_ids', 'attention_mask'],
-                          output_names=['logits'],
-                          dynamic_axes={'input_ids': {0: 'batch', 1: 'seq'},
-                                        'attention_mask': {0: 'batch', 1: 'seq'},
-                                        'logits': {0: 'batch'}},
+        torch.onnx.export(Mind(model), args, str(fp32),
+                          input_names=['input_ids', 'attention_mask'],
+                          output_names=['logits', 'embedding'],
+                          dynamic_axes={**axes, 'logits': {0: 'batch'},
+                                        'embedding': {0: 'batch'}},
                           opset_version=17, dynamo=False)
     except TypeError:                      # older torch: no dynamo switch at all
-        torch.onnx.export(model, args, str(fp32), input_names=['input_ids', 'attention_mask'],
-                          output_names=['logits'],
-                          dynamic_axes={'input_ids': {0: 'batch', 1: 'seq'},
-                                        'attention_mask': {0: 'batch', 1: 'seq'},
-                                        'logits': {0: 'batch'}},
+        torch.onnx.export(Mind(model), args, str(fp32),
+                          input_names=['input_ids', 'attention_mask'],
+                          output_names=['logits', 'embedding'],
+                          dynamic_axes={**axes, 'logits': {0: 'batch'},
+                                        'embedding': {0: 'batch'}},
                           opset_version=17)
     onnx_out = out_dir / 'model.onnx'
     try:
@@ -220,6 +263,8 @@ def export(model, tok, labels, out_dir, base):
     tok.save_pretrained(out_dir)
     (out_dir / 'labels.json').write_text(
         json.dumps(labels, ensure_ascii=False, indent=1), encoding='utf-8')
+    (out_dir / 'centroids.json').write_text(
+        json.dumps(cents, indent=1), encoding='utf-8')
     (out_dir / 'meta.json').write_text(json.dumps({
         'base': base, 'trained': time.strftime('%Y-%m-%d %H:%M'),
         'max_len': MAX_LEN, 'labels': labels}, ensure_ascii=False, indent=1),
@@ -238,17 +283,20 @@ def probe(out_dir, labels):
         return
     tok = AutoTokenizer.from_pretrained(out_dir)
     sess = ort.InferenceSession(str(Path(out_dir) / 'model.onnx'))
+    cents = json.loads((Path(out_dir) / 'centroids.json').read_text(encoding='utf-8'))
     for text in ('открой терминал', 'запусти консольку пожалуйста', 'врубь музыку',
                  'поставь на паузу', 'открой блокнот', 'какая сегодня погода',
-                 'расскажи анекдот', 'привет'):
-        enc = tok(text, return_tensors='np', max_length=MAX_LEN,
+                 'расскажи анекдот', 'привет', 'открой окно', 'включи свет'):
+        enc = tok(canon(text), return_tensors='np', max_length=MAX_LEN,
                   padding=True, truncation=True)
-        logits = sess.run(None, {'input_ids': enc['input_ids'].astype(np.int64),
-                                 'attention_mask': enc['attention_mask'].astype(np.int64)})[0][0]
-        e = np.exp(logits - logits.max())
+        logits, emb = sess.run(None, {'input_ids': enc['input_ids'].astype(np.int64),
+                                      'attention_mask': enc['attention_mask'].astype(np.int64)})
+        e = np.exp(logits[0] - logits[0].max())
         probs = e / e.sum()
         best = int(probs.argmax())
-        print(f'  {text!r:38s} → {labels[best]}  {probs[best]:.2f}')
+        v = emb[0] / np.linalg.norm(emb[0])
+        cos = float(v @ np.array(cents[best]))
+        print(f'  {canon(text)!r:34s} → {labels[best]:13s} prob {probs[best]:.2f}  cos {cos:.2f}')
 
 
 def main():
@@ -276,8 +324,9 @@ def main():
     model, tok = train(train_set, val_set, labels, args.base, args.epochs, args.seed)
     print()
     report(model, tok, val_set, labels)
+    cents = centroids(model, tok, data, labels)
     out = Path(args.out).expanduser()
-    export(model, tok, labels, out, args.base)
+    export(model, tok, labels, cents, out, args.base)
     size = (out / 'model.onnx').stat().st_size / 1e6
     print(f'\nexported: {out}/model.onnx ({size:.1f} MB), labels.json, tokenizer')
     probe(out, labels)

@@ -67,6 +67,11 @@ for said in ('какая сегодня погода', 'расскажи ане�
              'сколько будет два плюс два'):
     assert nlu.match(said, ACTIONS) is None, said
 
+# the phrases the mind was never taught and that look like commands but are
+# not her buttons: the cosine guard keeps them out of the commands
+for said in ('открой окно', 'запусти игру', 'включи свет', 'открой шторы'):
+    assert nlu.match(said, ACTIONS) is None, said
+
 # the negaters and the empty phrases never reach the mind
 assert nlu.match('не открывай терминал', ACTIONS) is None
 assert nlu.match('', ACTIONS) is None

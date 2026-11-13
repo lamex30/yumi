@@ -26,7 +26,11 @@ onnxruntime** в основном процессе приложения.
 ```
 
 - Порог 0.85 — стартовый; страховка: классификатор вызывается только после
-  провала правил, `NEGATERS` отсекают «не …» до него.
+  провала правил, `NEGATERS` отсекают «не …» до него, и третья гвардия —
+  **косинус к центроидам классов (COS_MIN=0.90)**: softmax бывает уверен на
+  незнакомых фразах («открой окно» → Terminal 0.93), а косинус настоящих фраз
+  0.94–0.98 против 0.78–0.86 у мусора. Центроиды пишет trainer
+  (`centroids.json`), ONNX экспортируется с двумя выходами (logits + embedding).
 - Слоты `{query}` (поиск) классификатор не решает — url-записи с `{query}`
   им не предлагаются (пока; см. «Идеи»).
 - Модель живёт в `~/.local/share/yumi/intents/` (как TTS-модели), НЕ в репо.
@@ -41,7 +45,7 @@ onnxruntime** в основном процессе приложения.
 | `data/intents-corpus.json` | корпус переформулировок (ru+en) + негативы «chat»; пишется руками/LLM, расширяется |
 | `tools/intents_setup.sh` | обучение: venv (python ≤3.13, torch cpu, transformers) + экспорт ONNX в `~/.local/share/yumi/intents/` |
 | `tools/intents_train.py` | сам скрипт обучения (запускается внутри venv) |
-| `yumi/intents.py` | рантайм-инференс: загрузка модели один раз, `classify(text, actions)` |
+| `yumi/intents.py` | рантайм-инференс: onnxruntime + wordpiece чистым питоном (vocab из tokenizer.json), БЕЗ tokenizers/transformers/torch; косинус-гвард |
 | `yumi/nlu.py` | сюда добавлен вызов классификатора третьим уровнем (НЕ переписывать правила) |
 | `yumi/config.py` | настройка `intents` (bool, default True) рядом с `nlu` |
 | `tests/test_intents.py` | офлайн-тесты (без модели — скип, с моделью — проверка классификации) |
@@ -51,6 +55,7 @@ onnxruntime** в основном процессе приложения.
 - [x] Ветка `intents-model` создана (от main @ fc281e8)
 - [x] Окружение проверено: системный python 3.14 (приложение), onnxruntime
       1.29.0 уже установлен, numpy есть; для обучения python3.12 + uv есть
+      (tokenizers в систему НЕ ставится: Arch PEP 668 — заменён своим wordpiece)
 - [x] `data/intents-corpus.json` — корпус (5 меток, 255 фраз; Terminal, Search,
       Notes, Play / pause, chat)
 - [x] `tools/intents_train.py` + `tools/intents_setup.sh`
@@ -69,7 +74,14 @@ onnxruntime** в основном процессе приложения.
 ```
 Попытка 1 (epochs=4, lr=2e-5, batch 16): val accuracy 0.48 — модель схлопнулась
 в класс chat (дисбаланс 86 против ~40 и слишком мало шагов). Правки: epochs 12,
-lr 5e-5, batch 8. Попытка 2 запущена — сюда вписать её метрики.
+lr 5e-5, batch 8.
+Попытка 2 (epochs=12, lr=5e-5, batch 8): val accuracy 0.96 (Notes 8/8,
+Play/pause 9/9, Search 6/7, Terminal 8/9, chat 17/17), модель 29.4 МБ (int8),
+пробы верны. Но «открой окно» → Terminal 0.93: softmax не ловит OOV. Правки:
+косинус-гвард к центроидам (COS_MIN=0.90: хорошие фразы 0.94–0.98, мусор
+0.78–0.86), в chat добавлены негативы «команды не-кнопки» (свет, шторы,
+кофе, окно, игра...), ONNX экспортирует logits+embedding.
+Попытка 3 — запущена, метрики сюда.
 ```
 
 ## Команды

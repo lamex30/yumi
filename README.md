@@ -272,9 +272,9 @@ somebody talking, not a wish. `"speak"` may carry `{query}` too.
 
 When no saying matches, a tiny local mind gets one look at the phrase: a small classifier
 (`tools/intents_setup.sh` teaches it on the sayings of the corpus and of your own buttons and
-puts a ~30 MB ONNX model into `~/.local/share/yumi/intents`; onnxruntime + tokenizers, no
-torch at run time) answers with a button and a probability — a sure answer (≥ 0.85 and above
-the «just talk» chance) runs the command, a shy one falls to the chat as before. The sayings'
+puts a ~30 MB ONNX model into `~/.local/share/yumi/intents`; onnxruntime alone at
+run time, the wordpiece is pure Python, no torch) answers with a button and a probability — a
+sure answer (≥ 0.85, above the «just talk» chance and close enough to the class's center) runs the command, a shy one falls to the chat as before. The sayings'
 rules always answer first; the mind only hears what they missed, so «открой консольку» and
 «врубь музыку» work even when they are not written anywhere. Toggle: **Settings → Her mind →
 Intents mind**.
