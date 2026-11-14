@@ -63,11 +63,30 @@ def _state():
     ping = _ping(port) if port else None
     if not ping:
         return None
-    if ping.get('version') != VERSION:  # an older twin: its code predates this ears.py
+    if ping.get('pid') and ping.get('pid') != info.get('pid'):
+        # the state file lied about the pid (an old adoption used to write the
+        # wrong one, and a false pid made the stale twin unkillable): fix it here
         try:
-            os.kill(info.get('pid'), signal.SIGTERM)
+            STATE.write_text(json.dumps({'port': port, 'pid': ping['pid'],
+                                         'version': ping.get('version')}))
+        except OSError:
+            pass
+    if ping.get('version') != VERSION:  # an older twin: its code predates this ears.py
+        pid = ping.get('pid') or info.get('pid')
+        try:
+            os.kill(pid, signal.SIGTERM)
         except (OSError, TypeError, ProcessLookupError):
             pass
+        for _ in range(15):             # 3 s: it must be dead and off the port before a
+            if not _ping(port):         # fresh one starts, or the two will fight over
+                break                   # the port and the loser ends up on a random one
+            time.sleep(0.2)
+        else:
+            try:                        # stuck in teardown: no more mr. nice signal
+                os.kill(pid, signal.SIGKILL)
+            except (OSError, TypeError, ProcessLookupError):
+                pass
+            time.sleep(0.5)
         try:
             STATE.unlink()
         except OSError:

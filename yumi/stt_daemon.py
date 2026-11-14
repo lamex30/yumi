@@ -64,7 +64,8 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 16                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 17                            # bumped when the protocol changes: stale twins are restarted
+                                        # (17: /ping tells its pid, so a stale twin is always findable)
 WAKE_AFTER = 1.5                        # s of quiet after the name before she asks what you wanted
 WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge reads: ~8 s
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
@@ -738,8 +739,11 @@ class Ears:
                 size = '~460 MB' if name == 'small' else '~1.5 GB'
                 self.dl = f'whisper {name} ({lang}, {size})'
             try:
+                # cpu_threads: without it the judge takes a thread per core and grabs
+                # the whole laptop for seconds on every near-miss; two read the tape
+                # just as fast per watt
                 m = WhisperModel(name, device='cpu', compute_type='int8',
-                                 download_root=str(path))
+                                 cpu_threads=2, download_root=str(path))
             finally:
                 self.dl = None
             for other in [k for k in self.wsp if k[0] == lang and k != key]:
@@ -976,6 +980,9 @@ class Ears:
                     ended = rec.AcceptWaveform(chunk)   # True: an utterance ended just now
                     if ended:
                         words = json.loads(rec.FinalResult() or '{}').get('text', '')
+                        # the tap's own recognizer is paused while the wake holds the
+                        # microphone: its diary takes the wake's phrases instead
+                        self.tap.note(' '.join(words.split()))
                     else:
                         words = json.loads(rec.PartialResult() or '{}').get('partial', '')
                     if woken and words != last:
@@ -1094,6 +1101,7 @@ class Tap:
         self.lock = threading.Lock()
         self.on = False
         self.gen = 0                    # bumped on every change: the running loop gives up
+        self.lines = 0                  # how many lines recogn.txt holds right now
         self.want = {'mic': None, 'lang': 'ru', 'size': 'small'}
 
     def set(self, on, mic=None, lang='ru', size='small', ear=None):
@@ -1113,6 +1121,25 @@ class Tap:
 
     def status(self):
         return {'on': self.on, 'dir': str(TAP_DIR), **(self.want if self.on else {})}
+
+    def note(self, text):
+        """one phrase into recogn.txt («time - phrase»), from the tap's own loop or
+        from the wake's: while the wake holds the microphone the tap pauses its own
+        recognizer, and the wake's finished phrases stand in for the diary's (one
+        vosk stream instead of two on the same sound); only the freshest TAP_LINES
+        lines stay, the old ones are rolled off"""
+        if not text:
+            return
+        with self.lock:
+            try:
+                TAP_DIR.mkdir(parents=True, exist_ok=True)
+                with open(TAP_DIR / 'recogn.txt', 'a', encoding='utf-8') as f:
+                    f.write(tap_line(text) + '\n')
+            except OSError:
+                return
+            self.lines += 1
+            if self.lines > TAP_LINES:
+                self.lines = tap_roll(TAP_DIR / 'recogn.txt', self.lines)
 
     def _work(self, mygen):
         """keep a recorder on tape; if it dies on its own, it goes again after a pause"""
@@ -1172,27 +1199,16 @@ class Tap:
         gmin, gk = ear_gate(self.want.get('ear'))
         st = {'hp': 0.0, 'floor': None, 'gate_min': gmin, 'gate_k': gk}    # the cleaner's memory
         seg = {'wav': None, 't0': 0.0, 'bytes': 0}
-        lines = 0                          # how many lines recogn.txt holds right now
+        self.lines = 0                     # how many lines recogn.txt holds right now
         try:
             with open(TAP_DIR / 'recogn.txt', encoding='utf-8') as f:
-                lines = sum(1 for _ in f)
+                self.lines = sum(1 for _ in f)
         except OSError:
             pass
 
         def say(text):
-            """one phrase into recogn.txt, «time - phrase»; only the freshest
-            TAP_LINES lines stay: once over, the file is rewritten without the old"""
-            nonlocal lines
-            if not text:
-                return
-            try:
-                with open(TAP_DIR / 'recogn.txt', 'a', encoding='utf-8') as f:
-                    f.write(tap_line(text) + '\n')
-                lines += 1
-                if lines > TAP_LINES:
-                    lines = tap_roll(TAP_DIR / 'recogn.txt', lines)
-            except OSError:
-                pass
+            """one phrase into recogn.txt, «time - phrase»"""
+            self.note(text)
 
         def put(chunk):
             """the sound into the segment file: a fresh wav every TAP_SEGMENT seconds
@@ -1222,6 +1238,10 @@ class Tap:
                         log(f'tap: {name} died ({die})')
                     break
                 put(chunk)                          # the diary keeps the untouched sound
+                if self.ears.busy and self.ears.kind == 'wake':
+                    continue        # the wake's own recognizer reads the same sound: its
+                                    # finished phrases stand in for the diary's words, and
+                                    # one vosk stream burns CPU instead of two
                 chunk = hp_pass(chunk, st)          # hum and rumble go
                 voiced = det.feed(chunk)            # the voice detector follows the frames
                 chunk = gate_noise(chunk, st, voiced)    # the hiss dies, speech is kept
@@ -1269,6 +1289,7 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(u.query)
         if u.path == '/ping':
             return self._json({'ok': True, 'error': self.ears.error, 'version': VERSION,
+                               'pid': os.getpid(),
                                'profile': ' '.join(sorted(MODELS)),
                                'recorder': recorder_cmd()[0],
                                'aec': bool(_echo['on']), 'tap': self.ears.tap.status(),
@@ -1351,9 +1372,12 @@ def read_state():
         return None
 
 
-def write_state(port):
+def write_state(port, pid=None):
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps({'port': port, 'pid': os.getpid(), 'version': VERSION}))
+    # pid of the daemon that serves this port, not of whoever happens to write the file:
+    # a false pid here makes the stale twin unkillable (ears.py would shoot a corpse)
+    STATE.write_text(json.dumps({'port': port, 'pid': pid if pid else os.getpid(),
+                                 'version': VERSION}))
 
 
 def tap_line(text, now=None):
@@ -1399,12 +1423,14 @@ def load_tap_state():
             'ear': w.get('ear') if w.get('ear') in EAR_RANGE else 'mid'}
 
 
-def ping(port, timeout=0.5):
+def ping_info(port, timeout=0.5):
+    """the twin's /ping dict, or None when nobody answers there"""
     try:
         with urllib.request.urlopen(f'http://127.0.0.1:{port}/ping', timeout=timeout) as r:
-            return json.loads(r.read().decode()).get('ok')
+            d = json.loads(r.read().decode())
+            return d if d.get('ok') else None
     except (OSError, ValueError):
-        return False
+        return None
 
 
 def try_forget(port):
@@ -1434,11 +1460,14 @@ def main():
         Handler.ears.tap.set(True, **resumed)
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
-    except OSError:                     # the port is taken: an older twin may already be there
+    except OSError:                     # the port is taken: a twin may already be there
         for _ in range(15):             # 3 s: the winner writes its state at once, and a stale
             info = read_state()         # version (one ears.py is about to kill) frees the port
-            if info and ping(info['port']) and info.get('version') == VERSION:
-                write_state(info['port'])
+            twin = ping_info(info.get('port')) if info else None
+            if twin and twin.get('version') == VERSION:
+                # the twin on the port stays the daemon: the state file keeps ITS pid,
+                # not ours — a false pid would make it unkillable when the code moves on
+                write_state(info['port'], twin.get('pid') or info.get('pid'))
                 log(f'already running on port {info["port"]}')
                 return
             try:
@@ -1447,7 +1476,11 @@ def main():
             except OSError:
                 time.sleep(0.2)
         else:
-            server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+            # nobody answers and the port does not free: it belongs to someone else.
+            # A second daemon on a random port would be an orphan nobody ever shuts
+            # down (gigabytes of models burning forever), so there is no second daemon.
+            log(f'port {args.port} is held and no twin of mine answers there — I quit')
+            sys.exit(1)
     port = server.server_address[1]
     write_state(port)
     atexit.register(try_forget, port)
