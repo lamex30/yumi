@@ -64,7 +64,7 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 15                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 16                            # bumped when the protocol changes: stale twins are restarted
 WAKE_AFTER = 1.5                        # s of quiet after the name before she asks what you wanted
 WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge reads: ~8 s
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
@@ -693,6 +693,7 @@ class Ears:
         self.busy = False
         self.abort = False
         self.kind = None                # what the lock holds now: 'listen' or 'wake'
+        self.dl = None                  # a model's name while it downloads: the bubble's fuel
         # RLock: a listen holds it and still reads the whisper loader within itself
         self.lock = threading.RLock()
         self.tap = Tap(self)
@@ -708,10 +709,16 @@ class Ears:
             zip_name, folder = MODELS[key[0]][key[1]]
             path = HOME / folder
             if not path.exists():
-                download(zip_name, folder)
+                self.dl = f'vosk {lang} (~45 MB)'
+                try:
+                    download(zip_name, folder)
+                finally:
+                    self.dl = None
             m = Model(str(path))
-            for other in [k for k in self.models if k[0] == lang and k != key]:
-                del self.models[other]      # a big model is many: one per language at a time
+            # no eviction of the same-language twin: the tap wants the small model while
+            # the wake wants the big one, and throwing the other out made the two reload
+            # each other forever (a big model is ~1.9 GB, and under swap that jams the
+            # lock everything else waits on); both stay, they fit in memory together
             self.models[key] = m
             return m
 
@@ -727,8 +734,14 @@ class Ears:
             path = HOME / 'whisper'      # the models live with the rest of the ears
             path.mkdir(parents=True, exist_ok=True)
             log(f'whisper: loading {name} ({lang})...')
-            m = WhisperModel(name, device='cpu', compute_type='int8',
-                             download_root=str(path))
+            if not (path / ('models--Systran--faster-whisper-' + name)).exists():
+                size = '~460 MB' if name == 'small' else '~1.5 GB'
+                self.dl = f'whisper {name} ({lang}, {size})'
+            try:
+                m = WhisperModel(name, device='cpu', compute_type='int8',
+                                 download_root=str(path))
+            finally:
+                self.dl = None
             for other in [k for k in self.wsp if k[0] == lang and k != key]:
                 del self.wsp[other]
             self.wsp[key] = m
@@ -1258,7 +1271,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'ok': True, 'error': self.ears.error, 'version': VERSION,
                                'profile': ' '.join(sorted(MODELS)),
                                'recorder': recorder_cmd()[0],
-                               'aec': bool(_echo['on']), 'tap': self.ears.tap.status()})
+                               'aec': bool(_echo['on']), 'tap': self.ears.tap.status(),
+                               'downloading': self.ears.dl})
         if u.path == '/tap':
             # the ears' diary: /tap?on=1&lang=ru&size=small&mic=... starts it, on=0 stops,
             # a bare /tap just tells the state

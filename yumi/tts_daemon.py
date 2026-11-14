@@ -54,6 +54,7 @@ class Engine:
         self.lock = threading.Lock()      # one synthesis at a time
         self.error = None
         self.ready = False
+        self.dl = None                  # a voice's name while torch fetches it: the bubble's fuel
         threading.Thread(target=self.warm, daemon=True).start()
 
     def warm(self):
@@ -74,7 +75,10 @@ class Engine:
             tag = self.conf.get('ru_model') if lang == 'ru' else LANGS[lang][0]
             tags = [tag] if tag == LANGS[lang][0] else [tag, LANGS[lang][0]]
             last = None
+            hub = MODELS_HOME / 'hub' / 'snakers4_silero-models_master' / 'src' / 'silero' / 'model'
             for tag in tags:           # a model that would not come: the previous one stays
+                if not (hub / f'{tag}.pt').exists():
+                    self.dl = f'silero {lang} ({tag}, ~100 MB)'
                 try:
                     log(f'loading the {lang} voice ({tag})...')
                     model, _ = torch.hub.load(HUB, 'silero_tts', language=lang, speaker=tag,
@@ -85,6 +89,8 @@ class Engine:
                 except Exception as e:  # noqa: BLE001
                     last = e
                     log(f'could not load {tag}: {e}')
+                finally:
+                    self.dl = None
             raise last
         return self.models[lang]
 
@@ -135,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(u.query)
         if u.path == '/ping':
             return self._json({'ok': True, 'ready': self.engine.ready, 'error': self.engine.error,
-                               'profile': self.profile})
+                               'profile': self.profile, 'downloading': self.engine.dl})
         if u.path != '/tts':
             return self._json({'error': 'no such path'}, 404)
         text = ' '.join((q.get('text') or [''])[0].split())[:MAX_TEXT]

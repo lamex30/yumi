@@ -73,7 +73,16 @@ def _state():
         except OSError:
             pass
         return None
-    return {'port': port}
+    return {'port': port, 'downloading': ping.get('downloading') or None}
+
+
+def downloading():
+    """what the ears daemon fetches this second (a name like «vosk ru (~45 MB)»),
+    '' when it runs but fetches nothing, None when it is not running at all"""
+    st = _state()
+    if not st:
+        return None
+    return st.get('downloading') or ''
 
 
 def _python():

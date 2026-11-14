@@ -148,6 +148,11 @@ LINES = {
                      ("No internet. Cozy, kind of.", None)],
         'download': [("{file} finished downloading.", 'happy'), ("Download's done: {file}.", None),
                      ("New file! {file}.", 'surprised'), ("{file} landed.", 'wink')],
+        'model_dl': [("{model} is downloading — once, then it stays mine.", None),
+                     ("Fetching {model}, a one-time download.", None),
+                     ("I'm downloading {model} — give me a moment, this happens once.", 'worried')],
+        'model_dl_done': [("{model} is in place, I can use it now.", 'happy'),
+                          ("{model} is mine from now on.", 'happy')],
         'screenshot': [("Click! Saved.", 'wink'), ("Nice shot.", 'happy'),
                        ("Screenshot's in your pictures.", None)],
         'chatter': [("Moths are just night butterflies with better taste.", 'wink'),
@@ -298,6 +303,11 @@ LINES = {
                      ("Нет интернета. Даже уютно.", None)],
         'download': [("{file} скачался.", 'happy'), ("Загрузка завершена: {file}.", None),
                      ("Новый файл! {file}.", 'surprised'), ("{file} приземлился.", 'wink')],
+        'model_dl': [("{model} качается — один раз, потом всегда у меня.", None),
+                     ("Качаю {model}, это в первый и последний раз.", None),
+                     ("Скачиваю {model}, подожди чуть-чуть — так только однажды.", 'worried')],
+        'model_dl_done': [("{model} на месте, теперь я могу им пользоваться.", 'happy'),
+                          ("{model} у меня, готово.", 'happy')],
         'screenshot': [("Щёлк! Сохранила.", 'wink'), ("Хороший кадр.", 'happy'),
                        ("Скриншот в папке с картинками.", None)],
         'chatter': [("Мотыльки — это ночные бабочки с хорошим вкусом.", 'wink'),
@@ -341,6 +351,7 @@ def plural_ru(n, one, few, many):
 KIND = {  # which rate limit an event falls under; everything else is an "action"
     'charger_on': 'system', 'charger_off': 'system', 'battery_low': 'system',
     'wifi_on': 'system', 'wifi_off': 'system', 'download': 'system', 'screenshot': 'system',
+    'model_dl': 'system', 'model_dl_done': 'system',
     'chatter': 'chatter',
 }
 

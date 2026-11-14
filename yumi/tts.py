@@ -48,7 +48,17 @@ def _state():
     ping = _ping(port) if port else None
     if not ping:
         return None
-    return {'port': port, 'profile': ping.get('profile') or info.get('profile')}
+    return {'port': port, 'profile': ping.get('profile') or info.get('profile'),
+            'downloading': ping.get('downloading') or None}
+
+
+def downloading():
+    """what the TTS daemon fetches this second (a name like «silero ru (v4_ru, ~100 MB)»),
+    '' when it runs but fetches nothing, None when it is not running at all"""
+    st = _state()
+    if not st:
+        return None
+    return st.get('downloading') or ''
 
 
 def _python():

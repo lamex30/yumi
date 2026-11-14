@@ -539,6 +539,8 @@ class App(Gtk.Application):
         self.queue = jobs.Queue(self.job_progress, self.job_done, self.job_start)
         self.ops = []
         self.timer = None
+        self.dl_announced = {}          # the model a daemon fetches now: src -> name, told about
+        GLib.timeout_add_seconds(4, self.watch_downloads)
         self.hold()                                  # keep running without a mapped window too
         GLib.timeout_add(1500, lambda: self.ev(lambda b: b.say('hello', force=True)) and False)
 
@@ -570,6 +572,33 @@ class App(Gtk.Application):
             music.service_stop()
         except Exception:
             pass
+
+    def watch_downloads(self):
+        """her servants fetch their models on their own (vosk, whisper, silero voices):
+        every few seconds she asks them what they pull, so a long quiet download never
+        looks like she froze — a bubble and a word when a model's download begins,
+        and one more when it lands; the models' first download is the only one told"""
+        threading.Thread(target=self.watch_downloads_once, daemon=True).start()
+        return True                     # the timer keeps going
+
+    def watch_downloads_once(self):
+        """runs off the interface thread: each daemon's answer is a name, '' for
+        «alive, fetching nothing» or None for «not running»; a fresh name is told,
+        a vanished one is congratulated (only while its daemon is still alive)"""
+        now = {}
+        for src, state in (('ears', ears.downloading()), ('tts', tts.downloading())):
+            if state is not None:       # the daemon answers: it is alive
+                now[src] = state
+        for src, name in now.items():
+            if name and src not in self.dl_announced:
+                self.dl_announced[src] = name
+                self.ev(lambda b, n=name: b.world('model_dl', model=n))
+        for src, name in list(self.dl_announced.items()):
+            if src not in now:          # the daemon itself went away: no «ready» words
+                del self.dl_announced[src]
+            elif now[src] != name:      # the download finished while it still runs
+                del self.dl_announced[src]
+                self.ev(lambda b, n=name: b.world('model_dl_done', model=n))
 
     def do_activate(self):
         if not LayerShell.is_supported():
