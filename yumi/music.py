@@ -342,6 +342,21 @@ def play_query(kind, query='', settings=None):
     tracks = res.get('tracks') or []
     report['source'] = res.get('source', 'local')
 
+    if not tracks and kind in ('song', 'artist', 'album') \
+            and str(query or '').strip():
+        # nothing was found under the name as the ears heard it: the tags may
+        # be latin while the words were said in Russian — her mind spells the
+        # name the way the covers do, and the whole chain is asked again
+        try:
+            from . import chat
+            fixed = chat.music_name(settings or {}, kind, query)
+        except Exception:
+            fixed = ''
+        if fixed:
+            res = library.resolve(settings or {}, kind, fixed)
+            tracks = res.get('tracks') or []
+            report['source'] = res.get('source', report['source'])
+
     if kind == 'play':
         if report['source'] != 'local':   # jellyfin or the server: a queue of
             tracks = (res.get('lib') or library.Local(settings or {})).random(25)

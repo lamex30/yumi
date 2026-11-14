@@ -431,16 +431,42 @@ def pick(settings):
 
 
 def resolve(settings, kind, query=''):
-    """one wish against the library that is awake: a report for her bubble
-    {'source', 'tracks'} — the songs already carry their urls and paths"""
+    """one wish against the libraries in the chain: a report for her bubble
+    {'source', 'tracks'} — the songs already carry their urls and paths.
+    The library that is awake is asked first; a name it did not find goes down
+    the chain (Jellyfin → the server's mpd → her folders), a surprise («что-нибудь»)
+    stays where it was dealt"""
     source, lib = pick(settings)
-    if kind == 'random':
-        tracks = lib.random(1)
-    elif kind == 'artist':
-        tracks = lib.by_artist(query)
-    elif kind == 'album':
-        tracks = lib.by_album(query)
-    else:
-        tracks = lib.search(query)
+    tracks = _ask(lib, kind, query)
+    if not tracks and kind in ('song', 'artist', 'album'):
+        for src, cand in _next_doors(settings, source):
+            tracks = _ask(cand, kind, query)
+            if tracks:
+                source, lib = src, cand
+                break
     return {'source': source, 'kind': kind, 'query': query, 'tracks': tracks,
             'lib': lib}
+
+
+def _ask(lib, kind, query):
+    """the one wish against one library, the way the kinds ask it"""
+    if kind == 'random':
+        return lib.random(1)
+    if kind == 'artist':
+        return lib.by_artist(query)
+    if kind == 'album':
+        return lib.by_album(query)
+    return lib.search(query)
+
+
+def _next_doors(settings, source):
+    """the next doors down the chain after the library that came up empty:
+    the server's mpd when it is named and awake, then her own folders"""
+    out = []
+    if source != 'server':
+        srv = ServerMpd(settings)
+        if srv.ok() and srv.available():
+            out.append(('server', srv))
+    if source != 'local':
+        out.append(('local', Local(settings)))
+    return out

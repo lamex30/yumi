@@ -306,6 +306,29 @@ def _one_shot(settings, user, tokens, lang='en', timeout=90, temp=None):
     return _strip_think(' '.join(str((data.get('message') or {}).get('content') or '').split()))
 
 
+def music_name(settings, kind, query, timeout=15):
+    """the name you said, spelled the way the covers spell it: the mind is asked
+    once, quietly («тупак» is 2Pac, «рамштайн» is Rammstein — the tags are
+    latin, the ears heard Russian) — the name alone, or '' when the mind is
+    away, in no mood, or repeated what was already tried"""
+    query = ' '.join(str(query or '').split())
+    if not query:
+        return ''
+    asked = (f'A music player heard a voice request. The user named '
+             f'{ {"song": "a song", "artist": "an artist", "album": "an album"}.get(kind, "music") }: '
+             f'«{query}» — spoken by ear, likely in Russian, while the music tags '
+             f'carry the original spelling. Write the most likely original spelling '
+             f'(how it appears on the covers and the labels). Answer with the name '
+             f'only, in one line, nothing else.')
+    got = _one_shot(settings, asked, 32, timeout=timeout, temp=0.1)
+    if not got:
+        return ''
+    got = got.splitlines()[0].strip(' «»"\'`*—- ').strip()
+    if not got or len(got) > 80 or got.lower() == query.lower():
+        return ''
+    return got
+
+
 def hourly_joke(settings, hour, lang='en', timeout=90):
     """ask the mind for a short funny line about this hour (Russian or English),
     one or two sentences, no emoji, no lists; '' when the mind is out of reach"""

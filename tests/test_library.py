@@ -153,4 +153,36 @@ assert library.pick(dead)[0] == 'local'          # no music_server in `dead`
 chain = dict(dead, music_server='12qwaszx@192.168.0.189:6600')
 assert library.pick(chain)[0] == 'server', library.pick(chain)[0]
 assert library.pick(dict(chain, music_source='local'))[0] == 'local'
+
+# the search goes down the chain when the name is found nowhere: a jellyfin
+# that never answers is followed by the server's mpd, then her folders
+empty_jf = library.Jellyfin({'music_jellyfin': ''})
+empty_jf.search = lambda q, limit=5: []
+empty_jf.by_artist = lambda q, limit=25: []
+empty_jf.by_album = lambda q, limit=40: []
+saved_pick = library.pick
+library.pick = lambda settings: ('jellyfin', empty_jf)
+srv = library.ServerMpd({'music_server': '12qwaszx@192.168.0.189:6600'})
+srv.tracks = lambda: srv_tracks
+res = library.resolve({'music_server': '12qwaszx@192.168.0.189:6600'}, 'song', 'california love')
+assert res['source'] == 'server' and 'California' in res['tracks'][0]['title'], res
+res = library.resolve({}, 'song', 'крылья')   # neither jellyfin nor the server has it: her folders do
+assert res['source'] == 'local' and res['tracks'][0]['title'] == 'Крылья', res
+res = library.resolve({}, 'random')                 # a surprise never leaves the house it woke in
+assert res['source'] == 'jellyfin' and res['tracks'] == []
+library.pick = saved_pick
+
+# her mind spells the name the way the covers do («тупак» is 2Pac)
+import yumi.chat as chat
+chat._one_shot = lambda settings, user, tokens, timeout=90, temp=None: '2Pac\n(Тупак Шакур)'
+assert chat.music_name({}, 'artist', 'тупак') == '2Pac'
+chat._one_shot = lambda settings, user, tokens, timeout=90, temp=None: '«Rammstein»'
+assert chat.music_name({}, 'artist', 'рамштайн') == 'Rammstein'   # quotes go
+assert chat.music_name({}, 'artist', '') == ''                    # no name, no question
+chat._one_shot = lambda settings, user, tokens, timeout=90, temp=None: 'рамштайн'
+assert chat.music_name({}, 'artist', 'рамштайн') == ''            # the same word is no answer
+chat._one_shot = lambda settings, user, tokens, timeout=90, temp=None: ''
+assert chat.music_name({}, 'artist', 'рамштайн') == ''            # the mind is away, she stays quiet
+chat._one_shot = lambda settings, user, tokens, timeout=90, temp=None: 'x' * 90
+assert chat.music_name({}, 'artist', 'рамштайн') == ''            # an essay is not a name
 print('ok')
