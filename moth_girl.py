@@ -533,6 +533,7 @@ class App(Gtk.Application):
         self.wake_thread = None
         self.wake_set(bool(self.settings.get('wake_ears')))   # «Юми» works out of the box
         self.tap_set(bool(self.settings.get('tap_ears')))     # the diary, too, if it was asked
+        music.apply_settings(self.settings)   # her mpd, or the server's (music_server)
         threading.Thread(target=music.service_start, daemon=True).start()   # mpd lives with her
         self.fetch_chat_models()        # her answer model for the settings, in the background
         self.on_caps(initial=True)
@@ -886,6 +887,8 @@ class App(Gtk.Application):
                     pass
             elif kind == 'music_who':
                 self.music_who()
+            elif kind == 'music_search':
+                self.music_search(r[1])
             elif kind == 'stop_all':
                 self.hush()                    # her voice dies mid-word
                 self.stop_timer_sound()
@@ -903,6 +906,7 @@ class App(Gtk.Application):
                 self.state.save()
             elif kind == 'save_settings':
                 self.settings.save()
+                music.apply_settings(self.settings)   # the server mpd may have moved
             elif kind == 'recolor':
                 self.apply_palette(self.effective_palette())
             elif kind == 'quit':
@@ -1156,6 +1160,17 @@ class App(Gtk.Application):
         def work():
             playing = music.now_playing()
             GLib.idle_add(lambda: self.ev(lambda b: b.said_now_playing(playing)) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def music_search(self, payload):
+        """«включи песню ...»: the libraries are asked away from her main thread
+        (a search walks the network and her folders, then the queue is built),
+        the report goes back into her bubble"""
+        def work():
+            music.apply_settings(self.settings)
+            report = music.play_query(payload.get('kind', 'song'),
+                                      payload.get('query', ''), self.settings)
+            GLib.idle_add(lambda: self.ev(lambda b: b.said_music_found(report)) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def hourly_ask(self, payload):

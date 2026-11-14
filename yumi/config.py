@@ -71,6 +71,20 @@ DEFAULT_SETTINGS = {
     'weather_city': 'Анапа',  # the city she peeks the weather at ('' = wherever she is);
                               # say it in the phrase («юми погода в ялте») or edit
                               # ~/.config/yumi/settings.json → "weather_city": "Ялта"
+    'music_source': 'auto',   # where the songs come from: auto (Jellyfin when home,
+                              # folders when away) / jellyfin / local
+    'music_jellyfin': '',     # the Jellyfin server's address (http://192.168.0.189:8096);
+                              # when it answers, the songs come from its library
+    'music_jellyfin_user': '',      # the Jellyfin login (and the password below);
+                              # or put a "music_jellyfin_key" api key instead —
+                              # both live in ~/.config/yumi/settings.json
+    'music_jellyfin_password': '',
+    'music_dirs': '',         # extra local folders, comma-separated
+                              # ("~/Музыка, /mnt/nas/музыка"); the xdg music folder
+                              # is always read
+    'music_server': '',       # a remote mpd to play on, 'password@host:port'
+                              # — the songs sound from the server's speakers then
+                              # (empty = this machine's own mpd)
 }
 DEFAULT_STATE = {
     'mode': 'docked',         # docked / air
@@ -260,6 +274,9 @@ UI = {
         'tour4': 'Drop files on me to convert or compress them. Hold me by the scruff to move me anywhere.',
         'tour5': 'Middle-click pins me so I stop hiding. The rest is in the gear: language, colors, outfits.',
         'B': 'B', 'KB': 'KB', 'MB': 'MB', 'GB': 'GB',
+        'cat_music': 'Music', 'music_source': 'Where the songs come from',
+        'm_auto': 'auto (Jellyfin at home)', 'm_jellyfin': 'Jellyfin',
+        'm_local': 'my folders', 'music_skill': 'Music control by voice',
     },
     'ru': {
         'recent': 'Недавние', 'shelf': 'Полка', 'pipette': 'Пипетка', 'clock': 'Время',
@@ -316,6 +333,9 @@ UI = {
         'tour4': 'Кидай на меня файлы, и я их сконвертирую или сожму. Возьми меня за шкирку, чтобы поставить где угодно.',
         'tour5': 'Средний клик закрепляет меня, чтобы я не пряталась. Остальное в шестерёнке: язык, цвета, наряды.',
         'B': 'Б', 'KB': 'КБ', 'MB': 'МБ', 'GB': 'ГБ',
+        'cat_music': 'Музыка', 'music_source': 'Откуда брать песни',
+        'm_auto': 'авто (Джеллифин дома)', 'm_jellyfin': 'Jellyfin',
+        'm_local': 'мои папки', 'music_skill': 'Управление музыкой голосом',
     },
 }
 

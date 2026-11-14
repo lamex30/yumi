@@ -82,8 +82,42 @@ assert m('юми громкость тридцать') == 'volume 30'
 assert m('громкости 30') == 'volume 30'            # whisper's verdict from the diary
 assert m('громкость девяносто') == 'volume 90'
 assert m('звук на пятьдесят') == 'volume 50'
+# «громкость пять» means fifty: only the tens she obeys
 assert m('громкость пять') == 'volume 50'          # the tens she obeys
 assert m('30') is None                             # a bare number is a wish only behind her name
+
+# the libraries: a name is searched for, not played at random
+assert m('включи песню крылья') == ('song', 'крылья')
+assert m('включи песню иван дорн') == ('song', 'иван дорн')
+assert m('включи трек город золотой') == ('song', 'город золотой')
+assert m('юми включи песню крылья') == ('song', 'крылья')   # the name went, the wish stayed
+assert m('поставь песню пламя') == ('song', 'пламя')
+assert m('включи музыку крылья') == ('song', 'крылья')      # a name beside «музыку»
+assert m('play the wings song') == ('song', 'wings')
+assert m('включи песню') == 'play'                 # no name said: her library as ever
+assert m('включи музыку') == 'play'                # still just her library
+
+# a surprise: «что-нибудь» keeps together and splits over the ears alike
+assert m('включи что-нибудь') == ('random', '')
+assert m('включи что нибудь') == ('random', '')
+assert m('включи любую песню') == ('random', '')
+assert m('включи случайную песню') == ('random', '')
+assert m('включи рандом') == ('random', '')
+assert m('play something') == ('random', '')
+assert m('play random') == ('random', '')
+
+# a whole singer, a whole album: not one song
+assert m('включи исполнителя аквариум') == ('artist', 'аквариум')
+assert m('включи группу аквариум') == ('artist', 'аквариум')
+assert m('включи аквариум') is None               # a bare name with no «песню» is
+                                                  # not hers to guess («включи свет»!)
+assert m('включи альбом золото') == ('album', 'золото')
+assert m('включи исполнителя') is None            # a singer with no name is no wish
+
+# and the old ears are not lost: «что включи музыку» still plays, «выключи» stops
+assert m('что включи музыку') == 'play'           # a verb nearby: it is a wish, not a question
+assert m('что выключи музыку') is None            # the stray «что» is a stranger to the parser
+assert m('не включай песню крылья') is None       # «не» is the opposite of a wish
 
 # a lone number after the name is a volume wish too (Brain.heard_text, wake=True)
 assert brain.bare_volume('30') == 30

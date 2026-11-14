@@ -65,6 +65,27 @@ _MUSIC_DIR = _xdg_music_dir()
 _running_processes = {'mpd': None, 'player': None}
 _stop_event = threading.Event()
 
+# the player she plays on: her own mpd, or a remote one (music_server:
+# 'password@host:port', the songs sound from the server's speakers instead)
+_MPDA = {'env': None}
+
+
+def apply_settings(settings):
+    """the player to play on, from her settings: 'music_server' names a remote
+    mpd as 'password@host:port' — then every mpc word goes to it (the sound
+    lives where the server is), empty means her own mpd on this machine"""
+    srv = str((settings or {}).get('music_server') or '').strip()
+    if not srv:
+        _MPDA['env'] = None
+        return
+    host, _, port = srv.partition(':')
+    pw, _, h = host.partition('@')
+    env = dict(ENV)
+    env['MPD_HOST'] = f'{pw}@{h}' if pw else h
+    if port:
+        env['MPD_PORT'] = port.strip()
+    _MPDA['env'] = env
+
 
 def get_music_dir():
     """Return the Yumi music directory path."""
@@ -72,12 +93,13 @@ def get_music_dir():
 
 
 def _mpc(*args, timeout=3):
-    """one mpc command: a CompletedProcess, or None when mpc/mpd are away"""
+    """one mpc command: a CompletedProcess, or None when mpc/mpd are away
+    (the address it knocks at comes from _MPDA — her mpd or the server's)"""
     if not shutil.which('mpc'):
         return None
     try:
         return subprocess.run(['mpc', *args], capture_output=True, text=True,
-                              timeout=timeout, env=ENV)
+                              timeout=timeout, env=_MPDA['env'] or ENV)
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -114,9 +136,12 @@ def _mpd_ready():
 
 
 def _ensure_mpd():
-    """start the user's mpd when it is installed but quiet; True when it answers"""
-    if _mpd_ready() or not shutil.which('mpd'):
+    """start the user's mpd when it is installed but quiet; True when it answers
+    (on the server there is nobody to start: it either answers or not)"""
+    if _mpd_ready() or _MPDA['env']:
         return _mpd_ready()
+    if not shutil.which('mpd'):
+        return False
     try:
         proc = subprocess.Popen(['mpd'], stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, env=ENV,
@@ -193,6 +218,120 @@ def play_music(file_path=None, directory=None):
                 pass
 
     return False
+
+
+def _mpd_path(p):
+    """the path as the queue wants it: inside her music folder it goes by its
+    relative name (mpd accepts only its own library), anywhere else as it is;
+    on the server her folders mean nothing, so the path goes as it is"""
+    p = str(p)
+    if _MPDA['env']:
+        return p
+    try:
+        return Path(p).resolve().relative_to(Path(_MUSIC_DIR).resolve()).as_posix()
+    except (ValueError, OSError):
+        return p
+
+
+def play_tracks(tracks):
+    """Play these tracks: stream urls (Jellyfin) and file paths (her folders),
+    one queue, straight to the front.
+
+    Returns True when the first notes are audible: mpd queues and plays, and
+    when mpd is away, ffplay takes the first track (it reads the http streams
+    too) — but on the server there is no fallback, the sound has to come
+    from there.
+    """
+    tracks = [t for t in (tracks or []) if t]
+    if not tracks:
+        return False
+
+    # Stop any existing playback first
+    stop_music(force=True)
+    _stop_event.clear()
+
+    if _ensure_mpd():
+        _mpc('clear')
+        for t in tracks:
+            if t.get('url'):
+                _mpc('add', t['url'])
+            elif t.get('path'):
+                _mpc('add', _mpd_path(t['path']))
+        if (_mpc('playlist').stdout or '').strip():
+            _mpc('play')
+            if is_mpd_playing():
+                return True
+        else:
+            _mpc('clear')          # nothing went in: the queue stays clean
+
+    if _MPDA['env']:
+        return False               # she plays on the server, or not at all
+
+    # fallback: ffplay over the first track — a url or a file, it plays both
+    src = tracks[0].get('url') or tracks[0].get('path')
+    if src and shutil.which('ffplay'):
+        try:
+            proc = subprocess.Popen(
+                ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', str(src)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=ENV, start_new_session=True
+            )
+            _running_processes['player'] = proc.pid
+            return True
+        except OSError:
+            pass
+
+    return False
+
+
+def play_query(kind, query='', settings=None):
+    """Find music in the library that is awake (Jellyfin at home, her folders
+    away from home) and play it.
+
+    Args:
+        kind: 'song' (the name of one song), 'artist', 'album' (the songs of
+              one singer or one album), 'random' (a surprise), 'play' (just
+              «включи музыку»: her folders the old way, Jellyfin a queue of
+              random songs)
+        query: the words of the name, '' for a surprise
+
+    Returns a small report for her bubble: {'ok', 'track', 'source', 'count',
+    'query'} — the track is (artist, title) of the song that came first.
+    """
+    report = {'ok': False, 'track': None, 'source': 'local', 'count': 0,
+              'kind': kind, 'query': query or ''}
+    try:
+        from . import library
+        res = library.resolve(settings or {}, kind, query or '')
+    except Exception:
+        return report
+
+    tracks = res.get('tracks') or []
+    report['source'] = res.get('source', 'local')
+
+    if kind == 'play':
+        if report['source'] == 'jellyfin':
+            tracks = (res.get('lib') or library.Jellyfin(settings or {})).random(25)
+        else:                      # her own folders: the old full-library way
+            report['ok'] = play_music()
+            return report
+
+    if not tracks:
+        return report
+
+    if kind == 'song' and len(tracks) == 1:
+        # the one song you asked for goes first, and after it the library
+        # keeps going: silence after one track is a poor way to listen
+        lib = res.get('lib') or library.Local(settings or {})
+        for extra in lib.random(1):
+            if extra != tracks[0]:
+                tracks.append(extra)
+
+    first = tracks[0]
+    report['track'] = (first.get('artist', ''), first.get('title', ''))
+    report['count'] = len(tracks)
+    report['ok'] = play_tracks(tracks)
+    return report
 
 
 def stop_music(force=False):
@@ -345,18 +484,47 @@ def _sink_volume(name=None):
     return min(pcts) if pcts else None
 
 
+def _mpd_volume():
+    """the volume mpd itself mixes, in percent, or None when it will not say"""
+    m = re.search(r'(\d+)\s*%', (_mpc('volume').stdout or ''))
+    return int(m.group(1)) if m else None
+
+
 def read_volume():
-    """the system loudness right now, in percent, or None when pactl is away"""
+    """the loudness right now, in percent: mpd's own when she plays on the
+    server (the local sinks have nothing to do with that sound), the system's
+    otherwise; None when the knob is away"""
+    if _MPDA['env']:
+        return _mpd_volume()
     name = _default_sink()
     return _sink_volume(name) if name else None
 
 
 def system_volume(cmd):
-    """The system loudness: 'volume_up' and 'volume_down' step it by 10,
+    """The loudness: 'volume_up' and 'volume_down' step it by 10,
     'volume N' sets it to N (10..100).
 
-    Returns the new volume percent, or None when the knob would not turn.
+    On the server the mpd mixer is turned (the sound lives there), on this
+    machine the system output's. Returns the new volume percent, or None when
+    the knob would not turn.
     """
+    if _MPDA['env']:
+        cur = _mpd_volume()
+        if cur is None:
+            cur = 50
+        if cmd == 'volume_up':
+            new = min(100, cur + 10)
+        elif cmd == 'volume_down':
+            new = max(0, cur - 10)
+        else:
+            try:                            # 'volume 50' from the voice parser
+                new = int(str(cmd).split(None, 1)[1].strip('%'))
+            except (ValueError, IndexError):
+                return None
+            new = min(100, max(10, new))
+        r = _mpc('volume', str(new))
+        return new if r is not None and r.returncode == 0 else None
+
     name = _default_sink()
     if not name:
         return None

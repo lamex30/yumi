@@ -509,7 +509,8 @@ class Brain(Extras):
                 'wake_model_size': ['small', 'big'],
                 'wake_judge_log': [True, False],
                 'chat_provider': ['ollama', 'polza.ai'],
-                'chat_model': self.chat_models or [self.settings.get('chat_model')]}
+                'chat_model': self.chat_models or [self.settings.get('chat_model')],
+                'music_source': ['auto', 'jellyfin', 'local']}
 
     outfit_names = []                 # outfit folders found in sprites/outfits (set by the app)
 
@@ -539,6 +540,8 @@ class Brain(Extras):
             return t('w_' + str(val)) if f'w_{val}' in UI['en'] else str(val)
         if arg == 'wake_judge_log':
             return t('on') if val else t('off')
+        if arg == 'music_source':
+            return t('m_' + str(val)) if f'm_{val}' in UI['en'] else str(val)
         if arg == 'stt_mic':
             if not val:
                 return t('mic_auto')
@@ -872,6 +875,7 @@ class Brain(Extras):
         elif kind == 'settings':
             # the settings come in a few small groups
             rows = [('menu', 'set_her', t('cat_her')), ('menu', 'set_sound', t('cat_sound')),
+                    ('menu', 'set_music', t('cat_music')),
                     ('menu', 'set_ears', t('cat_ears')), ('menu', 'set_look', t('cat_look')),
                     ('menu', 'set_lang', t('cat_lang')), ('menu', 'set_chat', t('cat_chat')),
                     ('ring_edit', None, t('cat_ring')),
@@ -893,6 +897,13 @@ class Brain(Extras):
             if s.get('timer_sound'):
                 rows.append(('sound_reset', None, t('sound_reset')))
             rows += [('sound_test', None, t('sound_test')), ('menu', 'settings', t('back'))]
+        elif kind == 'set_music':
+            # the addresses and passwords live in ~/.config/yumi/settings.json
+            # (music_jellyfin, music_jellyfin_user, music_jellyfin_password,
+            # music_jellyfin_key, music_dirs, music_server) — like weather_city
+            rows = [('set', 'music_source', t('music_source')),
+                    ('set', 'music_skill', t('music_skill')),
+                    ('menu', 'settings', t('back'))]
         elif kind == 'set_ears':
             # the mic list is fetched once: «Find the microphone» looks again after it changed
             if not self.mics and 'stt_mic' not in self.unavailable:
@@ -1211,8 +1222,16 @@ class Brain(Extras):
                 n = bare_volume(text) or (bare_volume(alt) if alt else None)
                 music_cmd = f'volume {n}' if n else None
             if music_cmd:
-                _mind_log(f'music {music_cmd}')
-                self.music_control(music_cmd)
+                if isinstance(music_cmd, tuple):   # the libraries: a song to find
+                    kind, query = music_cmd
+                    _mind_log(f'music {kind} {query!r}')
+                    self.thinking = True
+                    self.requests.append(('music_search',
+                                          {'kind': kind, 'query': query,
+                                           'lang': lang}))
+                else:
+                    _mind_log(f'music {music_cmd}')
+                    self.music_control(music_cmd)
                 return
         if self.voice_intent(text, alt):   # the user's own commands, no mind needed
             return
@@ -1336,6 +1355,35 @@ class Brain(Extras):
         else:
             self.say('music_who_artist', artist=artist)
 
+    def said_music_found(self, report):
+        """the library answered the search: she names what she found and plays,
+        or misses the name kindly (report is the dict play_query came back with)
+        """
+        self.thinking = False
+        if not report.get('ok'):
+            self.say('music_no_way')
+            return
+        track = report.get('track') or ('', '')
+        artist, title = track
+        if report.get('kind') in ('artist', 'album') and report.get('count', 0) > 1:
+            self.say('music_found_many', artist=artist)
+            return
+        if artist and title:
+            self.say('music_found', artist=artist, title=title)
+        elif title:
+            self.say('music_found_title', title=title)
+        elif artist:
+            self.say('music_found_artist', artist=artist)
+        elif not report.get('query'):
+            self.say('music_play')
+            return
+        else:
+            self.say('music_not_found', query=report.get('query') or '')
+            return
+        if report.get('source') == 'local' \
+                and str(self.settings.get('music_jellyfin') or '').strip():
+            self.say('music_local')
+
     def said_weather(self, report):
         """the clouds answered through wttr.in / Open-Meteo (report is '' when the net was away);
         the bubble keeps «+5°C», the ears hear «плюс 5 градусов»"""
@@ -1452,7 +1500,12 @@ class Brain(Extras):
             self.thinking = True
             self.requests.append(('music_who',))
             return
-        phrases = {'play_pause': 'music_toggle', 'play': 'music_play',
+        if cmd == 'play':              # «включи музыку»: the library that is awake —
+            self.thinking = True       # Jellyfin when home, her folders away from it
+            self.requests.append(('music_search', {'kind': 'play', 'query': ''}))
+            return
+
+        phrases = {'play_pause': 'music_toggle',
                    'pause': 'music_pause', 'next': 'music_next',
                    'previous': 'music_previous', 'stop': 'music_stop',
                    'volume_up': 'volume_up', 'volume_down': 'volume_down'}
@@ -2536,6 +2589,15 @@ MUSIC_WHO_ASK = frozenset(('кто', 'что', 'какая', 'какой', 'че
                            'what', "what's", 'whats', 'who', 'which'))
 MUSIC_WHO_PLAY = ('играет', 'играют', 'играла', 'играет', 'звучит', 'звучат',
                   'поёт', 'поет', 'playing', 'plays')
+# «включи что-нибудь / любую / случайную»: a surprise, not a name
+MUSIC_ANY = frozenset(('что-нибудь', 'нибудь', 'какую-нибудь', 'какая-нибудь',
+                       'любую', 'любой', 'любая', 'любое', 'случайную', 'случайная',
+                       'случайный', 'случайное', 'рандом', 'сюрприз',
+                       'something', 'anything', 'whatever', 'random'))
+# «включи исполнителя ... / группу ...»: the whole singer, not one song
+MUSIC_ARTIST_W = ('исполнителя', 'исполнитель', 'исполнителя', 'артиста',
+                  'группу', 'группы', 'artist', 'band', 'singer')
+MUSIC_ALBUM_W = frozenset(('альбом', 'альбома', 'album'))
 VOLUME_UP = frozenset(('громче', 'повысь', 'повысить', 'louder', 'up'))
 VOLUME_DOWN = frozenset(('тише', 'тихо', 'quieter', 'softer', 'lower'))
 VOLUME_WORD = frozenset(('громкость', 'звук', 'volume', 'sound'))
@@ -2556,7 +2618,6 @@ MUSIC_KNOWN = (MUSIC_WORDS | MUSIC_FILLERS | MUSIC_PLAY | MUSIC_PAUSE
                | {'следующ', 'предыдущ', 'дальше', 'назад', 'turn', 'off', 'on'})
 VERB_ALL = (MUSIC_PLAY | MUSIC_PAUSE | MUSIC_STOP_MUSIC
             | {'переключи', 'переключить'})
-
 
 # the words of a phrase the way the skills read them: lower case, punctuation gone,
 # ё folded into е — one normalization for everything (nlu.py keeps it)
@@ -2661,15 +2722,33 @@ def bare_volume(text):
     return min(100, max(10, n))
 
 
+def _music_query(toks):
+    """the name of the song out of the phrase: the words the music skill knows
+    nothing about, in the order they were said («включи песню иван дорн» →
+    «иван дорн») — her verbs and politeness are no part of a name, and the
+    ears' bent verbs («включить» heard as «включитьь») go too"""
+    skip = (MUSIC_KNOWN | MUSIC_ANY | MUSIC_ALBUM_W | set(MUSIC_ARTIST_W)
+            | MUSIC_WHO_ASK)
+    out = [t for t in toks
+           if t not in skip
+           and not t.startswith('исполнител')
+           and not t.startswith(('следующ', 'предыдущ', 'дальш', 'далш'))
+           and not (len(t) >= 4 and any(_near1(t, v) for v in VERB_ALL))]
+    return ' '.join(out).strip(' -')
+
+
 def music_control_text(text, lang='en'):
     """Convert voice text to a music command.
 
     Returns 'play' (her own library), 'pause', 'stop', 'next', 'previous',
     'who' (just the question «кто играет»: she names the artist and the track),
     'volume_up', 'volume_down', 'volume N' (the system volume, 10..100),
-    or None if not a music command. Whole words only: «включи музыку» plays,
-    «выключи музыку» stops, and «включи свет» or the telly in the background
-    is not hers to mind. The bare toggle 'play_pause' is for the hotkey only.
+    or None if not a music command. The libraries answer with a pair instead:
+    ('random', ''), ('song', name), ('artist', name), ('album', name) — she
+    finds the song in Jellyfin (home) or her folders (away) and plays it.
+    Whole words only: «включи музыку» plays, «выключи музыку» stops, and
+    «включи свет» or the telly in the background is not hers to mind. The bare
+    toggle 'play_pause' is for the hotkey only.
     """
     toks = volume_tokens(text)
     if not toks:
@@ -2725,6 +2804,28 @@ def music_control_text(text, lang='en'):
         return 'previous'
     if _verbs(toks, MUSIC_NEXT[:2]):               # «переключи музыку»: the next one
         return 'next' if has_music else None
+
+    # the libraries: «включи песню крылья», «включи что-нибудь», «включи
+    # исполнителя аквариум» — a name is everything she does not know here
+    if _verbs(toks, MUSIC_PLAY) and strangers():
+        strng = strangers()
+        if strng <= MUSIC_ANY or strng == {'что', 'нибудь'}:
+            return ('random', '')                  # «включи что-нибудь»: a surprise
+        if any(t.startswith('исполнител') or t in MUSIC_ARTIST_W for t in toks):
+            q = _music_query(toks)
+            return ('artist', q) if q else None
+        if any(t in MUSIC_ALBUM_W for t in toks):
+            q = _music_query(toks)
+            return ('album', q) if q else None
+        if has_music:
+            q = _music_query(toks)
+            if q:
+                return ('song', q)                 # «включи песню крылья»
+            if strng <= MUSIC_WHO_ASK:             # «что включи музыку»: the ears
+                pass                               # garbled it, but the wish is hers
+            else:
+                return None
+
     if _verbs(toks, MUSIC_PLAY):
         if has_music or not strangers():
             return 'play'

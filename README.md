@@ -57,6 +57,8 @@ English · [Русский](README.ru.md)
   there (the default is «Anapa», while `""` looks wherever the computer stands).
   Ask «кто играет» or «что за трек» («who plays», «what's playing») and she names the artist
   and the track that is sounding — from any MPRIS player (vlc, spotify, a browser) or her own library.
+  Say «включи песню …», «включи что-нибудь» or «включи исполнителя …» and she finds it and plays it:
+  from Jellyfin when you are home, from her own folders when you are not.
 - English and Russian, picked from your system language.
 
 <img src="docs/colors.png" alt="Yumi on teal, rose, amber and blue wallpapers, recolored to each" width="100%">
@@ -422,6 +424,20 @@ otherwise out of her own window — the city where you are, recognized from your
 Say «расскажи анекдот» (or «tell me a joke») and she asks her neural net to make one up,
 then tells it out loud. And «кто играет» («what's playing») she answers by herself too:
 the artist and the track of whatever is sounding right now.
+
+**Music from the library.** Say «Юми, включи песню город золотой» and she finds the song
+and plays it; «включи что-нибудь» plays a random one; «включи исполнителя аквариум» queues
+several tracks by that singer; «включи альбом золото» plays the whole album. And plain
+«включи музыку» — as before, her whole library, shuffled. Where she searches is her own
+call: at home, while the Jellyfin server answers, out of its big library (the stream plays
+locally through her mpd); when the server is away, out of her own folders. The switch lives
+in **Settings → Music → Where the songs come from** (auto / Jellyfin / my folders), while
+the addresses and passwords stay in `~/.config/yumi/settings.json`: `music_jellyfin` (the
+address, e.g. `http://192.168.0.189:8096`), `music_jellyfin_user`,
+`music_jellyfin_password` (or a `music_jellyfin_key` api key instead of the login),
+`music_dirs` (extra folders, comma-separated) and `music_server`
+(`password@host:port` — the songs then sound from the server's mpd speakers, not this
+machine). Playback wants `mpd` and `mpc` (with `ffplay` as a fallback).
 
 **The wake word.** Say «Yumi» and she is all ears at once, no buttons — the name may come
 behind a filler word («well, Yumi») and a half-heard mush of syllables counts too, so she
