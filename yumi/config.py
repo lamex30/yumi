@@ -83,8 +83,13 @@ DEFAULT_SETTINGS = {
                               # ("~/Музыка, /mnt/nas/музыка"); the xdg music folder
                               # is always read
     'music_server': '',       # a remote mpd to play on, 'password@host:port'
-                              # — the songs sound from the server's speakers then
-                              # (empty = this machine's own mpd)
+                              # — the middle of the chain: when Jellyfin sleeps,
+                              # its library answers, the songs play there and
+                              # come home through the httpd stream below
+                              # (empty = no server step, her folders instead)
+    'music_stream': '',       # the server mpd's httpd stream to pull the sound
+                              # home by (http://192.168.0.189:8123); without it
+                              # the server's songs sound on the server
 }
 DEFAULT_STATE = {
     'mode': 'docked',         # docked / air

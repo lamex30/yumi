@@ -65,18 +65,23 @@ _MUSIC_DIR = _xdg_music_dir()
 _running_processes = {'mpd': None, 'player': None}
 _stop_event = threading.Event()
 
-# the player she plays on: her own mpd, or a remote one (music_server:
-# 'password@host:port', the songs sound from the server's speakers instead)
+# the player the words answer to right now (the queue decides: Jellyfin
+# streams and her folders sound on her mpd, the server's paths on the
+# server's) and the mpd named by music_server, the middle of the chain
 _MPDA = {'env': None}
+_SERVER = {'env': None}
+_STREAM = {'url': ''}   # the server's httpd stream the sound comes home by
 
 
 def apply_settings(settings):
-    """the player to play on, from her settings: 'music_server' names a remote
-    mpd as 'password@host:port' — then every mpc word goes to it (the sound
-    lives where the server is), empty means her own mpd on this machine"""
+    """the middle of the chain, from her settings: 'music_server' names a
+    remote mpd as 'password@host:port' — its library answers when Jellyfin
+    sleeps, the songs play on the server and come home through the httpd
+    stream 'music_stream' names (empty means the sound stays on the server)"""
     srv = str((settings or {}).get('music_server') or '').strip()
+    _STREAM['url'] = str((settings or {}).get('music_stream') or '').strip()
     if not srv:
-        _MPDA['env'] = None
+        _SERVER['env'] = None
         return
     host, _, port = srv.partition(':')
     pw, _, h = host.partition('@')
@@ -84,7 +89,7 @@ def apply_settings(settings):
     env['MPD_HOST'] = f'{pw}@{h}' if pw else h
     if port:
         env['MPD_PORT'] = port.strip()
-    _MPDA['env'] = env
+    _SERVER['env'] = env
 
 
 def get_music_dir():
@@ -92,14 +97,18 @@ def get_music_dir():
     return _MUSIC_DIR
 
 
-def _mpc(*args, timeout=3):
+def _mpc(*args, timeout=3, mpd_env=None):
     """one mpc command: a CompletedProcess, or None when mpc/mpd are away
-    (the address it knocks at comes from _MPDA — her mpd or the server's)"""
+    (the address it knocks at is _MPDA — whoever plays now — or mpd_env when
+    an exact player is named: her own one for the stream, the server's
+    otherwise)"""
     if not shutil.which('mpc'):
         return None
     try:
         return subprocess.run(['mpc', *args], capture_output=True, text=True,
-                              timeout=timeout, env=_MPDA['env'] or ENV)
+                              timeout=timeout,
+                              env=mpd_env if mpd_env is not None
+                              else (_MPDA['env'] or ENV))
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -151,6 +160,15 @@ def _ensure_mpd():
         pass
     time.sleep(0.4)                    # the daemon takes a moment to open its port
     return _mpd_ready()
+
+
+def _ensure_local():
+    """her own mpd up for the stream home, whoever the session points at"""
+    saved = _MPDA['env']
+    _MPDA['env'] = None
+    ok = _ensure_mpd()
+    _MPDA['env'] = saved
+    return ok
 
 
 def _players():
@@ -234,13 +252,15 @@ def _mpd_path(p):
 
 
 def play_tracks(tracks):
-    """Play these tracks: stream urls (Jellyfin) and file paths (her folders),
-    one queue, straight to the front.
+    """Play these tracks: stream urls (Jellyfin), her folders' paths and the
+    server's paths, one queue.
 
-    Returns True when the first notes are audible: mpd queues and plays, and
-    when mpd is away, ffplay takes the first track (it reads the http streams
-    too) — but on the server there is no fallback, the sound has to come
-    from there.
+    The player follows the songs: Jellyfin streams and her folders sound
+    here on her mpd (ffplay in reserve), the server's paths (source 'server')
+    build the queue on the server's mpd — and the sound is pulled home
+    through its httpd stream ('music_stream'), not left on the server.
+
+    Returns True when the first notes are audible.
     """
     tracks = [t for t in (tracks or []) if t]
     if not tracks:
@@ -249,6 +269,19 @@ def play_tracks(tracks):
     # Stop any existing playback first
     stop_music(force=True)
     _stop_event.clear()
+
+    server = any(t.get('source') == 'server' for t in tracks)
+    if server:
+        # the sound comes home first: her mpd plays the server's httpd stream,
+        # whatever the queue on the server is doing behind it
+        if _STREAM['url'] and _ensure_local():
+            _mpc('clear', mpd_env=ENV)
+            _mpc('add', _STREAM['url'], mpd_env=ENV)
+            _mpc('play', mpd_env=ENV)
+        if _SERVER['env']:
+            _MPDA['env'] = _SERVER['env']    # the queue is the server's business now
+    else:
+        _MPDA['env'] = None                  # streams and folders sound here
 
     if _ensure_mpd():
         _mpc('clear')
@@ -265,7 +298,7 @@ def play_tracks(tracks):
             _mpc('clear')          # nothing went in: the queue stays clean
 
     if _MPDA['env']:
-        return False               # she plays on the server, or not at all
+        return False               # the server plays, or nothing does
 
     # fallback: ffplay over the first track — a url or a file, it plays both
     src = tracks[0].get('url') or tracks[0].get('path')
@@ -285,8 +318,8 @@ def play_tracks(tracks):
 
 
 def play_query(kind, query='', settings=None):
-    """Find music in the library that is awake (Jellyfin at home, her folders
-    away from home) and play it.
+    """Find music in the library that is awake (Jellyfin at home, the mpd on
+    the server when Jellyfin sleeps, her folders away from both) and play it.
 
     Args:
         kind: 'song' (the name of one song), 'artist', 'album' (the songs of
@@ -310,8 +343,8 @@ def play_query(kind, query='', settings=None):
     report['source'] = res.get('source', 'local')
 
     if kind == 'play':
-        if report['source'] == 'jellyfin':
-            tracks = (res.get('lib') or library.Jellyfin(settings or {})).random(25)
+        if report['source'] != 'local':   # jellyfin or the server: a queue of
+            tracks = (res.get('lib') or library.Local(settings or {})).random(25)
         else:                      # her own folders: the old full-library way
             report['ok'] = play_music()
             return report
@@ -347,10 +380,16 @@ def stop_music(force=False):
     if r is not None:
         stopped = True
 
-    # MPD
-    r = _mpc('stop')
-    if r is not None:
-        stopped = True
+    # mpd of this session, and the others that may be sounding: her own one
+    # (the httpd stream lives there) and the server's (the queue behind it)
+    targets = [_MPDA['env']]
+    for env in (_SERVER['env'], ENV):
+        if env and env not in targets:
+            targets.append(env)
+    for env in targets:
+        r = _mpc('stop', mpd_env=env)
+        if r is not None:
+            stopped = True
 
     # Processes we spawned ourselves
     if force:

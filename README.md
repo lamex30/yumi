@@ -435,9 +435,12 @@ in **Settings → Music → Where the songs come from** (auto / Jellyfin / my fo
 the addresses and passwords stay in `~/.config/yumi/settings.json`: `music_jellyfin` (the
 address, e.g. `http://192.168.0.189:8096`), `music_jellyfin_user`,
 `music_jellyfin_password` (or a `music_jellyfin_key` api key instead of the login),
-`music_dirs` (extra folders, comma-separated) and `music_server`
-(`password@host:port` — the songs then sound from the server's mpd speakers, not this
-machine). Playback wants `mpd` and `mpc` (with `ffplay` as a fallback).
+`music_dirs` (extra folders, comma-separated), `music_server`
+(`password@host:port` — the middle of the chain: when Jellyfin is asleep, its
+library answers, the songs play on the server and are pulled home through the
+httpd stream `music_stream` names, e.g. `http://192.168.0.189:8123` — without
+it the sound stays on the server).
+Playback wants `mpd` and `mpc` (with `ffplay` as a fallback).
 
 **The wake word.** Say «Yumi» and she is all ears at once, no buttons — the name may come
 behind a filler word («well, Yumi») and a half-heard mush of syllables counts too, so she

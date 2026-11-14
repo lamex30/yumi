@@ -43,10 +43,10 @@ def settle(b):
 assert all(len(row) == 7 for g in pixui.ICONS.values() for row in g) and all(len(g) == 7 for g in pixui.ICONS.values())
 
 b = brain()
-DEFAULT = ['recent', 'shelf', 'pipette', 'timer', 'clock', 'listen', 'joke', 'sleep', 'settings']
+DEFAULT = ['recent', 'shelf', 'pipette', 'timer', 'clock', 'listen', 'joke', 'sleep', 'search', 'settings']
 assert ids(b) == DEFAULT
 b.settings['ring'] = ['settings', 'gone-button', 'shelf']     # a stale id is dropped, new ones come after
-assert ids(b) == ['settings', 'shelf', 'recent', 'pipette', 'timer', 'clock', 'listen', 'joke', 'sleep']
+assert ids(b) == ['settings', 'shelf', 'recent', 'pipette', 'timer', 'clock', 'listen', 'joke', 'sleep', 'search']
 b.settings['ring'] = []
 
 # the switches; a sleeping Yumi keeps the way to wake her; settings and your own buttons do not switch off
@@ -91,12 +91,12 @@ r = rect_of(b, 'ring_tile', 'recent')
 b.press_at(1, *center(r))
 assert b.ring_drag == 'recent'
 b.motion(*b.ring_slots[3])
-assert ids(b) == ['shelf', 'pipette', 'timer', 'recent', 'clock', 'listen', 'joke', 'sleep', 'settings']
+assert ids(b) == ['shelf', 'pipette', 'timer', 'recent', 'clock', 'listen', 'joke', 'sleep', 'search', 'settings']
 b.scene()
-b.motion(*b.ring_slots[8])
+b.motion(*b.ring_slots[9])
 assert ids(b)[-1] == 'recent'
 b.requests.clear()
-b.release_at(1, *b.ring_slots[8])
+b.release_at(1, *b.ring_slots[9])
 assert b.ring_drag is None and ('save_settings',) in b.requests and b.ring_edit
 
 # a click on a built-in button does nothing, on yours it edits it, a jitter is still a click

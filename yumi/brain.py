@@ -1188,6 +1188,21 @@ class Brain(Extras):
             self.listening = True
             self.requests.append(('listen', 15))
 
+    def music_send(self, music_cmd, lang='en'):
+        """the music wish leaves this thread: the libraries' pair goes to the
+        search away from her main thread (a search walks the network and her
+        folders), the plain words to her own player at once"""
+        if isinstance(music_cmd, tuple):   # the libraries: a song to find
+            kind, query = music_cmd
+            _mind_log(f'music {kind} {query!r}')
+            self.thinking = True
+            self.requests.append(('music_search',
+                                  {'kind': kind, 'query': query,
+                                   'lang': lang}))
+        else:
+            _mind_log(f'music {music_cmd}')
+            self.music_control(music_cmd)
+
     def heard_text(self, text, wake=False, alt=None):
         """into her mind, whatever the ears' way was; wake is True when the phrase
         came right after her name («юми ...») or after she asked what you wanted;
@@ -1222,19 +1237,21 @@ class Brain(Extras):
                 n = bare_volume(text) or (bare_volume(alt) if alt else None)
                 music_cmd = f'volume {n}' if n else None
             if music_cmd:
-                if isinstance(music_cmd, tuple):   # the libraries: a song to find
-                    kind, query = music_cmd
-                    _mind_log(f'music {kind} {query!r}')
-                    self.thinking = True
-                    self.requests.append(('music_search',
-                                          {'kind': kind, 'query': query,
-                                           'lang': lang}))
-                else:
-                    _mind_log(f'music {music_cmd}')
-                    self.music_control(music_cmd)
+                self.music_send(music_cmd, lang)
                 return
         if self.voice_intent(text, alt):   # the user's own commands, no mind needed
             return
+        if self.settings.get('music_skill', True):
+            # neither a music word in the phrase nor a custom command on it:
+            # «включи рамштайн» — a bare name beside her verb, she looks for it
+            # in the library. A phrase the buttons claim never comes here
+            # («включи свет» is theirs), so a guess is free of their cares
+            pair = music_control_text(text, lang, guess=True)
+            if not pair and alt and alt != text:
+                pair = music_control_text(alt, lang, guess=True)
+            if pair:
+                self.music_send(pair, lang)
+                return
         if chat.time_question(text):       # the clock she reads herself, no mind needed
             self.say('chat_time', time=chat.the_time(lang))
             return
@@ -2749,6 +2766,11 @@ def music_control_text(text, lang='en'):
     Whole words only: «включи музыку» plays, «выключи музыку» stops, and
     «включи свет» or the telly in the background is not hers to mind. The bare
     toggle 'play_pause' is for the hotkey only.
+
+    guess=True: the phrase carried no music word and no custom command claimed
+    it (Brain.heard_text asks only after voice_intent said no) — a bare name
+    beside her verb («включи рамштайн») becomes a song to look for, the light
+    words having gone to the buttons already.
     """
     toks = volume_tokens(text)
     if not toks:

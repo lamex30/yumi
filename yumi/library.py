@@ -16,7 +16,9 @@ import json
 import os
 import random
 import re
+import shutil
 import socket
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -254,27 +256,7 @@ class Local:
     def _ranked(self, query, limit):
         """the tracks where every word of the name is found, the best first:
         a word in the title counts twice, in the artist once, in the album half"""
-        words = _tokens(query)
-        if not words:
-            return []
-        out = []
-        for t in self.tracks():
-            title = ' '.join(_tokens(t['title']))
-            artist = ' '.join(_tokens(t['artist']))
-            album = ' '.join(_tokens(t['album']))
-            if not all(w in f'{title} {artist} {album}' for w in words):
-                continue
-            score = 0.0
-            for w in words:
-                if w in title:
-                    score += 2
-                if w in artist:
-                    score += 1
-                if w in album:
-                    score += 0.5
-            out.append((score, t))
-        out.sort(key=lambda st: -st[0])
-        return [t for _, t in out[:limit]]
+        return _ranked_tracks(self.tracks(), query, limit)
 
     def search(self, query, limit=5):
         return self._ranked(query, limit)
@@ -308,10 +290,133 @@ class Local:
         return random.sample(tracks, min(limit, len(tracks)))
 
 
+def _ranked_tracks(tracks, query, limit):
+    """the tracks where every word of the name is found, the best first:
+    a word in the title counts twice, in the artist once, in the album half
+    (one ranking for her folders and for the server's library alike)"""
+    words = _tokens(query)
+    if not words:
+        return []
+    out = []
+    for t in tracks:
+        title = ' '.join(_tokens(t['title']))
+        artist = ' '.join(_tokens(t['artist']))
+        album = ' '.join(_tokens(t['album']))
+        if not all(w in f'{title} {artist} {album}' for w in words):
+            continue
+        score = 0.0
+        for w in words:
+            if w in title:
+                score += 2
+            if w in artist:
+                score += 1
+            if w in album:
+                score += 0.5
+        out.append((score, t))
+    out.sort(key=lambda st: -st[0])
+    return [t for _, t in out[:limit]]
+
+
+def _server_tracks(text):
+    """the server's answer 'path§artist§title§album' read into tracks: the
+    lines that do not split into four (a «§» a tag carried by itself) go by,
+    there are enough honest ones around"""
+    out = []
+    for line in str(text or '').splitlines():
+        parts = line.split('§')
+        if len(parts) != 4:
+            continue
+        path, artist, title, album = (p.strip() for p in parts)
+        if not path:
+            continue
+        out.append({'title': title, 'artist': artist, 'album': album,
+                    'path': path, 'source': 'server'})
+    return out
+
+
+class ServerMpd:
+    """the mpd on the server (music_server 'password@host:port'): its library
+    is asked with mpc, its songs play on the server, and the sound is pulled
+    home through its httpd stream (music_stream names the address) — the
+    middle step of the chain, when Jellyfin is asleep"""
+
+    def __init__(self, settings):
+        srv = str((settings or {}).get('music_server') or '').strip()
+        host, _, port = srv.partition(':')
+        self.password, _, self.host = host.partition('@')
+        self.port = port.strip() or '6600'
+
+    def ok(self):
+        """an address is written down at all"""
+        return bool(self.host)
+
+    def available(self, timeout=1.5):
+        """the server answers at its door: a plain TCP knock, no requests yet"""
+        try:
+            with socket.create_connection((self.host, int(self.port)),
+                                          timeout=timeout):
+                return True
+        except (OSError, ValueError):
+            return False
+
+    def _mpc(self, *args, timeout=8):
+        """one mpc command at the server's mpd: a CompletedProcess, or None"""
+        if not shutil.which('mpc'):
+            return None
+        env = dict(os.environ)
+        env['MPD_HOST'] = (f'{self.password}@{self.host}'
+                           if self.password else self.host)
+        env['MPD_PORT'] = self.port
+        try:
+            return subprocess.run(['mpc', *args], capture_output=True,
+                                  text=True, timeout=timeout, env=env)
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def tracks(self):
+        """the whole library the server's mpd knows: one search with empty
+        words answers every song with its tags in one line apiece"""
+        r = self._mpc('-f', '%file%§%artist%§%title%§%album%',
+                      'search', 'title', '')
+        if r is None or r.returncode != 0:
+            return []
+        return _server_tracks(r.stdout)
+
+    def search(self, query, limit=5):
+        return _ranked_tracks(self.tracks(), query, limit)
+
+    def by_artist(self, query, limit=25):
+        """the songs of the singer you named, the library ranked by the artist
+        first (a search matches the names of the songs too)"""
+        tracks = self.tracks()
+        words = _tokens(query)
+        picked = [t for t in tracks
+                  if all(w in _tokens(f'{t["artist"]} {t["album"]}')
+                         for w in words)]
+        return (picked or _ranked_tracks(tracks, query, limit))[:limit]
+
+    def by_album(self, query, limit=40):
+        """the songs of the album you named, ranked by the album"""
+        tracks = self.tracks()
+        words = _tokens(query)
+        picked = [t for t in tracks
+                  if all(w in _tokens(t['album']) for w in words)]
+        return (picked or _ranked_tracks(tracks, query, limit))[:limit]
+
+    def random(self, limit=1):
+        """n songs out of the server's library, a fresh deal every time"""
+        tracks = self.tracks()
+        if not tracks:
+            return []
+        return random.sample(tracks, min(limit, len(tracks)))
+
+
 def pick(settings):
-    """which library she reads now: Jellyfin when it is written down, awake
-    and logged in — her folders the rest of the time (a dead Jellyfin is
-    never a silence: the folders answer instead)"""
+    """which library she reads now, the chain of the chain's wishes: Jellyfin
+    when it is written down, awake and logged in; the mpd on the server
+    (music_server) when Jellyfin sleeps — the same disk, another door; her own
+    folders the rest of the time. A source named by hand («Jellyfin» or «my
+    folders») is obeyed, only the dead one steps aside"""
     want = str(settings.get('music_source') or 'auto')
     jf = Jellyfin(settings)
     if want != 'local' and jf.ok() and jf.available():
@@ -319,6 +424,9 @@ def pick(settings):
             return 'jellyfin', jf
     if want == 'jellyfin' and jf.ok() and jf.available() and jf.auth():
         return 'jellyfin', jf
+    srv = ServerMpd(settings)
+    if want == 'auto' and srv.ok() and srv.available():
+        return 'server', srv
     return 'local', Local(settings)
 
 

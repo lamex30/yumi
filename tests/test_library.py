@@ -115,4 +115,42 @@ assert len(got) == 1 and got[0]['title'] == 'Крылья'
 jf = library.Jellyfin({'music_jellyfin': 'http://127.0.0.1:9'})
 assert jf.available(timeout=0.2) is False
 
+# the server's mpd: its answer read into tracks, the paths go as its library
+# keeps them (the sound comes home through the httpd stream, not these paths)
+lines = '\n'.join((
+    'rebase/2Pac/All Eyez on Me (1996)/14 California Love.mp3§2Pac§California Love§All Eyez on Me',
+    'rebase/Аквариум/Русский альбом (1992)/01 Город золотой.flac§Аквариум§Город золотой§Русский альбом',
+    'сломанная строка без разделителей',
+    '§§§',
+))
+srv_tracks = library._server_tracks(lines)
+assert len(srv_tracks) == 2, srv_tracks
+assert srv_tracks[0]['path'] == 'rebase/2Pac/All Eyez on Me (1996)/14 California Love.mp3'
+assert srv_tracks[0]['source'] == 'server' and srv_tracks[1]['album'] == 'Русский альбом'
+
+# the server's mpd answers a search the way her folders do
+class FakeSrv(library.ServerMpd):
+    def __init__(self):            # no address: only _server_tracks is hers here
+        pass
+srv = FakeSrv()
+srv.tracks = lambda: srv_tracks
+assert srv.search('золотой')[0]['artist'] == 'Аквариум'
+assert srv.by_artist('2pac')[0]['title'] == 'California Love'
+assert srv.by_album('русский')[0]['title'] == 'Город золотой'
+assert len(srv.random(1)) == 1
+assert srv.search('несуществующее слово') == []
+
+# the address is parsed the way she reads music_server: 'password@host:port'
+srv = library.ServerMpd({'music_server': '12qwaszx@192.168.0.189:6600'})
+assert srv.password == '12qwaszx' and srv.host == '192.168.0.189' and srv.port == '6600'
+assert srv.ok() and srv.available()
+srv = library.ServerMpd({})
+assert not srv.ok() and not srv.available()
+
+# the chain: a dead jellyfin steps aside in auto, the server comes next —
+# and a server that is not named anywhere leaves the folders
+assert library.pick(dead)[0] == 'local'          # no music_server in `dead`
+chain = dict(dead, music_server='12qwaszx@192.168.0.189:6600')
+assert library.pick(chain)[0] == 'server', library.pick(chain)[0]
+assert library.pick(dict(chain, music_source='local'))[0] == 'local'
 print('ok')
