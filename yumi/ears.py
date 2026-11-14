@@ -29,19 +29,59 @@ STATE = DIR / 'port.json'
 LOG = config.STATE_DIR / 'stt.log'      # what the daemon printed, for the troubleshooting
 _sys_py_ok = None
 _spawn_lock = threading.Lock()          # ears start from several threads: one daemon at a time
-_proc = None          # the daemon Yumi started (not one already running)
+_proc = None          # the daemon this Yumi started (an adopted one is stopped by its pid)
+_shutting_down = False # close() already said goodbye: no thread may start the daemon again
 
 
 def close():
-    """stop the STT daemon Yumi started, if it is still ours; safe to call more than once"""
-    global _proc
-    p = _proc
-    _proc = None
+    """stop the STT daemon — Yumi's own child or an adopted one — and forbid new
+    starts (a listening thread may still be running); safe to call more than once"""
+    global _proc, _shutting_down
+    _shutting_down = True
+    p, _proc = _proc, None
     if p:
         try:
-            p.terminate()
+            p.terminate()               # our own child: the direct handle is the surest way
         except (OSError, AttributeError):
             pass
+    pid = _file_pid()                   # the child died at once — or it was an adopted one
+    if pid and p is None:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (OSError, TypeError):
+            pass
+    for _ in range(10):                 # 2 s: SIGTERM ends it at once; SIGKILL is for the stuck
+        if pid is None or not _is_daemon(pid):
+            return
+        time.sleep(0.2)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except (OSError, TypeError):
+        pass
+
+
+def _is_daemon(pid):
+    """true when this pid really is our daemon's process: a recycled pid must never be signalled"""
+    try:
+        with open(f'/proc/{pid}/cmdline', 'rb') as f:
+            return DAEMON.name in f.read().decode(errors='replace')
+    except OSError:
+        return False
+
+
+def _file_pid():
+    """the running daemon's pid: the port file's word first, then a scan of /proc
+    (an old port file has no pid at all, yet the daemon may still be there)"""
+    try:
+        pid = json.loads(STATE.read_text()).get('pid')
+    except (OSError, ValueError, AttributeError):
+        pid = None
+    if isinstance(pid, int) and _is_daemon(pid):
+        return pid
+    for name in os.listdir('/proc'):
+        if name.isdigit() and _is_daemon(int(name)):
+            return int(name)
+    return None
 
 
 def _ping(port, timeout=0.4):
@@ -121,11 +161,16 @@ def _python():
 
 def _ensure():
     """the running daemon's port, starting it if needed; None if it cannot be"""
+    if _shutting_down:                  # she is leaving: no new daemon rises behind her
+        return None
     DIR.mkdir(parents=True, exist_ok=True)
     info = _state()
     if info:
         return info
     with _spawn_lock:           # a race here spawns twin daemons: two vosks, two recorders
+        global _proc
+        if _shutting_down:              # close() happened while we waited for the lock
+            return None
         info = _state()
         if info:
             return info         # the other thread won the start: its daemon is good enough
@@ -139,6 +184,12 @@ def _ensure():
                                      stdout=log, stderr=log)
         except OSError:
             _proc = None
+            return None
+        if _shutting_down:                  # close() ran while the daemon was being born
+            try:
+                _proc.terminate()
+            except OSError:
+                pass
             return None
         for _ in range(50):                 # 10 s: importing vosk is quick, the first model download is not
             info = _state()

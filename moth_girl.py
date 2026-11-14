@@ -562,6 +562,7 @@ class App(Gtk.Application):
     def close(self):
         """let all her companion services go before she does: the TTS daemon,
         the STT daemon, her music and anything else that outlives her process."""
+        self.wake_on = False            # the wake loop stops asking: no ears rise after her
         self.duck_end()                 # the ducked loudness comes back before she goes
         if self.duck_restore:
             GLib.source_remove(self.duck_restore)

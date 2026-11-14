@@ -40,6 +40,7 @@ import atexit
 import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -1643,8 +1644,13 @@ def main():
     port = server.server_address[1]
     write_state(port)
     atexit.register(try_forget, port)
+    signal.signal(signal.SIGTERM, goodbye)   # a SIGTERM leaves through atexit: the port file is forgotten
     log(f'listening on 127.0.0.1:{port}')
     server.serve_forever()
+
+
+def goodbye(*_):
+    raise SystemExit(0)
 
 
 if __name__ == '__main__':

@@ -16,6 +16,7 @@ import atexit
 import io
 import json
 import os
+import signal
 import sys
 import threading
 import time
@@ -175,9 +176,9 @@ def read_state():
         return None
 
 
-def write_state(port, profile):
+def write_state(port, profile, pid=None):
     STATE.parent.mkdir(parents=True, exist_ok=True)
-    STATE.write_text(json.dumps({'port': port, 'profile': profile}))
+    STATE.write_text(json.dumps({'port': port, 'profile': profile, 'pid': pid or os.getpid()}))
 
 
 def main():
@@ -209,15 +210,20 @@ def main():
     except OSError:                   # the port is taken: an older twin may already be there
         info = read_state()
         if info and info.get('profile') == profile and ping(info['port']):
-            write_state(info['port'], profile)
+            write_state(info['port'], profile, info.get('pid'))
             log(f'already running on port {info["port"]}')
             return
         server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     port = server.server_address[1]
     write_state(port, profile)
     atexit.register(try_forget, port)
+    signal.signal(signal.SIGTERM, goodbye)   # a SIGTERM leaves through atexit: the port file is forgotten
     log(f'listening on 127.0.0.1:{port} (profile {profile})')
     server.serve_forever()
+
+
+def goodbye(*_):
+    raise SystemExit(0)
 
 
 def ping(port, timeout=0.5):
