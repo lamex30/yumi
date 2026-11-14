@@ -266,3 +266,15 @@ def mute(secs=6.0):
             f"http://127.0.0.1:{info['port']}/mute?secs={round(float(secs), 1)}", timeout=1)
     except (urllib.error.URLError, OSError):
         pass
+
+
+def unmute():
+    """the ears open again: her voice stopped early (a click, a «стоп») and the mute
+    the sound scheduled must not keep them shut any longer (best effort)"""
+    info = _state()
+    if not info:
+        return
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{info['port']}/mute?secs=0", timeout=1)
+    except (urllib.error.URLError, OSError):
+        pass

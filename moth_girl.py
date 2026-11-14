@@ -1010,6 +1010,7 @@ class App(Gtk.Application):
             if not b.listening:
                 return
             self.hush()                     # still sounding after the wait: she gives way to you
+            ears.unmute()                   # her voice is gone: the ears open for you at once
             res = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs,
                               size=self.settings.get('stt_size', 'small'),
                               mic=self.settings.get('stt_mic'),
@@ -1065,10 +1066,12 @@ class App(Gtk.Application):
         return False
 
     def self_mute(self, secs):
-        """her ears close while she speaks (system.play_file calls this with the
-        sound's length): a click-listen waits her out anyway, and the wake's recorder
-        drops every chunk until the window runs out — she cannot wake to her own
-        words, with or without the echo canceller (stt_selfmute)"""
+        """her ears close while she speaks (system.play_file keeps the mute alive only
+        while the sound plays): a click-listen waits her out anyway, and the wake's
+        recorder drops the wake logic until the window runs out — she cannot wake to
+        her own words, with or without the echo canceller; a shout of «стоп» gets
+        through (the daemon judges the phrases it hears for a stop and nothing else)
+        (stt_selfmute)"""
         if not self.settings.get('stt_selfmute', True):
             return
         threading.Thread(target=ears.mute, args=(secs,), daemon=True).start()

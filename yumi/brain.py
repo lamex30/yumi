@@ -503,6 +503,7 @@ class Brain(Extras):
                 'stt_size': ['small', 'big'],
                 'stt_mic': [None] + [m['name'] for m in self.mics],
                 'ears_range': ['near', 'mid', 'far'],
+                'stt_echo': [True, False],
                 'wake_sensitivity': ['normal', 'strict'],
                 'wake_confirm': [True, False],
                 'wake_model_size': ['small', 'big'],
@@ -528,6 +529,8 @@ class Brain(Extras):
             return t('eng_' + str(val)) if f'eng_{val}' in UI['en'] else str(val)
         if arg == 'ears_range':
             return t('r_' + str(val)) if f'r_{val}' in UI['en'] else str(val)
+        if arg == 'stt_echo':
+            return t('on') if val else t('off')
         if arg == 'wake_sensitivity':
             return t('wake_sensitivity_' + str(val)) if f'wake_sensitivity_{val}' in UI['en'] else str(val)
         if arg == 'wake_confirm':
@@ -900,6 +903,7 @@ class Brain(Extras):
                 # the whisper ear's size: with the nemotron ear named, this row does nothing
                 rows.append(('set', 'stt_size', t('stt_size')))
             rows += [('set', 'stt_mic', t('stt_mic')), ('set', 'ears_range', t('ears_range')),
+                    ('set', 'stt_echo', t('stt_echo')),
                     ('set', 'tap_ears', t('tap_ears')), ('set', 'wake_sensitivity', t('wake_sensitivity')),
                     ('set', 'wake_confirm', t('wake_confirm')), ('set', 'wake_model_size', t('wake_model_size')),
                     ('set', 'wake_judge_log', t('wake_judge_log'))]

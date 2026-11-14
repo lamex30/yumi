@@ -431,20 +431,23 @@ def set_mute_hook(fn):
     _mute_hook = fn
 
 
-def _mute_for(path):
-    """close the ears for the length of the sound (a tail after it too)"""
-    if not _mute_hook:
+MUTE_AHEAD = 1.2          # s the mute stays ahead of the sound while it plays
+MUTE_STEP = 0.6           # the mute is renewed this often
+
+
+def _mute_watch(proc):
+    """keep her ears closed only while the sound really plays: the mute window is
+    stretched a little ahead of the player, so when her voice stops early (a
+    «стоп», a click, a new line) the ears open again at once — the shout is not
+    lost to a mute that runs on by schedule (stt_selfmute)"""
+    if not proc or not _mute_hook:
         return
     try:
-        from .tts import wav_len
-        secs = wav_len(path)
+        while proc.poll() is None:
+            _mute_hook(MUTE_AHEAD)
+            time.sleep(MUTE_STEP)
     except Exception:                   # noqa: BLE001 - a mute is worth no crash
-        return
-    if secs:
-        try:
-            _mute_hook(secs + 0.8)
-        except Exception:               # noqa: BLE001
-            pass
+        pass
 
 
 def _echo_sink():
@@ -465,9 +468,9 @@ def play_file(path):
     """play a sound file in the background with whatever player is around; when the
     echo-cancel sink is around, her sounds go through it, so the echo-cancel source
     knows them and subtracts them from what her ears hear (she never hears herself);
-    the mute hook closes her ears for the sound's length all the same (stt_selfmute)"""
+    her ears stay closed only while the sound really plays, so a «стоп» mid-word
+    opens them again at once (stt_selfmute)"""
     path = str(path)
-    _mute_for(path)
     sink = _echo_sink()
     pw = ['pw-play', path]
     pa = ['paplay', path]
@@ -478,5 +481,13 @@ def play_file(path):
                 ['aplay', '-q', path],
                 ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', path]):
         if shutil.which(cmd[0]):
-            return spawn(*cmd)
+            if _mute_hook:
+                try:
+                    _mute_hook(MUTE_AHEAD)     # the ears close before the sound starts
+                except Exception:              # noqa: BLE001 - a mute is worth no crash
+                    pass
+            proc = spawn(*cmd)
+            if proc:
+                threading.Thread(target=_mute_watch, args=(proc,), daemon=True).start()
+            return proc
     return False

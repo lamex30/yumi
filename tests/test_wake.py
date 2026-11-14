@@ -31,6 +31,16 @@ assert stt.wake_at('ю и ми откры', spellings) == ('откры', 'юим
 assert stt.wake_at('а юми', spellings) == ('', 'аюми')
 assert stt.wake_at('виноват пусть и юный погода', spellings) == ('погода', 'июный')
 
+# the wide pre-filter (the judge's budget) must not eat the word after the name:
+# «юми кто играет» must not lose «кто» to a glued «юмикто»
+assert stt.wake_at('юми кто играет', spellings, 3) == ('кто играет', 'юми')
+assert stt.wake_at('юный кто играет', spellings, 3) == ('кто играет', 'юный')
+assert stt.wake_at('юми твои параметры', spellings, 3) == ('твои параметры', 'юми')
+assert stt.wake_at('юный твои параметры', spellings, 3) == ('твои параметры', 'юный')
+assert stt.wake_at('юми, то играй', spellings, 3) == ('то играй', 'юми')
+# the near-miss the wide budget exists for still reaches the judge
+assert stt.wake_at('юноша включи музыку', spellings, 3) == ('включи музыку', 'юноша')
+
 # not her name: whole glued-up words, words one look-alike away, or simply other ones
 for said in ('юмизнает', 'конюми', 'таймер', 'привет мир', 'включи свет',
              'юмор сегодня', 'юбилей отметила', 'объем молока'):
@@ -80,6 +90,28 @@ assert not stt.stop_at('включи музыку')
 assert not stt.stop_at('')
 assert not stt.stop_at('столько')     # two slips and more: not a stop
 assert not stt.stop_at('стопор')
+
+# stop_shout: through the closed ears (her voice is playing) only a stop and nothing
+# else may interrupt her — her own «останови» inside a longer answer never counts
+assert stt.stop_shout('стоп')
+assert stt.stop_shout('стопи')
+assert stt.stop_shout('остановись')
+assert stt.stop_shout('стол')                     # the ears' slip over the music
+assert stt.stop_shout('юми стоп', spellings)
+assert stt.stop_shout('юный стоп', spellings)     # the hear-say the ears really write
+assert not stt.stop_shout('стоп так нельзя')      # her own words never stop her
+assert not stt.stop_shout('остановилась')
+assert not stt.stop_shout('скажи стоп')
+assert not stt.stop_shout('')
+assert not stt.stop_shout('привет')
+
+# the mute: her ears close while she speaks and open again when she is stopped
+stt.mute_for(5)
+assert stt.muted()
+stt.mute_for(2)                       # a fresh call only stretches the window
+assert stt.muted()
+stt.mute_for(0)                       # her voice stopped early: the ears open
+assert not stt.muted()
 
 print('test_wake: ok')
 sys.exit(0)

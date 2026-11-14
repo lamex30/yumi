@@ -64,8 +64,10 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 18                            # bumped when the protocol changes: stale twins are restarted
-                                        # (18: /mute closes the ears while she speaks)
+VERSION = 19                            # bumped when the protocol changes: stale twins are restarted
+                                        # (19: the mute may be lifted (secs=0), a «стоп» shout
+                                        #     gets through it, and the wide wake match keeps
+                                        #     the word that follows the name)
 WAKE_AFTER = 1.5                        # s of quiet after the name before she asks what you wanted
 WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge reads: ~8 s
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
@@ -104,10 +106,11 @@ def muted():
 
 
 def mute_for(secs):
-    """close the ears for this many seconds; a fresh call stretches the window"""
+    """close the ears for this many seconds; a fresh call stretches the window,
+    secs=0 opens them again (her voice stopped early: a «стоп», a click, a new line)"""
     global _mute_until
     with _mute_lock:
-        _mute_until = max(_mute_until, time.monotonic() + secs)
+        _mute_until = max(_mute_until, time.monotonic() + secs) if secs > 0 else 0.0
 # which command reads the mic, raw s16 mono RATE. pw-record before parecord: on some
 # desktops parecord connects and then stays silent, so arecord gets the last word.
 # {mic} in the third column is where a chosen microphone goes (the /mics endpoint lists them).
@@ -613,7 +616,14 @@ def wake_at(text, spellings, budget=1):
     """what came after the wake word and the spelling the ears wrote it with, or (None, None);
     whole words only, right at the start of the phrase («юми» or behind a filler
     «а можно ми»), glued hear-say like «ю и ми» counts too: «юмизнает» must not wake her.
-    budget is how many letters may differ from any known spelling (0 = exact only)."""
+    budget is how many letters may differ from any known spelling (0 = exact only).
+    A wide budget (the judge's pre-filter) never eats a word the strict one keeps:
+    «юми кто играет» must not lose «кто» to a glued «юмикто» — the strict match is
+    tried first, and the wide one only catches what the strict one missed."""
+    if budget > 1:
+        hit, said = wake_at(text, spellings, 1)
+        if hit is not None:
+            return hit, said
     toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
             for t in text.split()]
     toks = [t for t in toks if t]
@@ -684,6 +694,23 @@ def stop_at(text):
             for t in (text or '').split()]
     return any(t in words or (len(t) >= 4 and any(near(t, w) <= 1
                for w in words if len(w) <= 6)) for t in toks if t)
+
+
+def stop_shout(text, names=()):
+    """the phrase is a stop and nothing but a stop (her name may lead the shout):
+    while her own voice plays, the words the ears pick up may be her own, so a
+    stop through the closed ears counts only when the whole phrase is one —
+    her «останови» inside a longer answer must never stop her mid-word"""
+    toks = [t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
+            for t in (text or '').split()]
+    toks = [t for t in toks if t]
+    if toks and names and (toks[0] in names
+                           or any(near(toks[0], n, 1) <= 1 for n in names)):
+        toks = toks[1:]                 # «юми» (or its hear-say) may lead the shout
+    words = _stop_words()
+    return bool(toks) and all(
+        t in words or (len(t) >= 4 and any(near(t, w) <= 1
+                     for w in words if len(w) <= 6)) for t in toks)
 
 
 _judge = threading.Lock()   # one whisper reading at a time, wake to wake
@@ -1035,6 +1062,7 @@ class Ears:
                 st = {'hp': 0.0, 'floor': None, 'gate_min': gmin, 'gate_k': gk}     # the cleaner's memory
                 t0 = time.monotonic()
                 heard = False               # at least one byte of sound has arrived
+                was_muted = False           # the ears were closed when the last chunk came
                 woken = False               # the wake word has passed by already
                 since = t0                  # when the heard words last changed
                 last = ''                   # the previous half-heard words, to notice staleness
@@ -1068,7 +1096,27 @@ class Ears:
                         break
                     heard = True
                     if muted():
-                        continue        # she is speaking: the ears are closed
+                        # she is speaking: the ears stay shut to her own voice (she must
+                        # not wake to her own words) — but «стоп» must cut her off
+                        # mid-word, so the cheap chain and vosk keep running, and a
+                        # finished phrase is judged for a stop and nothing else
+                        chunk = hp_pass(chunk, st)
+                        voiced = det.feed(chunk)
+                        chunk = gate_noise(chunk, st, voiced)
+                        if rec.AcceptWaveform(chunk):
+                            words = ' '.join(json.loads(
+                                rec.FinalResult() or '{}').get('text', '').split())
+                            if stop_shout(words, spellings):
+                                return {'woke': False, 'stop': True, 'text': words}
+                        was_muted = True
+                        continue
+                    if was_muted:               # the mute ran out mid-listen: her voice
+                        was_muted = False       # stays out of vosk's stream and the tape
+                        rec = KaldiRecognizer(model, RATE)
+                        rec.SetWords(False)
+                        det = Detector()
+                        tape = bytearray()
+                        last = logged = ''
                     chunk = hp_pass(chunk, st)            # hum and rumble go
                     voiced = det.feed(chunk)              # the voice detector follows the frames
                     chunk = gate_noise(chunk, st, voiced) # the hiss dies, speech is never touched
