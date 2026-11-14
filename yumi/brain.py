@@ -499,6 +499,7 @@ class Brain(Extras):
         return {'ui_lang': ['en', 'ru'], 'speech_lang': ['en', 'ru'],
                 'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names,
                 'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts'],
+                'stt_engine': ['whisper', 'nemotron'],
                 'stt_size': ['small', 'big'],
                 'stt_mic': [None] + [m['name'] for m in self.mics],
                 'ears_range': ['near', 'mid', 'far'],
@@ -523,6 +524,8 @@ class Brain(Extras):
             return t('v_' + str(val)) if f'v_{val}' in UI['en'] else str(val)
         if arg == 'stt_size':
             return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
+        if arg == 'stt_engine':
+            return t('eng_' + str(val)) if f'eng_{val}' in UI['en'] else str(val)
         if arg == 'ears_range':
             return t('r_' + str(val)) if f'r_{val}' in UI['en'] else str(val)
         if arg == 'wake_sensitivity':
@@ -892,8 +895,11 @@ class Brain(Extras):
             if not self.mics and 'stt_mic' not in self.unavailable:
                 self.requests.append(('mics',))
             rows = [('set', 'wake_ears', t('wake_ears')), ('set', 'name_duck', t('name_duck')),
-                    ('set', 'stt_size', t('stt_size')),
-                    ('set', 'stt_mic', t('stt_mic')), ('set', 'ears_range', t('ears_range')),
+                    ('set', 'stt_engine', t('stt_engine'))]
+            if (self.settings.get('stt_engine') or 'whisper') == 'whisper':
+                # the whisper ear's size: with the nemotron ear named, this row does nothing
+                rows.append(('set', 'stt_size', t('stt_size')))
+            rows += [('set', 'stt_mic', t('stt_mic')), ('set', 'ears_range', t('ears_range')),
                     ('set', 'tap_ears', t('tap_ears')), ('set', 'wake_sensitivity', t('wake_sensitivity')),
                     ('set', 'wake_confirm', t('wake_confirm')), ('set', 'wake_model_size', t('wake_model_size')),
                     ('set', 'wake_judge_log', t('wake_judge_log'))]
@@ -1189,6 +1195,21 @@ class Brain(Extras):
             return
         lang = self.settings.get('speech_lang', 'en')
         self.say_text(text, voice=False)   # back to you, quietly: you just said it
+        # Music first: «включи музыку» is her own library, «пауза» quiets what
+        # plays — the built-in skill owns the sayings before any custom button,
+        # whose «playerctl play-pause» would only toggle a stranger's player
+        # (and that is a lie in a quiet room: nothing to pause, nothing to resume)
+        if self.settings.get('music_skill', True):
+            music_cmd = music_control_text(text, lang)
+            if not music_cmd and alt and alt != text:
+                music_cmd = music_control_text(alt, lang)   # the other ear's reading
+            if not music_cmd and wake:      # only the number made it through the ears:
+                n = bare_volume(text) or (bare_volume(alt) if alt else None)
+                music_cmd = f'volume {n}' if n else None
+            if music_cmd:
+                _mind_log(f'music {music_cmd}')
+                self.music_control(music_cmd)
+                return
         if self.voice_intent(text, alt):   # the user's own commands, no mind needed
             return
         if chat.time_question(text):       # the clock she reads herself, no mind needed
@@ -1209,18 +1230,6 @@ class Brain(Extras):
         if chat.params_question(text):     # «юми, твои параметры»: she names herself
             self.say_text(self.params_report(lang))
             return
-        # Music control commands (only if music skill is enabled)
-        if self.settings.get('music_skill', True):
-            music_cmd = music_control_text(text, lang)
-            if not music_cmd and alt and alt != text:
-                music_cmd = music_control_text(alt, lang)   # the other ear's reading
-            if not music_cmd and wake:      # only the number made it through the ears:
-                n = bare_volume(text) or (bare_volume(alt) if alt else None)
-                music_cmd = f'volume {n}' if n else None
-            if music_cmd:
-                _mind_log(f'music {music_cmd}')
-                self.music_control(music_cmd)
-                return
         _mind_log('chat')
         # Fall through to normal text processing if music skill is disabled
         self.chat_history.append({'role': 'user', 'content': text})
@@ -1239,6 +1248,8 @@ class Brain(Extras):
         intents = s.get('intents', True) and s.get('nlu', True)
         if ru:
             ear = 'точная' if s.get('stt_size') == 'big' else 'лёгкая'
+            reader = ('немотрон 0.6b' if s.get('stt_engine') == 'nemotron'
+                      else 'whisper ' + ear)
             wsize = 'точная' if s.get('wake_model_size') == 'big' else 'лёгкая'
             rng = {'near': 'на расстоянии руки', 'mid': 'по всей комнате',
                    'far': 'даже через комнату'}.get(s.get('ears_range', 'mid'), 'по всей комнате')
@@ -1249,11 +1260,12 @@ class Brain(Extras):
             mind = ('мозги: полза-точка-ай, модель ' + model if s.get('chat_provider') == 'polza.ai'
                     else 'мозги: локальный оллама, модель ' + model)
             voice = 'говорю своим голосом' if s.get('voice_kind') != 'blips' else 'говорю звуками'
-            return (f'Мои ушки: whisper {ear} читает фразы, vosk {wsize} слушает имя, '
+            return (f'Мои ушки: {reader} читает фразы, vosk {wsize} слушает имя, '
                     f'слышу {rng}, {mic}. {wake}, {judge}. '
                     f'{mind}. Команды по переформулировкам '
                     f'{"понимаю" if intents else "выключены"}. {voice}.')
         ear = 'sharp' if s.get('stt_size') == 'big' else 'lite'
+        reader = ('nemotron 0.6b' if s.get('stt_engine') == 'nemotron' else 'whisper ' + ear)
         wsize = 'sharp' if s.get('wake_model_size') == 'big' else 'lite'
         rng = {'near': 'an arm away', 'mid': 'across the room',
                'far': 'even from the next room'}.get(s.get('ears_range', 'mid'), 'across the room')
@@ -1264,7 +1276,7 @@ class Brain(Extras):
         mind = ('mind: polza.ai, model ' + model if s.get('chat_provider') == 'polza.ai'
                 else 'mind: local ollama, model ' + model)
         voice = 'I speak with my voice' if s.get('voice_kind') != 'blips' else 'I speak in sounds'
-        return (f'My ears: whisper {ear} reads the phrases, vosk {wsize} listens for the name, '
+        return (f'My ears: {reader} reads the phrases, vosk {wsize} listens for the name, '
                 f'I hear {rng}, {mic}. {wake}, {judge}. '
                 f'{mind}. Rephrased voice commands '
                 f'{"are on" if intents else "are off"}. {voice}.')

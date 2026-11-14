@@ -393,7 +393,26 @@ the room (his fans and hiss die), and a voice detector (`webrtcvad`, installed b
 to whisper whole. On PipeWire or
 PulseAudio there is also webrtc echo cancellation (best effort, `pactl` loads
 `module-echo-cancel` over the chosen mic): her own voice played into the echo-cancel sink
-is subtracted from what her ears hear, so she never hears herself.
+is subtracted from what her ears hear, so she never hears herself. There is a second, system-free
+way too (`stt_selfmute: true`, on by default): while her voice sounds, her ears simply close —
+no canceller, no virtual devices, no changes to the sound system at all, she cannot hear her own
+line with the plain mic either. If you would rather keep the sound system untouched, set
+`stt_echo: false` in `~/.config/yumi/settings.json` and the canceller never loads.
+
+There is also a second reader: **Nemotron 3.5 ASR Streaming 0.6b** from NVIDIA (the same model
+family the Handy dictation app listens with) — a streaming transducer about 650 MB on disk, ru
+and en among its 40 locales, noticeably quicker than whisper on the CPU:
+
+```sh
+./tools/nemotron_setup.sh    # sherpa-onnx + the model, both into the ears venv
+```
+
+and then `"stt_engine": "nemotron"` in `~/.config/yumi/settings.json` (also **Settings →
+Her ears → Ear for phrases**). Whisper then sleeps: nothing loads it, and it is only read
+from the disk when the Nemotron ear is missing or fails — a fallback, not a worker. It can
+go entirely: `rm -rf ~/.local/share/yumi/stt/whisper` frees ~3.4 GB, and `stt_setup.sh`
+stops installing faster-whisper once the settings name the nemotron ear (vosk then stands
+alone if the ear ever fails). The wake-word judge uses it too.
 
 **The time and the weather.** «Который час» and «what time is it» she answers by herself,
 no mind involved — she just reads the clock. «Какая погода» and «what's the weather» make her

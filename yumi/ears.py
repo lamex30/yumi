@@ -161,13 +161,15 @@ def mics():
     return data.get('mics') if isinstance(data.get('mics'), list) else []
 
 
-def listen(lang='ru', secs=7, size='small', mic=None, ear=None):
+def listen(lang='ru', secs=7, size='small', mic=None, ear=None, engine=None):
     """hear one phrase: {'text': the words whisper read, 'vosk': the words vosk read}
     ('' for silence, None when the ears are not set up); the mind tries both readings"""
     info = _ensure()
     if not info:
         return None
     q = {'lang': lang, 'secs': round(secs, 1), 'size': size}
+    if engine and engine != 'whisper':
+        q['engine'] = engine
     if mic:
         q['mic'] = mic
     if ear:
@@ -185,7 +187,7 @@ def listen(lang='ru', secs=7, size='small', mic=None, ear=None):
 
 
 def wake(lang='ru', word='юми', secs=20, size='small', mic=None, ear=None,
-         sensitivity='normal', confirm=True, model_size=None, judge_log=False):
+         sensitivity='normal', confirm=True, model_size=None, judge_log=False, engine=None):
     """wait for the wake word (say «Юми» and she is all ears): a dict
     {'woke': bool, 'text': what came after the word, '' when it was said alone},
     or None when the ears cannot work at all. A manual listen takes the mic over."""
@@ -195,6 +197,8 @@ def wake(lang='ru', word='юми', secs=20, size='small', mic=None, ear=None,
     q = {'lang': lang, 'word': word, 'secs': round(secs, 1), 'size': size,
          'sensitivity': sensitivity, 'confirm': '1' if confirm else '0',
          'judge_log': '1' if judge_log else '0'}
+    if engine and engine != 'whisper':
+        q['engine'] = engine
     if model_size:
         q['model_size'] = model_size
     if mic:
@@ -249,3 +253,16 @@ def stop():
             urllib.request.urlopen(f"http://127.0.0.1:{info['port']}/stop", timeout=1)
         except (urllib.error.URLError, OSError):
             pass
+
+
+def mute(secs=6.0):
+    """the ears close for this many seconds: her own voice is playing, so she must
+    not hear herself (no canceller needed); best effort — the ears being away is fine"""
+    info = _state()
+    if not info:
+        return
+    try:
+        urllib.request.urlopen(
+            f"http://127.0.0.1:{info['port']}/mute?secs={round(float(secs), 1)}", timeout=1)
+    except (urllib.error.URLError, OSError):
+        pass

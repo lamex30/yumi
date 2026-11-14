@@ -503,6 +503,7 @@ class App(Gtk.Application):
                                                   Gtk.STYLE_PROVIDER_PRIORITY_USER + 1)
         self.settings = config.load_settings()
         self.state = config.load_state()
+        system.set_mute_hook(self.self_mute)   # her ears close while her voice plays
         scale = int(os.environ.get('YUMI_SCALE') or self.settings.get('scale') or 1)
         self.world = system.World({
             'charger': lambda on: self.ev(lambda b: b.world('charger_on' if on else 'charger_off')),
@@ -1012,7 +1013,8 @@ class App(Gtk.Application):
             res = ears.listen(lang=self.settings.get('speech_lang', 'en'), secs=secs,
                               size=self.settings.get('stt_size', 'small'),
                               mic=self.settings.get('stt_mic'),
-                              ear=self.settings.get('ears_range', 'mid'))
+                              ear=self.settings.get('ears_range', 'mid'),
+                              engine=self.settings.get('stt_engine'))
             text = res.get('text') if isinstance(res, dict) else res
             vtxt = res.get('vosk', '') if isinstance(res, dict) else ''
             GLib.idle_add(lambda t=text, v=vtxt: self.ev(lambda b: b.heard(t, v)) and False)
@@ -1062,6 +1064,15 @@ class App(Gtk.Application):
                 pass
         return False
 
+    def self_mute(self, secs):
+        """her ears close while she speaks (system.play_file calls this with the
+        sound's length): a click-listen waits her out anyway, and the wake's recorder
+        drops every chunk until the window runs out — she cannot wake to her own
+        words, with or without the echo canceller (stt_selfmute)"""
+        if not self.settings.get('stt_selfmute', True):
+            return
+        threading.Thread(target=ears.mute, args=(secs,), daemon=True).start()
+
     def wake_set(self, on):
         """the wake word: while it is on, a loop keeps the daemon listening for her name
         and, the moment it passes by, the phrase that follows goes straight to her mind"""
@@ -1087,7 +1098,8 @@ class App(Gtk.Application):
                                 sensitivity=self.settings.get('wake_sensitivity', 'normal'),
                                 confirm=self.settings.get('wake_confirm', True),
                                 model_size=self.settings.get('wake_model_size', 'small'),
-                                judge_log=self.settings.get('wake_judge_log', True))
+                                judge_log=self.settings.get('wake_judge_log', True),
+                                engine=self.settings.get('stt_engine'))
                 if not self.wake_on or not res:
                     continue            # called off or the ears are away
                 if res.get('stop'):

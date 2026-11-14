@@ -26,8 +26,13 @@ else
 fi
 
 # faster-whisper is the ear that reads the phrases (vosk only hears where they end);
-# a failed install is no tragedy: vosk's words are used when whisper is not there
-if ! "$DIR/bin/python" -c 'import faster_whisper' >/dev/null 2>&1; then
+# a failed install is no tragedy: vosk's words are used when whisper is not there.
+# When the settings name the nemotron ear, whisper is not wanted at all: the phrases
+# are read by it, and vosk stands on its own if the ear ever fails.
+if grep -q '"stt_engine"[[:space:]]*:[[:space:]]*"nemotron"' \
+       "${XDG_CONFIG_HOME:-$HOME/.config}/yumi/settings.json" 2>/dev/null; then
+    echo 'stt_engine is nemotron: faster-whisper is skipped, the phrases are read by it.'
+elif ! "$DIR/bin/python" -c 'import faster_whisper' >/dev/null 2>&1; then
     if command -v uv >/dev/null 2>&1; then
         uv pip install --python "$DIR/bin/python" faster-whisper || true
     else

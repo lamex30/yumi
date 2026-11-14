@@ -56,8 +56,12 @@ DEFAULT_SETTINGS = {
                                # hear the phrase; the old loudness returns after it,
                                # a volume command she keeps
     'stt_size': 'small',      # her hearing: small (45 MB) / big (a sharper ~1.8 GB model)
+    'stt_engine': 'whisper',  # who reads the phrases: whisper / nemotron (a streaming
+                              # 0.6b ear, ~650 MB, tools/nemotron_setup.sh; faster)
     'stt_mic': None,          # which microphone the ears hear with: None = auto (the desktop's pick)
     'stt_echo': True,         # the webrtc echo canceller around the mic; false = plain mic only
+    'stt_selfmute': True,     # the ears close while she speaks, so she never hears
+                              # herself; works with the plain mic too (no canceller)
     'phrase_tail_ms': 1200,   # ms of quiet that ends a phrase: raise it when she cuts you
                               # off during your pauses, lower it when answers come too slow
     'wake_after': 1.5,        # s of quiet after the name before the half-heard words count
@@ -237,7 +241,9 @@ UI = {
         'joke': 'Joke',
         'chat_refresh': 'Find the model',
         'chat_think': 'Let her think first',
-        'wake_ears': 'Wake when you say «Yumi»', 'stt_size': 'Ear for phrases (whisper)', 'e_small': 'Lite (~460 MB)',
+        'wake_ears': 'Wake when you say «Yumi»', 'stt_engine': 'Ear for phrases',
+        'eng_whisper': 'Whisper', 'eng_nemotron': 'Nemotron 0.6b (fast)',
+        'stt_size': 'Whisper ear size', 'e_small': 'Lite (~460 MB)',
         'name_duck': 'Duck sounds when she hears «Yumi»', 'e_big': 'Sharp (~1.5 GB)', 'cat_ears': 'Her ears', 'stt_mic': 'Microphone',
         'wake_sensitivity': 'How strictly to listen for «Yumi»', 'wake_sensitivity_normal': 'Normal',
         'wake_sensitivity_strict': 'Strict', 'wake_confirm': 'Double-check the name with whisper',
@@ -288,7 +294,9 @@ UI = {
         'joke': 'Анекдот',
         'chat_refresh': 'Найти модель',
         'chat_think': 'Дать ей подумать',
-        'wake_ears': 'Будить, когда скажешь «Юми»', 'stt_size': 'Ухо для фраз (whisper)', 'e_small': 'Лёгкая (~460 МБ)',
+        'wake_ears': 'Будить, когда скажешь «Юми»', 'stt_engine': 'Ухо для фраз',
+        'eng_whisper': 'Whisper', 'eng_nemotron': 'Nemotron 0.6b (быстрое)',
+        'stt_size': 'Размер whisper-уха', 'e_small': 'Лёгкая (~460 МБ)',
     'music_skill': 'Умение управлять музыкой',
         'name_duck': 'Приглушать звуки при имени',
         'e_big': 'Точная (~1.5 ГБ)', 'cat_ears': 'Её ушки', 'stt_mic': 'Микрофон',

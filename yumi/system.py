@@ -420,6 +420,32 @@ def ppm_pixel(data):
 
 _echo_route = {'when': 0.0, 'name': None}
 
+_mute_hook = None                       # the app's way to close her ears while she speaks
+
+
+def set_mute_hook(fn):
+    """the app registers a hook called with the seconds a sound of hers will last,
+    just before it plays: her ears close while she speaks, so she never hears
+    herself — without an echo canceller or any other change to the system"""
+    global _mute_hook
+    _mute_hook = fn
+
+
+def _mute_for(path):
+    """close the ears for the length of the sound (a tail after it too)"""
+    if not _mute_hook:
+        return
+    try:
+        from .tts import wav_len
+        secs = wav_len(path)
+    except Exception:                   # noqa: BLE001 - a mute is worth no crash
+        return
+    if secs:
+        try:
+            _mute_hook(secs + 0.8)
+        except Exception:               # noqa: BLE001
+            pass
+
 
 def _echo_sink():
     """the echo-cancel sink (yumi_ec_sink) when it exists, else None; pactl is not free,
@@ -438,8 +464,10 @@ def _echo_sink():
 def play_file(path):
     """play a sound file in the background with whatever player is around; when the
     echo-cancel sink is around, her sounds go through it, so the echo-cancel source
-    knows them and subtracts them from what her ears hear (she never hears herself)"""
+    knows them and subtracts them from what her ears hear (she never hears herself);
+    the mute hook closes her ears for the sound's length all the same (stt_selfmute)"""
     path = str(path)
+    _mute_for(path)
     sink = _echo_sink()
     pw = ['pw-play', path]
     pa = ['paplay', path]

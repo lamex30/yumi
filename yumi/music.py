@@ -258,7 +258,9 @@ def now_playing():
 
     MPRIS players (vlc, spotify, a browser) answer first — they play even when
     her own mpd is up; her library answers through mpc. A track on pause still
-    has a name: «кто играет» may be asked about it too.
+    has a name: «кто играет» may be asked about it too. A file with no tags
+    still has a name: its own — «трек 7.mp3» reads poorly, so the file stem
+    is the title («Синтвейв для ночных разработчиков», a real answer).
     """
     def split(out):
         artist, _, title = (out or '').strip().partition('\t')
@@ -273,11 +275,15 @@ def now_playing():
             if names:
                 return names
     if _mpd_ready():
-        r = _mpc('current', '-f', '%artist%\t%title%')
+        r = _mpc('current', '-f', '%artist%\t%title%\t%file%')
         if r is not None and r.returncode == 0:
-            names = split(r.stdout)
-            if names:
-                return names
+            artist, _, rest = (r.stdout or '').strip().partition('\t')
+            title, _, file_ = rest.partition('\t')
+            if artist or title:
+                return artist, title
+            if file_:                  # no tags at all: the file name is the song
+                title = Path(file_).stem
+                return '', title
     return None
 
 
