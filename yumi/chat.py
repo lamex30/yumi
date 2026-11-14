@@ -216,6 +216,18 @@ def joke_question(text):
     return bool(JOKE_Q_RE.search(t))
 
 
+PARAMS_Q_RE = re.compile(
+    r'тво[иё]\s+параметры|какие\s+у\s+тебя\s+параметры'
+    r'|тво[иё]\s+настройки|какие\s+у\s+тебя\s+настройки|что\s+у\s+тебя\s+стоит'
+    r'|\byour\s+parameters\b|\byour\s+specs?\b|\byour\s+settings\b|\bwhat\s+are\s+you\s+running\b')
+
+
+def params_question(text):
+    """True when the phrase asks what she is made of: the ears, the voice, the mind"""
+    t = ' '.join(str(text or '').lower().split()).strip(' ?!.,')
+    return bool(PARAMS_Q_RE.search(t))
+
+
 def the_time(lang='en', now=None):
     """the clock as she says it: 24 hours for Russian, «2:14 pm» for English"""
     t = time.localtime() if now is None else time.localtime(now)

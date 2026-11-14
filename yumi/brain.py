@@ -530,7 +530,7 @@ class Brain(Extras):
         if arg == 'wake_confirm':
             return t('on') if val else t('off')
         if arg == 'wake_model_size':
-            return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
+            return t('w_' + str(val)) if f'w_{val}' in UI['en'] else str(val)
         if arg == 'wake_judge_log':
             return t('on') if val else t('off')
         if arg == 'stt_mic':
@@ -1206,6 +1206,9 @@ class Brain(Extras):
             self.thinking = True
             self.requests.append(('joke_ask', {'lang': lang}))
             return
+        if chat.params_question(text):     # «юми, твои параметры»: she names herself
+            self.say_text(self.params_report(lang))
+            return
         # Music control commands (only if music skill is enabled)
         if self.settings.get('music_skill', True):
             music_cmd = music_control_text(text, lang)
@@ -1224,6 +1227,47 @@ class Brain(Extras):
         del self.chat_history[:-10]     # she remembers her last five turns
         self.thinking = True
         self.requests.append(('chat_ask', list(self.chat_history)))
+
+    def params_report(self, lang='en'):
+        """what she is made of right now, in one breath: her ears, her name ear,
+        her voice and her mind — the answer to «юми, твои параметры»; speech words,
+        not menu words (a «45 МБ» label reads badly, so sizes live in words here)"""
+        s = self.settings
+        ru = str(lang) == 'ru'
+        model = str(s.get('chat_model') or (chat.POLZA_MODEL if s.get('chat_provider') == 'polza.ai'
+                                            else chat.DEFAULT_MODEL))
+        intents = s.get('intents', True) and s.get('nlu', True)
+        if ru:
+            ear = 'точная' if s.get('stt_size') == 'big' else 'лёгкая'
+            wsize = 'точная' if s.get('wake_model_size') == 'big' else 'лёгкая'
+            rng = {'near': 'на расстоянии руки', 'mid': 'по всей комнате',
+                   'far': 'даже через комнату'}.get(s.get('ears_range', 'mid'), 'по всей комнате')
+            mic = ('микрофон ' + (s.get('stt_mic') or 'авто')) if s.get('stt_mic') else 'микрофон авто'
+            wake = ('Имя «Юми» слушаю' if s.get('wake_ears', True) else 'имя «Юми» не слушаю')
+            judge = ('пробуждения перепроверяю whisper-ом, модель ' + wsize
+                     if s.get('wake_confirm', True) else 'пробуждения не перепроверяю')
+            mind = ('мозги: полза-точка-ай, модель ' + model if s.get('chat_provider') == 'polza.ai'
+                    else 'мозги: локальный оллама, модель ' + model)
+            voice = 'говорю своим голосом' if s.get('voice_kind') != 'blips' else 'говорю звуками'
+            return (f'Мои ушки: whisper {ear} читает фразы, vosk {wsize} слушает имя, '
+                    f'слышу {rng}, {mic}. {wake}, {judge}. '
+                    f'{mind}. Команды по переформулировкам '
+                    f'{"понимаю" if intents else "выключены"}. {voice}.')
+        ear = 'sharp' if s.get('stt_size') == 'big' else 'lite'
+        wsize = 'sharp' if s.get('wake_model_size') == 'big' else 'lite'
+        rng = {'near': 'an arm away', 'mid': 'across the room',
+               'far': 'even from the next room'}.get(s.get('ears_range', 'mid'), 'across the room')
+        mic = 'mic auto' if not s.get('stt_mic') else 'mic ' + (s.get('stt_mic') or '')
+        wake = ('I listen for the name Yumi' if s.get('wake_ears', True) else 'I do not listen for my name')
+        judge = ('wakes are double-checked with whisper, the ' + wsize + ' model'
+                 if s.get('wake_confirm', True) else 'wakes are not double-checked')
+        mind = ('mind: polza.ai, model ' + model if s.get('chat_provider') == 'polza.ai'
+                else 'mind: local ollama, model ' + model)
+        voice = 'I speak with my voice' if s.get('voice_kind') != 'blips' else 'I speak in sounds'
+        return (f'My ears: whisper {ear} reads the phrases, vosk {wsize} listens for the name, '
+                f'I hear {rng}, {mic}. {wake}, {judge}. '
+                f'{mind}. Rephrased voice commands '
+                f'{"are on" if intents else "are off"}. {voice}.')
 
     def voice_intent(self, text, alt=''):
         """the user's own voice commands: the «phrases» and «keywords» written
