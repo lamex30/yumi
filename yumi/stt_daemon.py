@@ -1341,6 +1341,7 @@ class Ears:
             if self.busy:
                 return None                 # the app never does this, but just in case
             self.busy, self.abort = True, False
+            proc = None                     # the recorder may never be born: the finally checks
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except OSError as e:
@@ -1419,23 +1420,24 @@ class Ears:
                     text = vtext
                 return {'text': text, 'vosk': vtext}   # both readings: the mind will choose
             finally:
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-                except OSError:
-                    pass
-                finally:
+                if proc is not None:            # the recorder was born: it dies with the call
                     try:
-                        proc.stdout.close()
+                        proc.terminate()
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
                     except OSError:
                         pass
-                    try:
-                        proc.stderr.close()
-                    except OSError:
-                        pass
+                    finally:
+                        try:
+                            proc.stdout.close()
+                        except OSError:
+                            pass
+                        try:
+                            proc.stderr.close()
+                        except OSError:
+                            pass
                 self.busy = False
 
     def wake(self, lang, word, secs, size='small', mic=None, ear=None,
@@ -1456,15 +1458,9 @@ class Ears:
         if not name:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
         word = ' '.join(str(word).split()).lower() or 'юми'
-        # the trained ear «Юми» (openWakeWord, ~2 MB): it hears the name alone,
-        # no Vosk, no Nemotron, no Whisper in the way
-        ear_oww = None
-        if oww_ear in ('auto', 'oww'):
-            ear_oww = oww_ear_start()
-            if oww_ear == 'oww' and ear_oww is None:
-                log('the trained ear is not here: wake will not hear the name')
-            elif ear_oww is not None:
-                log('the trained ear «Юми» is on duty: OpenWakeWord alone decides')
+        diag = Diag(diag or judge_log)      # the book of doubts: diag=1 or the diary switch
+        if self.busy:                       # a wake or a listen already owns the mic:
+            return {'woke': False, 'text': None}   # answer at once, before anything runs
 
         # the ring of the last ~8 s of clean sound: so the start of the phrase
         # can be given to STT after the name is heard
@@ -1481,18 +1477,45 @@ class Ears:
                        judge_called=False, final_wake=True, latency_ms=latency)
             return {'woke': True, 'text': text}
 
+        def judge_note(what):
+            """one line into the wake's diary (judge.log): what the ear heard and why
+            it woke or stayed quiet — without it a failed wake is a guess. The judge
+            itself is gone (OpenWakeWord alone decides), the diary stays."""
+            if not judge_log:
+                return
+            TAP_DIR.mkdir(parents=True, exist_ok=True)
+            try:
+                with open(TAP_DIR / 'judge.log', 'a', encoding='utf-8') as f:
+                    f.write(f'{time.strftime("%H:%M:%S")} {what}\n')
+            except OSError:
+                pass
+
         with self.lock:                     # one microphone at a time
             if self.busy:
                 return {'woke': False, 'text': None}
             self.busy, self.abort, self.kind = True, False, 'wake'
+            proc = None                     # the recorder may never be born: the finally checks
+            diag_wav = bool(TUNE['stt_diag_wav']) or bool(diag)
+            ear_tape = bytearray() if diag_wav else None
             try:
+                # the trained ear «Юми» (openWakeWord, ~2 MB): it hears the name alone,
+                # no Vosk, no Nemotron, no Whisper in the way. It is born here, inside
+                # the lock, after the busy check: born on a busy path it would never
+                # reach the finally below and would haunt the RAM as an orphan (a new
+                # ~190 MB ear every call that found the wake busy — the oom killer's
+                # dinner). It dies with this wake, a new one is born on the next.
+                ear_oww = None
+                if oww_ear in ('auto', 'oww'):
+                    ear_oww = oww_ear_start()
+                    if oww_ear == 'oww' and ear_oww is None:
+                        log('the trained ear is not here: wake will not hear the name')
+                    elif ear_oww is not None:
+                        log('the trained ear «Юми» is on duty: OpenWakeWord alone decides')
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except OSError as e:
                 self.busy = False
                 raise RuntimeError(f'the microphone would not start: {e}')
             try:
-                diag_wav = bool(TUNE['stt_diag_wav']) or bool(diag)
-                ear_tape = bytearray() if diag_wav else None
                 sel = selectors.DefaultSelector()
                 sel.register(proc.stdout, selectors.EVENT_READ)
                 gmin, gk = ear_gate(ear)
@@ -1510,7 +1533,7 @@ class Ears:
                     if not sel.select(0.5):
                         if not heard and time.monotonic() - t0 > 8:
                             raise RuntimeError(f'{name} gave no sound')
-                        if woken and time.monotonic() - since > WAKE_AFTER:
+                        if woken and time.monotonic() - voice_t0 > WAKE_AFTER:
                             # the name passed by, nothing followed it: her turn to greet
                             return wake_result(heard_after, 'quiet_after_name')
                         # the recorder went dumb mid-window (a source yanked away, a
@@ -1611,23 +1634,24 @@ class Ears:
                         ear_oww['proc'].terminate()
                     except OSError:
                         pass
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-                except OSError:
-                    pass
-                finally:
+                if proc is not None:            # the recorder was born: it dies with the call
                     try:
-                        proc.stdout.close()
+                        proc.terminate()
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait()
                     except OSError:
                         pass
-                    try:
-                        proc.stderr.close()
-                    except OSError:
-                        pass
+                    finally:
+                        try:
+                            proc.stdout.close()
+                        except OSError:
+                            pass
+                        try:
+                            proc.stderr.close()
+                        except OSError:
+                            pass
                 self.busy = False
                 self.kind = None
 
