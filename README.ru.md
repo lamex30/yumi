@@ -54,7 +54,7 @@
 
 | Работает | Пока нет |
 | --- | --- |
-| sway, Hyprland, niri, river, Wayfire, labwc, KDE Plasma 6, COSMIC и другие на wlroots; X11 с включённым композитингом (KDE, Xfce, Cinnamon, MATE, GNOME на Xorg, i3 / bspwm / Openbox + picom) | GNOME на Wayland (в Mutter нет layer-shell), Windows, macOS |
+| sway, Hyprland, niri, river, Wayfire, labwc, KDE Plasma 6, COSMIC и другие на wlroots; X11 с включённым композитингом (Xfce, Cinnamon, MATE, i3 / bspwm / Openbox + picom) | GNOME (в Mutter нет layer-shell), Windows, macOS |
 
 Всё, кроме самого окна, необязательно: если какой-то программы нет, она просто не делает эту
 одну вещь, а в настройках, где это важно, будет написано «пока недоступно».
@@ -78,7 +78,6 @@
 | `ffmpeg` | конвертация и сжатие видео, аудио и GIF |
 | `imagemagick`, `pngquant`, `oxipng`, `jpegoptim` | конвертация и сжатие картинок |
 | `hyprpicker` или `grim` + `slurp` | пипетка на wlroots (в KDE и COSMIC работает через портал) |
-| `xcolor` | пипетка на X11 (без него — через портал) |
 | `wl-clipboard` | копирование цветов (иначе через буфер GTK) |
 | `swayidle` | дремать, когда вас нет |
 | `playerctl` | реакция на музыку |
@@ -179,8 +178,7 @@ bindsym $mod+p exec yumi --pipette
 
 - **`gtk4-layer-shell is not installed`**: поставьте его (см. таблицу выше) или укажите путь:
   `YUMI_LAYER_SHELL_LIB=/путь/к/libgtk4-layer-shell.so.0 yumi`.
-- **«this desktop has no wlr-layer-shell»**: у вас GNOME на Wayland, он пока не поддерживается
-  (сессия Xorg работает).
+- **«this desktop has no wlr-layer-shell»**: у вас GNOME, он пока не поддерживается.
 - **«X11 without a compositor»**: включите композитинг в настройках рабочего стола или запустите
   `picom`. На X11 gtk4-layer-shell не нужен.
 - **«Цвета от обоев: пока недоступно»**: она не знает вашу программу для обоев. Запишите оттенок в

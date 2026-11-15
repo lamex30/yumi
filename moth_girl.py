@@ -579,7 +579,7 @@ class App(Gtk.Application):
                              'Turn compositing on (or run picom) and start her again.\n')
             self.failed = True
         elif not self.x11 and not (LayerShell and LayerShell.is_supported()):
-            sys.stderr.write('yumi: this desktop has no wlr-layer-shell (GNOME on Wayland is not '
+            sys.stderr.write('yumi: this desktop has no wlr-layer-shell (GNOME is not '
                              'supported yet). She lives on sway, Hyprland, niri, river, Wayfire, '
                              'labwc, KDE Plasma, COSMIC and X11...\n')
             self.failed = True
