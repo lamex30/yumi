@@ -67,7 +67,7 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 19                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 20                            # bumped when the protocol changes: stale twins are restarted
                                         # (19: the mute may be lifted (secs=0), a «стоп» shout
                                         #     gets through it, and the wide wake match keeps
                                         #     the word that follows the name)
@@ -1082,11 +1082,12 @@ class Ears:
                 wmodel = self.whisper(lang, size)
             except Exception as e:      # noqa: BLE001 - whisper is best effort, vosk stands
                 log('whisper will not judge, vosk answers alone: ' + str(e)[-120:])
+        judge = nrec if nrec is not None else wmodel  # whoever reads the tape for a yes or no
         judge_lock = threading.Lock()
         # the wide pre-filter is only safe behind the judge: when whisper reads the tape
         # anyway, letting more hear-says through costs seconds, not false wakes; without
         # the judge vosk's word is taken as it comes, and the strict budget stands
-        wake_budget = WAKE_WIDE if (confirm and wmodel is not None) else 1
+        wake_budget = WAKE_WIDE if (confirm and judge is not None) else 1
         # the trained ear «Юми» (openWakeWord, ~2 MB): it hears the name where vosk
         # dreams and misses — 'auto' takes it when it lives here, vosk otherwise
         ear_oww = None
@@ -1212,7 +1213,7 @@ class Ears:
                         score = oww_ear_score(ear_oww, chunk)
                         if score >= OWW_THRESHOLD:
                             judge_note(f'OWW {score:.2f}')
-                            if score >= OWW_SURE or wmodel is None or not confirm:
+                            if score >= OWW_SURE or judge is None or not confirm:
                                 # her name, sure as sure: the judge would only lose seconds
                                 woken = True
                                 since = time.monotonic()
@@ -1257,7 +1258,7 @@ class Ears:
                     # the letters were a dream of vosk's (a name in a video's stream);
                     # it is read even when vosk went quiet — a name said into silence
                     # must not hang unanswered
-                    if not woken and wmodel is not None and not verdict['busy'] \
+                    if not woken and judge is not None and not verdict['busy'] \
                             and verdict['ok'] is not None:
                         with judge_lock:
                             ok, after, said = verdict['ok'], verdict['after'], verdict['said']
@@ -1274,7 +1275,7 @@ class Ears:
                         logged = words
                         judge_note(f'VOSK {words!r}')
                     hit, src = wake_at(words, spellings, wake_budget)
-                    if not woken and hit is not None and wmodel is None:
+                    if not woken and hit is not None and judge is None:
                         # no judge today: vosk's word is taken as it comes
                         woken = True                # she hears her name: keep on recording
                         since = time.monotonic()
@@ -1309,6 +1310,12 @@ class Ears:
                     return {'woke': True, 'text': heard_after}   # the name was heard
                 return {'woke': False, 'text': None}
             finally:
+                if ear_oww is not None:         # the little ear dies with the wake: a new
+                    try:                        # one is born on it, or it haunts the RAM
+                        ear_oww['proc'].stdin.close()
+                        ear_oww['proc'].terminate()
+                    except OSError:
+                        pass
                 try:
                     proc.terminate()
                     proc.wait(timeout=2)
