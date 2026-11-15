@@ -69,7 +69,7 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 24                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 27                            # bumped when the protocol changes: stale twins are restarted
                                         # (22: the ear's veto softened into a rank: a deaf ear alone
                                         #     no longer silences a name-shaped word — the arbitrator
                                         #     weighs every ear, the judge reads a short fresh tape,
@@ -462,6 +462,24 @@ def gate_noise(chunk, st, voiced):
             vals[i] = int(vals[i] * damp)
         return vals.tobytes()
     return chunk
+
+
+def watch_loud(chunk, st):
+    """the stop-watch's doorman: a chunk goes to the decoder only when it carries
+    a voice's worth of energy by the noise gate's own measure (the same thr that
+    decides what vosk may hear) — a fan's hum and a room's hiss are no stop
+    command, and the decode threads they would feed burn whole cores for nothing"""
+    n = len(chunk) // 2
+    if n == 0:
+        return False
+    vals = array('h', chunk[:n * 2])
+    acc = 0
+    for v in vals:
+        acc += v * v
+    rms = (acc / n) ** 0.5
+    thr = max(st.get('gate_min', GATE_MIN),
+              (st.get('floor') or 0) * st.get('gate_k', 3.0))
+    return rms >= thr
 
 
 class Detector:
@@ -953,7 +971,34 @@ def stop_shout(text, names=()):
     words = _stop_words()
     return bool(toks) and all(
         t in words or (len(t) >= 4 and any(near(t, w) <= 1
-                     for w in words if len(w) <= 6)) for t in toks)
+                     for w in words if len(w) <= 6)) or stop_mush(t, names)
+        for t in toks)
+
+
+def stop_mush(text, spellings=()):
+    """the stop may arrive glued to her name («юмистоп» for «юми стоп», the pause
+    drowns in the music and the ear writes one word): a word counts when it ends
+    in a stop command and what stands before it is her name as the ears spell
+    it — «стопка» stays a box, «приостанови» stays a word. The trained ear also
+    has its latin quirks on the noise («umistop», «mistop»): a word ending in
+    the english 'stop' with a short head counts too"""
+    words = _stop_words()
+    for tok in (t.strip('.,!?"«»…:;()[]-—').lower().replace('ё', 'е')
+                for t in (text or '').split()):
+        if not tok or tok in words:
+            continue
+        for w in (x for x in words if len(x) >= 4):
+            if tok.endswith(w):
+                head = tok[:-len(w)]
+                if head and (head in spellings
+                             or any(near(head, s, 1) <= 1 for s in spellings)):
+                    return True
+        if tok.endswith('stop') and 2 <= len(tok) - 4 <= 4:
+            return True                 # «umistop», «mistop»: the ear's latin mush
+        for s in spellings:
+            if near(tok, s + 'стоп', 2) <= 2:
+                return True             # «юмистоп»: the pause drowned, one word stands
+    return False
 
 
 _PHON_MAP = str.maketrans({'ю': 'у', 'ё': 'о', 'ы': 'и', 'э': 'е',
@@ -1264,7 +1309,7 @@ class Ears:
                     encoder=str(NEMO_DIR / 'encoder.int8.onnx'),
                     decoder=str(NEMO_DIR / 'decoder.int8.onnx'),
                     joiner=str(NEMO_DIR / 'joiner.int8.onnx'),
-                    num_threads=1, sample_rate=RATE, feature_dim=80,
+                    num_threads=2, sample_rate=RATE, feature_dim=80,
                     decoding_method='greedy_search')
             except Exception as e:      # noqa: BLE001 - a failed ear is no tragedy
                 log('nemotron will not load, whisper reads instead: ' + str(e)[-120:])
@@ -1437,6 +1482,9 @@ class Ears:
         arbiter = Arbiter()             # the middle mind: who is worth the judge's seconds
         diag = Diag(judge_log)          # the book of doubts, the same switch as the diary
         judge_bytes = int(TUNE['judge_tape'] * RATE * 2)   # the fragment the judge reads
+        nemo_lock = threading.Lock()    # one nemotron read at a time: the judge and
+                                        # the stop-watch share the same recognizer
+        nemo_stop = nrec.create_stream() if nrec is not None else None
         judge_confirmed = 0             # how many of the judge's readings said yes
         ear_ignored = 0                 # candidates the arbitrator let go (deaf ear, no voice)
         # the trained ear «Юми» (openWakeWord, ~2 MB): it hears the name where vosk
@@ -1470,7 +1518,8 @@ class Ears:
             with _judge:                # wake to wake: one judge reading at a time
                 try:
                     if nrec is not None:
-                        text = transcribe_nemo_model(nrec, says, lang)
+                        with nemo_lock:
+                            text = transcribe_nemo_model(nrec, says, lang)
                     else:
                         text = transcribe_model(wmodel, says, lang, hotwords=word)
                 except Exception as e:  # noqa: BLE001 - a failed verdict is no verdict
@@ -1490,6 +1539,52 @@ class Ears:
                        judge_called=False, final_wake=False)
             judge_note(f'STOP {text!r}')
             return {'woke': False, 'stop': True, 'text': text}
+
+        nemo_hit = [None]               # the stop the watch heard, when it did
+        nemo_run = [False]              # the watch's reader lives while the wake does
+
+        def stop_watch(chunk):
+            """the stop-watch ear: the same cleaned sound vosk eats goes into a
+            nemotron stream of its own — the worker thread reads it (the wake's
+            own steps must not wait on a decode), the loop only asks whether a
+            stop was heard. «Стоп» stops everything at once, judge or no judge
+            (vosk drowns in the noise, this ear hears through it). The matched
+            words, or None."""
+            if nemo_stop is None:
+                return None
+            import numpy as np
+            with nemo_lock:
+                nemo_stop.accept_waveform(RATE, np.frombuffer(
+                    chunk, dtype=np.int16).astype(np.float32) / 32768.0)
+            return nemo_hit[0]
+
+        def stop_worker():
+            """the watch's reader: nemotron decodes here, off the wake's critical
+            path, and every fresh reading is asked for a stop word. The reading
+            accumulates — the whole window's words stay in it (the state does not
+            grow with the sound, only the line does), so a stop is never lost to
+            a slow spell: it fires whenever the reader catches up."""
+            import numpy as np
+            last = ''
+            while nemo_run[0]:
+                time.sleep(0.02)        # a breath between reads: no work, no burn
+                stream = nemo_stop
+                if stream is None:
+                    return
+                with nemo_lock:
+                    if nemo_stop is not stream:
+                        last = ''       # the stream was replaced: the reading starts over
+                        continue
+                    while nrec.is_ready(stream):
+                        nrec.decode_stream(stream)
+                    ntext = nrec.get_result(stream)
+                if ntext != last:
+                    last = ntext
+                    if ntext:
+                        judge_note(f'NEMO {ntext!r}')
+                    if stop_at(ntext) or stop_mush(ntext, spellings):
+                        nemo_hit[0] = ntext
+                        return          # heard it: the loop does the stopping
 
         def wake_result(text, why):
             """the wake's answer and its diary line: the time from the first voice
@@ -1533,10 +1628,14 @@ class Ears:
                 ear_stat = EarStat()        # the trained ear's window, with its hysteresis
                 diag_wav = bool(TUNE['stt_diag_wav']) or bool(diag)   # the ear's stream on the shelf
                 ear_note = [0.0]            # when the ear's last loud frame was noted
+                ignore_note = {}            # when each IGNORE reason was last noted
                 voice_t0 = 0.0              # when the current voice began: the stop watch
                 was_voiced = False          # a voice was on the last chunk
                 phon_on = TUNE['wake_phonetic']
                 judge_note(f'WAKE open {secs:.0f} s')
+                if nemo_stop is not None:       # the stop-watch's reader: it lives
+                    nemo_run[0] = True          # while this window does, no longer
+                    threading.Thread(target=stop_worker, daemon=True).start()
                 while time.monotonic() - t0 < secs:
                     if self.abort:
                         break               # /stop, or a listen that needs the microphone
@@ -1571,6 +1670,9 @@ class Ears:
                             last = logged = ''
                             st = {'hp': 0.0, 'floor': None, 'gate_min': gmin,
                                   'gate_k': gk}
+                            if nemo_stop is not None:   # the mute's gap took the sound
+                                with nemo_lock:         # away: the watch starts over
+                                    nemo_stop = nrec.create_stream()
                             if ear_oww is not None:
                                 oww_ear_score(ear_oww, b'', reset=True)
                             ear_stat.reset()
@@ -1617,6 +1719,9 @@ class Ears:
                         if ear_oww is not None:
                             oww_ear_score(ear_oww, b'', reset=True)   # the ear forgets her voice too
                         ear_stat.reset()                          # and the window forgets it
+                        if nemo_stop is not None:                 # the stop-watch forgets it too
+                            with nemo_lock:
+                                nemo_stop = nrec.create_stream()
                     chunk = hp_pass(chunk, st)            # hum and rumble go
                     raw = chunk                           # stream B: after the filter, before the gate
                     voiced = det.feed(chunk)              # the voice detector follows the frames
@@ -1645,6 +1750,13 @@ class Ears:
                             ear_note[0] = time.monotonic()
                             judge_note(f'EAR {score:.2f}')
                         stat = ear_stat.feed(score, time.monotonic())
+                    if watch_loud(chunk, st):
+                        # the watch eats only a voice's worth of energy: silence and
+                        # the room's hiss would keep its decode threads spinning for
+                        # nothing — and what vosk cannot hear, no stop lives in either
+                        shout = stop_watch(chunk)       # «стоп» is always hers to command:
+                        if shout:                       # it cuts the run before the ears
+                            return stop_result(shout)   # are even asked whose name it was
                     ended = rec.AcceptWaveform(chunk)   # True: an utterance ended just now
                     if ended:
                         words = json.loads(rec.FinalResult() or '{}').get('text', '')
@@ -1656,7 +1768,7 @@ class Ears:
                     if woken and words != last:
                         since = time.monotonic()    # the half-heard moves on: the wait restarts
                     last = words
-                    if stop_at(words):
+                    if stop_at(words) or stop_mush(words, spellings):
                         # «стоп» overrides everything: she stops whatever she is busy
                         # with, even her own voice mid-word, wake word or not
                         return stop_result(words)
@@ -1695,6 +1807,10 @@ class Ears:
                                    fresh=fresh, judge_called=True, final_wake=False)
                         if not fresh:
                             judge_note('JUDGE stale verdict dropped')
+                        elif stop_at(jtext) or stop_mush(jtext, spellings):
+                            # the judge's own reading says «стоп»: everything stops now —
+                            # the name it may or may not have heard is beside the point
+                            return stop_result(jtext)
                         elif ok:
                             woken = True                # the judge heard the name too
                             since = time.monotonic()
@@ -1739,7 +1855,9 @@ class Ears:
                                        phonetic_match=src if phon else None,
                                        arbitration='IGNORE', reason=why, ear_veto=not cand,
                                        judge_called=False, final_wake=False)
-                            judge_note(f'IGNORE {src or "oww"!r} ({why})')
+                            if time.monotonic() - ignore_note.get(why, 0.0) > 0.5:
+                                ignore_note[why] = time.monotonic()
+                                judge_note(f'IGNORE {src or "oww"!r} ({why})')
                         elif action == ARB_JUDGE:
                             n = min(len(tape), judge_bytes)
                             frag = bytes(tape[len(tape) - n:]) if n else b''
@@ -1793,6 +1911,7 @@ class Ears:
                            final_wake=False, judge_confirmed=judge_confirmed)
                 return {'woke': False, 'text': None}
             finally:
+                nemo_run[0] = False             # the window is over: the watch's reader dies
                 if diag_wav and ear_tape:
                     wake_feed_wav(ear_tape)     # what the ear heard, for the shelf
                 judge_note(f'SUMMARY judge_sent={arbiter.sent} confirmed={judge_confirmed} '
