@@ -113,5 +113,16 @@ assert stt.muted()
 stt.mute_for(0)                       # her voice stopped early: the ears open
 assert not stt.muted()
 
+# the trained ear's window: a louder frame takes the top at once, quiet ones keep
+# the peak for a while, and when the window runs out even a quiet frame replaces it —
+# so a silence after speech reads as silence, and vosk's dreams die at the veto
+w = stt.ear_window_hi
+hi, t = w(0.0, 0.0, 0.3, 1.0)
+assert (hi, t) == (0.3, 1.0)
+assert w(hi, t, 0.1, 2.0) == (0.3, 1.0)      # within the window the peak stands
+assert w(hi, t, 0.9, 2.0) == (0.9, 2.0)      # a sure name takes the top at once
+assert w(0.9, 1.0, 0.1, 5.0) == (0.1, 5.0)   # the window ran out: silence is silence
+assert stt.OWW_VETO < stt.OWW_THRESHOLD      # the veto sits under the ear's own doubt
+
 print('test_wake: ok')
 sys.exit(0)

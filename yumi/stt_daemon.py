@@ -67,7 +67,9 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 20                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 21                            # bumped when the protocol changes: stale twins are restarted
+                                        # (21: the trained ear vetoes vosk's dreams when it hears nothing)
+                                        # (20: whoever reads the tape judges — nemotron or whisper)
                                         # (19: the mute may be lifted (secs=0), a «стоп» shout
                                         #     gets through it, and the wide wake match keeps
                                         #     the word that follows the name)
@@ -80,6 +82,9 @@ WAKE_WIDE = 3                 # when the judge is on duty, the pre-filter forgiv
 
 OWW_THRESHOLD = 0.5          # the trained ear's score that counts as her name
 OWW_SURE = 0.7               # above it the name is sure: the judge is not asked
+OWW_VETO = 0.2               # below it the ear hears nothing at all: vosk's
+                             # near-misses do not go to the judge on a deaf ear's watch —
+                             # a video's speech would only be read and believed again
 OWW_CHUNK = 2560             # bytes of s16 sound per frame: 1280 samples, 80 ms —
                              # the exact step the streaming melspectrogram keeps step with
                               # letters: over music vosk writes «юноша» for «юми», and
@@ -579,6 +584,15 @@ def oww_ear_score(ear, chunk, reset=False):
             n_frames -= 1
     ear['buf'] = buf
     return best
+
+
+def ear_window_hi(hi, hi_t, score, now, keep=3.0):
+    """the trained ear's best score of the last `keep` seconds: a fresh louder
+    frame takes the top at once, and when the window runs out any new frame
+    (even a quiet one) replaces it — so a silence after speech reads as silence"""
+    if score > hi or now - hi_t > keep:
+        return score, now
+    return hi, hi_t
 
 
 _LAT = {'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
@@ -1162,6 +1176,7 @@ class Ears:
                 verdict = {'busy': False, 'ok': None, 'after': '', 'said': None,
                            't': 0.0}        # whisper's fresh answer lives here
                 heard_after = ''            # the words whisper heard past the name
+                ear_hi, ear_hi_t = 0.0, t0  # the trained ear's best of the last seconds
                 while time.monotonic() - t0 < secs:
                     if self.abort:
                         break               # /stop, or a listen that needs the microphone
@@ -1210,6 +1225,7 @@ class Ears:
                         last = logged = ''
                         if ear_oww is not None:
                             oww_ear_score(ear_oww, b'', reset=True)   # the ear forgets her voice too
+                            ear_hi, ear_hi_t = 0.0, time.monotonic()  # and the window forgets it
                     chunk = hp_pass(chunk, st)            # hum and rumble go
                     voiced = det.feed(chunk)              # the voice detector follows the frames
                     chunk = gate_noise(chunk, st, voiced) # the hiss dies, speech is never touched
@@ -1218,6 +1234,8 @@ class Ears:
                         del tape[:-WAKE_TAPE]
                     if ear_oww is not None and not woken:
                         score = oww_ear_score(ear_oww, chunk)
+                        now = time.monotonic()
+                        ear_hi, ear_hi_t = ear_window_hi(ear_hi, ear_hi_t, score, now)
                         if score >= OWW_THRESHOLD:
                             judge_note(f'OWW {score:.2f}')
                             if score >= OWW_SURE or judge is None or not confirm:
@@ -1294,6 +1312,11 @@ class Ears:
                             # the judge would only add seconds of waiting
                             woken = True
                             since = time.monotonic()
+                        elif ear_oww is not None and ear_hi < OWW_VETO:
+                            # the trained ear hears nothing where vosk dreams: a video
+                            # speaks, not her name — the judge would only read the same
+                            # tape and believe the dream all over again
+                            judge_note(f'EARVETO {src!r}')
                         elif not verdict['busy'] and verdict['ok'] is None \
                                 and time.monotonic() - verdict['t'] > WAKE_REJUDGE:
                             # a near-miss spelling: the tape goes to the judge, a fresh
