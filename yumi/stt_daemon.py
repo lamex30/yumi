@@ -709,14 +709,21 @@ def wake_at(text, spellings, budget=1):
             # letter is the one that survives («юноша», «юный» for «юми»), while words
             # far from the name by their first letter stay outside the strict budget
             slack = 1 if budget > 1 and any(said[:1] == s[:1] for s in spellings) else 0
-            dist = min(near(said, s, budget + slack) for s in spellings)
-            if dist > budget + slack:
+            # a wide budget may not outgrow the word itself: a hear-say of three or four
+            # letters keeps all but one of its letters, or half the Russian speech
+            # («что», «эта», «она», «они») becomes the name and the judge reads a lesson
+            # video every few seconds; long hear-says («думаю» for «джуми») still pass
+            cap = budget + slack
+            if len(said) <= 4:
+                cap = min(cap, 1)
+            dist = min(near(said, s, cap) for s in spellings)
+            if dist > cap:
                 continue
             # a common word one letter from the name's hear-say («иди», «или», «уже»)
             # must not wake her: it counts as the name only when a true spelling of the
-            # name fits the sound no worse than the stop word does (the same budget both
+            # name fits the sound no worse than the stop word does (the same cap both
             # ways, so a wide pre-filter does not let the stop words win by a shorter cap)
-            if any(near(said, w, budget + slack) < dist for w in WAKE_STOPS):
+            if any(near(said, w, cap) < dist for w in WAKE_STOPS):
                 continue
             return ' '.join(toks[i + n:]), said
     return None, None
@@ -736,7 +743,7 @@ def name_exact(text, spellings):
     return False
 
 
-WAKE_STOPS = {'иди', 'или', 'уже', 'ели', 'юли', 'умер'}    # the ears' false names: never wake on these
+WAKE_STOPS = {'иди', 'или', 'уже', 'ели', 'юли', 'умер', 'они'}    # the ears' false names: never wake on these
 STOP_COMMANDS = {'стоп', 'стопи', 'останови', 'остановись', 'прекрати', 'stop'}
 STOP_FILE = HOME / 'stop_words.json'       # extra stop words the user may add (a json list)
 _stops_cache = {'t': 0.0, 'words': frozenset(STOP_COMMANDS)}
