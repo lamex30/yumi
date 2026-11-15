@@ -114,6 +114,21 @@ assert m('включи аквариум') is None               # a bare name wi
 assert m('включи альбом золото') == ('album', 'золото')
 assert m('включи исполнителя') is None            # a singer with no name is no wish
 
+# a bare name with no «песню»: strict pass says no («включи свет» is the
+# buttons' business), but when the buttons did not claim the phrase either,
+# the second pass (guess=True, Brain.heard_text) hears a name of something
+assert m('включи аквариум') is None
+assert brain.music_control_text('включи аквариум', 'ru', True) == ('song', 'аквариум')
+assert brain.music_control_text('включи рамштайн', 'ru', True) == ('song', 'рамштайн')
+assert brain.music_control_text('включи тупак', 'ru', True) == ('song', 'тупак')
+assert brain.music_control_text('включи в аня воробей', 'ru', True) == ('song', 'в аня воробей')
+                                                  # the ears' stray «в» goes to the search, it forgives
+assert brain.music_control_text('включи свет', 'ru', True) == ('song', 'свет')
+                                                  # the ears alone judge here: no buttons claimed it
+assert brain.music_control_text('включи', 'ru', True) == 'play'
+                                                  # a verb alone is still just her library
+assert brain.music_control_text('включи что-нибудь', 'ru', True) == ('random', '')
+
 # and the old ears are not lost: «что включи музыку» still plays, «выключи» stops
 assert m('что включи музыку') == 'play'           # a verb nearby: it is a wish, not a question
 assert m('что выключи музыку') is None            # the stray «что» is a stranger to the parser

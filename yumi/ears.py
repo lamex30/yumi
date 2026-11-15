@@ -238,7 +238,8 @@ def listen(lang='ru', secs=7, size='small', mic=None, ear=None, engine=None):
 
 
 def wake(lang='ru', word='юми', secs=20, size='small', mic=None, ear=None,
-         sensitivity='normal', confirm=True, model_size=None, judge_log=False, engine=None):
+         sensitivity='normal', confirm=True, model_size=None, judge_log=False, engine=None,
+         oww_ear=None):
     """wait for the wake word (say «Юми» and she is all ears): a dict
     {'woke': bool, 'text': what came after the word, '' when it was said alone},
     or None when the ears cannot work at all. A manual listen takes the mic over."""
@@ -252,6 +253,8 @@ def wake(lang='ru', word='юми', secs=20, size='small', mic=None, ear=None,
         q['engine'] = engine
     if model_size:
         q['model_size'] = model_size
+    if oww_ear:
+        q['oww_ear'] = oww_ear
     if mic:
         q['mic'] = mic
     if ear:

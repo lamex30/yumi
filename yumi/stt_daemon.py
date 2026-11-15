@@ -40,8 +40,10 @@ import atexit
 import json
 import os
 import re
-import signal
+import select
 import shutil
+import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -75,6 +77,11 @@ WAKE_REJUDGE = 3.0                      # s before the judge reads the tape agai
 VAD_TAIL = 1200                         # ms of quiet after speech: the phrase is really over
 WAKE_SENSITIVITY = {'normal': 1, 'strict': 0}  # edit-distance budget for a wake match
 WAKE_WIDE = 3                 # when the judge is on duty, the pre-filter forgives three
+
+OWW_THRESHOLD = 0.5          # the trained ear's score that counts as her name
+OWW_SURE = 0.7               # above it the name is sure: the judge is not asked
+OWW_CHUNK = 2560             # bytes of s16 sound per frame: 1280 samples, 80 ms —
+                             # the exact step the streaming melspectrogram keeps step with
                               # letters: over music vosk writes «юноша» for «юми», and
                               # only whisper reading the tape tells a name from a dream
 TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
@@ -505,7 +512,73 @@ def list_mics():
 
 
 def log(msg):
+    """one line into the ears' diary (/tmp/yumi/app.log): what the ears do and why"""
     print(f'[yumi-stt] {msg}', flush=True)
+
+
+def oww_ear_start():
+    """the trained ear «Юми» as a little process beside the daemon: the oww
+    venv may be another python than the daemon's, so it lives apart — fed the
+    clean sound, it answers one score per frame; None when it cannot live here
+    (no venv, no model), and vosk listens as before"""
+    py = os.environ.get('YUMI_OWW_PY') or str(
+        Path.home() / '.local/share/yumi/oww/bin/python')
+    model = os.environ.get('YUMI_OWW_MODEL') or str(
+        Path.home() / '.local/share/yumi/oww/models/yumi.onnx')
+    if not (os.path.isfile(py) and os.path.isfile(model)):
+        return None
+    helper = Path(__file__).with_name('oww_ear.py')
+    try:
+        proc = subprocess.Popen([py, '-u', str(helper), model],
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, bufsize=0)
+    except OSError as e:
+        log('the trained ear will not start: ' + str(e)[-120:])
+        return None
+    return {'proc': proc, 'buf': bytearray(), 'dead': False}
+
+
+def oww_ear_score(ear, chunk, reset=False):
+    """one frame of sound to the trained ear, its score back: b'' with reset
+    only forgets what was heard; 0.0 when the ear is away, dead or too slow —
+    vosk answers instead, nothing hangs on the little process"""
+    if not ear or ear['dead']:
+        return 0.0
+    proc = ear['proc']
+    if proc.poll() is not None:
+        ear['dead'] = True
+        return 0.0
+    try:
+        if reset:
+            proc.stdin.write(b'R')
+        else:
+            for i in range(0, len(chunk) - OWW_CHUNK + 1, OWW_CHUNK):
+                # 80 ms steps only: the streaming melspectrogram loses its count
+                # on any other step, and the scores drown
+                proc.stdin.write(b'D' + struct.pack('<H', OWW_CHUNK)
+                                 + chunk[i:i + OWW_CHUNK])
+        proc.stdin.flush()
+    except (OSError, ValueError):
+        ear['dead'] = True
+        return 0.0
+    n_frames = 1 if reset else max(1, len(chunk) // OWW_CHUNK)
+    buf = ear['buf']
+    end = time.monotonic() + 0.3
+    best = 0.0
+    while n_frames and time.monotonic() < end:
+        r, _, _ = select.select([proc.stdout], [], [], 0.1)
+        if not r:
+            continue
+        buf += os.read(proc.stdout.fileno(), 256)
+        while b'\n' in buf:
+            line, _, buf = buf.partition(b'\n')
+            try:
+                best = max(best, float(line))
+            except ValueError:
+                pass
+            n_frames -= 1
+    ear['buf'] = buf
+    return best
 
 
 _LAT = {'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
@@ -978,7 +1051,7 @@ class Ears:
 
     def wake(self, lang, word, secs, size='small', mic=None, ear=None,
              sensitivity='normal', confirm=True, model_size=None, judge_log=False,
-             engine='whisper'):
+             engine='whisper', oww_ear='auto'):
         """wait for the wake word, keeping the microphone on:
         {'woke': True, 'text': the phrase after it} — the name was heard, the rest came
         {'woke': True, 'text': ''} — the name alone, a phrase may still come
@@ -1014,6 +1087,15 @@ class Ears:
         # anyway, letting more hear-says through costs seconds, not false wakes; without
         # the judge vosk's word is taken as it comes, and the strict budget stands
         wake_budget = WAKE_WIDE if (confirm and wmodel is not None) else 1
+        # the trained ear «Юми» (openWakeWord, ~2 MB): it hears the name where vosk
+        # dreams and misses — 'auto' takes it when it lives here, vosk otherwise
+        ear_oww = None
+        if oww_ear in ('auto', 'oww'):
+            ear_oww = oww_ear_start()
+            if oww_ear == 'oww' and ear_oww is None:
+                log('the trained ear is not here: vosk listens for the name')
+            elif ear_oww is not None:
+                log('the trained ear «Юми» is on duty beside vosk')
 
         def judge_note(what):
             """one line into the wake's diary (judge.log): what vosk heard, what went
@@ -1118,12 +1200,27 @@ class Ears:
                         det = Detector()
                         tape = bytearray()
                         last = logged = ''
+                        if ear_oww is not None:
+                            oww_ear_score(ear_oww, b'', reset=True)   # the ear forgets her voice too
                     chunk = hp_pass(chunk, st)            # hum and rumble go
                     voiced = det.feed(chunk)              # the voice detector follows the frames
                     chunk = gate_noise(chunk, st, voiced) # the hiss dies, speech is never touched
                     tape += chunk                         # the judge reads the same clean sound
                     if len(tape) > WAKE_TAPE:
                         del tape[:-WAKE_TAPE]
+                    if ear_oww is not None and not woken:
+                        score = oww_ear_score(ear_oww, chunk)
+                        if score >= OWW_THRESHOLD:
+                            judge_note(f'OWW {score:.2f}')
+                            if score >= OWW_SURE or wmodel is None or not confirm:
+                                # her name, sure as sure: the judge would only lose seconds
+                                woken = True
+                                since = time.monotonic()
+                            elif not verdict['busy'] and verdict['ok'] is None:
+                                # borderline: the judge reads the tape, as with vosk's dreams
+                                verdict['busy'] = True
+                                threading.Thread(target=judge, args=(bytes(tape),),
+                                                 daemon=True).start()
                     ended = rec.AcceptWaveform(chunk)   # True: an utterance ended just now
                     if ended:
                         words = json.loads(rec.FinalResult() or '{}').get('text', '')
@@ -1489,11 +1586,12 @@ class Handler(BaseHTTPRequestHandler):
             confirm = q.get('confirm') and q['confirm'][0] not in ('', '0', 'false', 'no')
             model_size = (q.get('model_size') or ['small'])[0]
             judge_log = q.get('judge_log') and q['judge_log'][0] not in ('', '0', 'false', 'no')
+            oww_ear = (q.get('oww_ear') or ['auto'])[0]
             try:
                 res = self.ears.wake(lang, word, secs, size=size, mic=mic, ear=ear,
                                      sensitivity=sensitivity, confirm=confirm,
                                      model_size=model_size, judge_log=judge_log,
-                                     engine=engine)
+                                     engine=engine, oww_ear=oww_ear)
             except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
                 self.ears.error = str(e)
                 return self._json({'error': str(e)}, 500)

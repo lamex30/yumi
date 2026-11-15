@@ -507,6 +507,7 @@ class Brain(Extras):
                 'wake_sensitivity': ['normal', 'strict'],
                 'wake_confirm': [True, False],
                 'wake_model_size': ['small', 'big'],
+                'wake_ear': ['auto', 'oww', 'vosk'],
                 'wake_judge_log': [True, False],
                 'chat_provider': ['ollama', 'polza.ai'],
                 'chat_model': self.chat_models or [self.settings.get('chat_model')],
@@ -538,6 +539,8 @@ class Brain(Extras):
             return t('on') if val else t('off')
         if arg == 'wake_model_size':
             return t('w_' + str(val)) if f'w_{val}' in UI['en'] else str(val)
+        if arg == 'wake_ear':
+            return t('we_' + str(val)) if f'we_{val}' in UI['en'] else str(val)
         if arg == 'wake_judge_log':
             return t('on') if val else t('off')
         if arg == 'music_source':
@@ -916,7 +919,8 @@ class Brain(Extras):
             rows += [('set', 'stt_mic', t('stt_mic')), ('set', 'ears_range', t('ears_range')),
                     ('set', 'stt_echo', t('stt_echo')),
                     ('set', 'tap_ears', t('tap_ears')), ('set', 'wake_sensitivity', t('wake_sensitivity')),
-                    ('set', 'wake_confirm', t('wake_confirm')), ('set', 'wake_model_size', t('wake_model_size')),
+                    ('set', 'wake_confirm', t('wake_confirm')), ('set', 'wake_ear', t('wake_ear')),
+                    ('set', 'wake_model_size', t('wake_model_size')),
                     ('set', 'wake_judge_log', t('wake_judge_log'))]
             if self.mics:
                 rows.append(('mic_refresh', None, t('mic_refresh')))
@@ -2754,7 +2758,7 @@ def _music_query(toks):
     return ' '.join(out).strip(' -')
 
 
-def music_control_text(text, lang='en'):
+def music_control_text(text, lang='en', guess=False):
     """Convert voice text to a music command.
 
     Returns 'play' (her own library), 'pause', 'stop', 'next', 'previous',
@@ -2839,7 +2843,7 @@ def music_control_text(text, lang='en'):
         if any(t in MUSIC_ALBUM_W for t in toks):
             q = _music_query(toks)
             return ('album', q) if q else None
-        if has_music:
+        if has_music or guess:
             q = _music_query(toks)
             if q:
                 return ('song', q)                 # «включи песню крылья»

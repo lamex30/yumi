@@ -1107,7 +1107,8 @@ class App(Gtk.Application):
                                 confirm=self.settings.get('wake_confirm', True),
                                 model_size=self.settings.get('wake_model_size', 'small'),
                                 judge_log=self.settings.get('wake_judge_log', True),
-                                engine=self.settings.get('stt_engine'))
+                                engine=self.settings.get('stt_engine'),
+                                oww_ear=self.settings.get('wake_ear', 'auto'))
                 if not self.wake_on or not res:
                     continue            # called off or the ears are away
                 if res.get('stop'):

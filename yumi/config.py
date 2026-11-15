@@ -51,6 +51,10 @@ DEFAULT_SETTINGS = {
     'wake_sensitivity': 'normal',   # normal / strict: how sharply the wake word must match
     'wake_confirm': True,   # let whisper double-check every vosk guess before waking
     'wake_model_size': 'small',   # small / big: the model the wake ear listens with
+    'wake_ear': 'auto',     # the ear that catches her name: auto (the trained
+                            # openWakeWord ear when its model is here, vosk
+                            # otherwise) / oww / vosk; vosk guessed the name by
+                            # ear, the trained one learned it
     'wake_judge_log': True,    # write what the judge hears into /tmp/yumi/judge.log
     'name_duck': False,        # when her name is heard, the sounds duck so she can
                                # hear the phrase; the old loudness returns after it,
@@ -266,7 +270,9 @@ UI = {
         'name_duck': 'Duck sounds when she hears «Yumi»', 'e_big': 'Sharp (~1.5 GB)', 'cat_ears': 'Her ears', 'stt_mic': 'Microphone',
         'wake_sensitivity': 'How strictly to listen for «Yumi»', 'wake_sensitivity_normal': 'Normal',
         'wake_sensitivity_strict': 'Strict', 'wake_confirm': 'Double-check the name with whisper',
-        'wake_model_size': 'Ear for the name «Yumi» (vosk)', 'w_small': 'Lite (45 MB)', 'w_big': 'Sharp (~1.8 GB)', 'wake_judge_log': 'Write the whisper judge to /tmp/yumi/judge.log',
+        'wake_model_size': 'Ear for the name «Yumi» (vosk)', 'w_small': 'Lite (45 MB)', 'w_big': 'Sharp (~1.8 GB)',
+        'wake_ear': 'The ear that hears «Yumi»', 'we_auto': 'auto (the trained ear when it is here)',
+        'we_oww': 'the trained ear (openWakeWord)', 'we_vosk': 'vosk, as before', 'wake_judge_log': 'Write the whisper judge to /tmp/yumi/judge.log',
         'mic_refresh': 'Find the microphone', 'mic_auto': 'auto', 'chat_provider': 'Mind provider',
         'polza_url': 'Polza.ai address', 'polza_api_key': 'Polza.ai API key',
         'tap_ears': 'Write everything it hears (/tmp/yumi)', 'ears_range': 'How far it hears',
@@ -326,6 +332,8 @@ UI = {
         'wake_sensitivity': 'Как строго слушать «Юми»', 'wake_sensitivity_normal': 'Обычная',
         'wake_sensitivity_strict': 'Строгая', 'wake_confirm': 'Перепроверять имя whisper-ом',
         'wake_model_size': 'Ухо для имени «Юми» (vosk)', 'w_small': 'Лёгкая (45 МБ)', 'w_big': 'Точная (~1.8 ГБ)', 'wake_judge_log': 'Записывать судью-whisper в /tmp/yumi/judge.log',
+        'wake_ear': 'Кто слушает имя «Юми»', 'we_auto': 'авто (обученное ухо, когда оно тут)',
+        'we_oww': 'обученное ухо (openWakeWord)', 'we_vosk': 'vosk, как раньше',
         'mic_refresh': 'Найти микрофон', 'mic_auto': 'авто',
         'chat_provider': 'Провайдер мозгов', 'polza_url': 'Адрес Polza.ai', 'polza_api_key': 'Ключ Polza.ai',
         'tap_ears': 'Записывать всё услышанное (/tmp/yumi)', 'ears_range': 'С какой дальности слышит',
