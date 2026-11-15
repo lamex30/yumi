@@ -1,4 +1,4 @@
-"""Yumi: a sleepy moth-girl desktop assistant (GTK4 + gtk4-layer-shell).
+"""Yumi: a sleepy moth-girl desktop assistant (GTK4 + gtk4-layer-shell, or X11).
 
 One transparent layer-shell overlay covers the screen; only what is really drawn catches the
 pointer (the input region follows her, the moth, the file pile, menus and bubbles). All the
@@ -32,15 +32,22 @@ os.environ['LD_PRELOAD'] = ':'.join(p for p in os.environ.get('LD_PRELOAD', '').
 import gi  # noqa: E402
 gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
-gi.require_version('Gtk4LayerShell', '1.0')
 gi.require_version('GdkPixbuf', '2.0')
 gi.require_foreign('cairo')
 import cairo  # noqa: E402
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
-from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
+try:
+    gi.require_version('Gtk4LayerShell', '1.0')
+    from gi.repository import Gtk4LayerShell as LayerShell
+except (ValueError, ImportError):                # an X11-only system may not have it
+    LayerShell = None
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from yumi import config, files, jobs, pixfont, pixui, system, voice  # noqa: E402
+try:
+    from yumi import x11  # noqa: E402
+except (ValueError, ImportError, OSError):       # no GdkX11 or libX11: Wayland only
+    x11 = None
 from yumi.brain import UI_PX, Brain  # noqa: E402
 from yumi.phrases import Speech  # noqa: E402
 from yumi.sprites import Meta, palette_delta, palette_from_hue, recolor_bgra, ui_colors  # noqa: E402
@@ -256,7 +263,7 @@ class Painter:
 # ---------------------------------------------------------------------------------------------
 
 class Overlay(Gtk.ApplicationWindow):
-    """one transparent layer-shell window per screen; she lives on one of them (app.active), the
+    """one transparent layer-shell (or X11 override-redirect) window per screen; she lives on one of them (app.active), the
     others only show her while she is carried across their edge"""
 
     def __init__(self, app, monitor=None):
@@ -269,16 +276,16 @@ class Overlay(Gtk.ApplicationWindow):
         self.name = (monitor.get_connector() if monitor is not None else None) or 'default'
         self.drew = False
         self.add_css_class('moth-girl')
-        LayerShell.init_for_window(self)
-        if monitor is not None:
-            LayerShell.set_monitor(self, monitor)
-        LayerShell.set_namespace(self, 'yumi')
-        LayerShell.set_layer(self, LayerShell.Layer.TOP)          # under fullscreen windows
-        for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM, LayerShell.Edge.LEFT,
-                     LayerShell.Edge.RIGHT):
-            LayerShell.set_anchor(self, edge, True)
-        LayerShell.set_exclusive_zone(self, -1)
-        LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
+        if app.x11:
+            self.scale = monitor.get_scale_factor() if monitor is not None else 1
+            self.set_decorated(False)
+            self.set_default_size(self.mw, self.mh)
+            self.connect('realize', lambda _w: x11.unmanage(self))
+            self.connect('map', lambda _w: x11.place(self, self.ox * self.scale, self.oy * self.scale,
+                                                     self.mw * self.scale, self.mh * self.scale))
+        else:
+            self.init_layer(monitor)
+        self.keyboard = 'none'
 
         self.area = Gtk.DrawingArea()
         self.area.set_draw_func(self.draw)
@@ -315,7 +322,6 @@ class Overlay(Gtk.ApplicationWindow):
         keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)   # before GTK takes Tab for its own focus moves
         keys.connect('key-pressed', self.on_key)
         self.add_controller(keys)
-        self.keyboard = LayerShell.KeyboardMode.NONE
 
         drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
         drop.connect('enter', self.on_dnd_motion)
@@ -324,6 +330,19 @@ class Overlay(Gtk.ApplicationWindow):
         drop.connect('drop', self.on_drop)
         self.area.add_controller(drop)
         self.connect('realize', lambda _w: self.update_input())
+
+    def init_layer(self, monitor):
+        LayerShell.init_for_window(self)
+        if monitor is not None:
+            LayerShell.set_monitor(self, monitor)
+        LayerShell.set_namespace(self, 'yumi')
+        LayerShell.set_layer(self, LayerShell.Layer.TOP)          # under fullscreen windows
+        for edge in (LayerShell.Edge.TOP, LayerShell.Edge.BOTTOM, LayerShell.Edge.LEFT,
+                     LayerShell.Edge.RIGHT):
+            LayerShell.set_anchor(self, edge, True)
+        LayerShell.set_exclusive_zone(self, -1)
+        LayerShell.set_keyboard_mode(self, LayerShell.KeyboardMode.NONE)
+
 
     # ---- input
     @staticmethod
@@ -334,6 +353,8 @@ class Overlay(Gtk.ApplicationWindow):
 
     def on_pressed(self, g, n, x, y):
         button = g.get_current_button()
+        if self.app.x11 and self.keyboard == 'on_demand':
+            x11.focus(self, True)                   # what the compositor does on a click under Wayland
         self.app.ev(lambda b: b.press_at(button, x, y, n))
 
     def on_released(self, g, _n, x, y):
@@ -369,7 +390,10 @@ class Overlay(Gtk.ApplicationWindow):
         """the keyboard comes to her only while the pointer is over the timer or a button form is open"""
         if mode != self.keyboard:
             self.keyboard = mode
-            LayerShell.set_keyboard_mode(self, mode)
+            if self.app.x11:
+                x11.focus(self, mode == 'exclusive')
+            else:
+                LayerShell.set_keyboard_mode(self, getattr(LayerShell.KeyboardMode, mode.upper()))
 
     def on_drag_prepare(self, src, x, y):
         b = self.app.brain
@@ -479,6 +503,8 @@ class App(Gtk.Application):
         self.sound_src = None
         self.voice_proc = None          # the player saying her current line
         self.failed = False             # this desktop cannot show her
+        self.x11 = False                # an X11 session: yumi/x11.py stands in for layer-shell
+        self.x11_raising = 0
         self.voice_id = None            # which bubble it belongs to
         self.load_gen = 0               # sprite reloads: only the newest one is used
         self.outfit_want = None         # the outfit she wears or is changing into
@@ -546,16 +572,32 @@ class App(Gtk.Application):
         self.ev(lambda b: b.set_face('happy', 2.5))
 
     def do_activate(self):
-        if not LayerShell.is_supported():
-            sys.stderr.write('yumi: this desktop has no wlr-layer-shell (GNOME and X11 are not '
-                             'supported yet). She lives on sway, Hyprland, niri, river, Wayfire, '
-                             'labwc, KDE Plasma, COSMIC...\n')
+        display = Gdk.Display.get_default()
+        self.x11 = x11 is not None and x11.is_x11(display)
+        if self.x11 and not display.is_composited():
+            sys.stderr.write('yumi: X11 without a compositor cannot show a see-through window. '
+                             'Turn compositing on (or run picom) and start her again.\n')
             self.failed = True
+        elif not self.x11 and not (LayerShell and LayerShell.is_supported()):
+            sys.stderr.write('yumi: this desktop has no wlr-layer-shell (GNOME on Wayland is not '
+                             'supported yet). She lives on sway, Hyprland, niri, river, Wayfire, '
+                             'labwc, KDE Plasma, COSMIC and X11...\n')
+            self.failed = True
+        if self.failed:
             self.quit()
             return
+        if self.x11 and not self.x11_raising:
+            self.x11_raising = GLib.timeout_add_seconds(1, self.x11_raise)
         if not self.windows:
             self.sync_windows()
             self.kick()
+
+    def x11_raise(self):
+        """no layers on X11: back on top of the other windows, but not over a fullscreen one"""
+        if not x11.fullscreen_active():
+            for w in self.windows:
+                x11.raise_(w)
+        return True
 
     # ---- screens
     @staticmethod
@@ -669,8 +711,8 @@ class App(Gtk.Application):
             if w is self.active:
                 w.area.queue_draw()
                 w.update_input()
-                w.set_keyboard(LayerShell.KeyboardMode.EXCLUSIVE if b.form and not self.form_picking else
-                               LayerShell.KeyboardMode.ON_DEMAND if b.kb_hover else LayerShell.KeyboardMode.NONE)
+                w.set_keyboard('exclusive' if b.form and not self.form_picking else
+                               'on_demand' if b.kb_hover else 'none')
             elif b.mode == 'held' or w.drew:
                 w.area.queue_draw()                 # carried across / one last clear
         fps = b.fps()

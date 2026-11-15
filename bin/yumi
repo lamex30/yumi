@@ -1,5 +1,5 @@
 #!/bin/sh
-# Yumi, a sleepy pixel-art moth girl for Wayland desktops.
+# Yumi, a sleepy pixel-art moth girl for Wayland and X11 desktops.
 #   yumi [--toggle|--pipette|--home|--recent|--sleep|--monitor|--quit|--version|--help]
 # Flags go straight to the running Yumi over D-Bus (fast) and start her if she is not running.
 # She runs on her own (closing the terminal does not close her); --foreground keeps her attached.
@@ -40,13 +40,14 @@ if [ -z "$LIB" ]; then
         [ -e "$f" ] && LIB="$f" && break
     done
 fi
-if [ -z "$LIB" ]; then
+if [ -z "$LIB" ] && [ -n "$WAYLAND_DISPLAY" ]; then
     echo "yumi: gtk4-layer-shell is not installed (see the README for your distro)." >&2
     exit 1
 fi
 
 # Only python gets it: other tools may be built against an older glibc than the library (Nix).
-PRELOAD="$LIB${LD_PRELOAD:+:$LD_PRELOAD}"
+# X11 sessions do without it.
+PRELOAD="$LIB${LD_PRELOAD:+${LIB:+:}$LD_PRELOAD}"
 if [ -n "$FG" ]; then
     exec env LD_PRELOAD="$PRELOAD" python3 "$DIR/moth_girl.py" "$@"
 fi

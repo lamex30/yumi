@@ -50,11 +50,11 @@ English · [Русский](README.ru.md)
 
 ## Where she lives
 
-Yumi needs a Wayland compositor with **wlr-layer-shell**:
+Yumi needs a Wayland compositor with **wlr-layer-shell**, or an X11 session with a compositor:
 
 | Works | Not yet |
 | --- | --- |
-| sway, Hyprland, niri, river, Wayfire, labwc, KDE Plasma 6, COSMIC, other wlroots-based ones | GNOME (Mutter has no layer-shell), X11 sessions, Windows, macOS |
+| sway, Hyprland, niri, river, Wayfire, labwc, KDE Plasma 6, COSMIC, other wlroots-based ones; X11 with compositing on (KDE, Xfce, Cinnamon, MATE, GNOME on Xorg, i3 / bspwm / Openbox + picom) | GNOME on Wayland (Mutter has no layer-shell), Windows, macOS |
 
 Everything except the window itself is optional: when a tool is missing she simply does not do
 that one thing, and the settings say "not available yet" where it matters.
@@ -79,6 +79,7 @@ Optional, for the extras (install what you like):
 | `ffmpeg` | converting and compressing video, audio and GIFs |
 | `imagemagick`, `pngquant`, `oxipng`, `jpegoptim` | converting and compressing images |
 | `hyprpicker`, or `grim` + `slurp` | the color picker on wlroots compositors (KDE and COSMIC use the desktop portal) |
+| `xcolor` | the color picker on X11 (without it: the desktop portal) |
 | `wl-clipboard` | copying picked colors (falls back to GTK's clipboard) |
 | `swayidle` | dozing off when you are away |
 | `playerctl` | reacting to music |
@@ -272,7 +273,10 @@ unlike her hair).
 
 - **`gtk4-layer-shell is not installed`**: install it (see the table above). If it lives
   somewhere unusual, point to it: `YUMI_LAYER_SHELL_LIB=/path/to/libgtk4-layer-shell.so.0 yumi`.
-- **"this desktop has no wlr-layer-shell"**: you are on GNOME or X11; those are not supported yet.
+- **"this desktop has no wlr-layer-shell"**: you are on GNOME on Wayland; it is not supported yet
+  (an Xorg session works).
+- **"X11 without a compositor"**: turn compositing on in your desktop's settings, or run `picom`.
+  gtk4-layer-shell is not needed on X11.
 - **Wallpaper colors say "not available yet"**: your wallpaper tool is not one she knows. Write
   the hue to `~/.config/yumi/palette.json`, or open an issue saying which tool you use.
 - **She does not appear**: run `yumi --foreground` to see what she says, or look into

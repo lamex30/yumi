@@ -312,7 +312,7 @@ class Notifier:
 
 
 def copy_text(text):
-    if shutil.which('wl-copy'):
+    if shutil.which('wl-copy') and os.environ.get('WAYLAND_DISPLAY'):   # X11: GTK's clipboard (moth_girl.py)
         try:
             p = subprocess.Popen(['wl-copy', text], stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL, env=ENV, start_new_session=True)
@@ -324,20 +324,24 @@ def copy_text(text):
 
 def can_pick():
     return bool(shutil.which('hyprpicker') or (shutil.which('slurp') and shutil.which('grim'))
-                or os.environ.get('XDG_CURRENT_DESKTOP'))
+                or shutil.which('xcolor') or os.environ.get('XDG_CURRENT_DESKTOP'))
 
 
 def pick_color(done, accent=None):
     """let the user click a point on the screen; done('#rrggbb' or None) on the main loop.
-    hyprpicker, then slurp + grim (wlroots), then the desktop portal (KDE, COSMIC...)"""
+    hyprpicker, then slurp + grim (wlroots), xcolor on X11, then the desktop portal (KDE, COSMIC...)"""
     def work():
         hexc = None
         desk = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
-        if shutil.which('hyprpicker') and 'kde' not in desk:
+        wl = bool(os.environ.get('WAYLAND_DISPLAY'))
+        if not wl and shutil.which('xcolor'):
+            out = run('xcolor', timeout=120).strip()
+            hexc = out.lower() if re.fullmatch(r'#[0-9a-fA-F]{6}', out or '') else None
+        elif wl and shutil.which('hyprpicker') and 'kde' not in desk:
             out = run('hyprpicker', '-f', 'hex', timeout=120).strip()
             hexc = out if re.fullmatch(r'#?[0-9a-fA-F]{6}', out or '') else None
             hexc = hexc and '#' + hexc.lstrip('#').lower()
-        elif shutil.which('slurp') and shutil.which('grim') and 'kde' not in desk:
+        elif wl and shutil.which('slurp') and shutil.which('grim') and 'kde' not in desk:
             col = (accent or '#bea7c8').lstrip('#')[:6]
             geo = run('slurp', '-p', '-b', '00000000', '-c', col + 'ff', timeout=120).strip()
             if geo:
