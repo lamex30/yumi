@@ -107,6 +107,12 @@ OWW_CHUNK = 2560             # bytes of s16 sound per frame: 1280 samples, 80 ms
                              # the exact step the streaming melspectrogram keeps step with
                               # letters: over music vosk writes «юноша» for «юми», and
                               # only whisper reading the tape tells a name from a dream
+OWW_COOLDOWN = 2.0           # s of quiet after a wake before the ear may wake again:
+                             # the same name still ringing on the air must not fire twice
+WAKE_LEAD_MS = 1000.0        # ms of sound before the wake point that joins the phrase:
+                             # OpenWakeWord answers a frame or two INTO the name, the
+                             # head must be on the tape when STT reads it
+WAKE_LISTEN = 15.0           # s the wake keeps listening for the phrase after the name
 TAP_DIR = Path(os.environ.get('YUMI_TAP_DIR') or '/tmp/yumi')   # the ears' diary lives here
 TAP_SEGMENT = 600.0                     # s of tape in one wav, then the next file starts
 TAP_MAX_BYTES = 10 * 1024 * 1024        # a segment is no bigger than this: the diary is small
@@ -219,7 +225,8 @@ def _wake_tuning():
          'oww_veto': OWW_VETO, 'oww_window': 3.0, 'oww_spike': OWW_SPIKE,
          'oww_positive_ms': 240.0, 'judge_tape': JUDGE_TAPE, 'judge_rate': WAKE_REJUDGE,
          'judge_ttl': JUDGE_TTL, 'wake_phonetic': True, 'oww_stream_raw': True,
-         'stt_diag_wav': False}
+         'stt_diag_wav': False, 'oww_cooldown': OWW_COOLDOWN,
+         'wake_lead_ms': WAKE_LEAD_MS, 'wake_listen': WAKE_LISTEN}
 
     def clamp(key, lo, hi):
         try:
@@ -239,6 +246,9 @@ def _wake_tuning():
     clamp('judge_tape', 2.0, 8.0)
     clamp('judge_rate', 1.0, 30.0)
     clamp('judge_ttl', 2.0, 60.0)
+    clamp('oww_cooldown', 0.0, 30.0)
+    clamp('wake_lead_ms', 0.0, 4000.0)
+    clamp('wake_listen', 5.0, 30.0)
     t['oww_spike'] = int(t['oww_spike'])
     for key in ('wake_phonetic', 'oww_stream_raw', 'stt_diag_wav'):
         try:
@@ -626,6 +636,7 @@ def oww_ear_start():
 
 
 _ear_lag = [0.0]               # last time the ear's backlog was complained about
+_last_wake = [0.0]             # when the wake last handed over: the cooldown reads it
 
 
 def oww_ear_score(ear, chunk, reset=False):
@@ -760,6 +771,17 @@ class EarStat:
         self.active_t = 0.0
 
 
+def oww_wake_decision(stat):
+    """the trained ear's verdict on one frame's stats: a believed candidate wakes
+    her when the current frame stands on the sure line, or when the stretch's best
+    stands over the threshold line — OpenWakeWord alone decides, no judge, no Vosk
+    (разделы 2 и 6 ТЗ). The belief itself (a stretch of frames with its hold
+    hysteresis) is EarStat's work: one loud spike alone never wakes her."""
+    if not stat or not stat.get('active'):
+        return False
+    return stat['cur'] >= TUNE['oww_sure'] or stat['hi'] >= TUNE['oww_threshold']
+
+
 _LAT = {'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo', 'ж': 'zh',
         'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o',
         'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts',
@@ -848,6 +870,9 @@ class Utterance:
     def __init__(self):
         self.lead = bytearray()
         self.buf = bytearray()
+        self.lead_max = self.LEAD       # the lead's cap: the wake keeps the name's
+                                        # head (a second of it on the tape), a listen
+                                        # keeps a breath of the room before the voice
 
     def feed(self, chunk, voiced):
         """one cleaned chunk of s16 mono; True while a voice has ever passed by"""
@@ -855,8 +880,8 @@ class Utterance:
             self.buf += chunk       # once the voice began, the inner quiet is a phrase's own
         else:
             self.lead += chunk
-            if len(self.lead) > self.LEAD:
-                del self.lead[:-self.LEAD]
+            if len(self.lead) > self.lead_max:
+                del self.lead[:-self.lead_max]
         return self.buf
 
     def take(self):
@@ -1324,6 +1349,25 @@ class Ears:
         a tangled phrase better than the judge's quick beam 1"""
         return transcribe_model(self.whisper(lang, size), pcm, lang, beam=beam)
 
+    def transcribe_said(self, said, lang, size='small', engine='whisper'):
+        """the phrase's bytes (s16 mono RATE) through the engine the settings name:
+        nemotron or whisper read it; None when neither would — vosk's own words are
+        the caller's business. One place for listen() and wake() to read the tape."""
+        text = None
+        if engine == 'nemotron':
+            nrec = self.nemotron()
+            if nrec:                    # the streaming ear reads; when it fails,
+                try:                    # vosk's own words answer — whisper stays out
+                    text = transcribe_nemo_model(nrec, said, lang)
+                except Exception as e:  # noqa: BLE001 - it is best effort
+                    log('nemotron failed, vosk answers instead: ' + str(e)[-120:])
+        else:                           # the whisper ear (the settings name it) reads
+            try:
+                text = self.transcribe(said, lang, size)   # whisper reads the tape
+            except Exception as e:      # noqa: BLE001 - whisper is best effort
+                log('whisper failed, vosk answers instead: ' + str(e)[-120:])
+        return text
+
     def listen(self, lang, secs, quiet, size='small', mic=None, ear=None, engine='whisper'):
         """hear one phrase: the recognized text ('' when there was nothing)"""
         from vosk import KaldiRecognizer
@@ -1403,19 +1447,7 @@ class Ears:
                 text = ''
                 vtext = ' '.join(json.loads(rec.FinalResult() or '{}').get('text', '').split())
                 if len(said) >= RATE:         # under a second is a breath, not a phrase
-                    text = None
-                    if engine == 'nemotron':
-                        nrec = self.nemotron()
-                        if nrec:              # the streaming ear reads; when it fails,
-                            try:              # vosk's own words answer — whisper stays out
-                                text = transcribe_nemo_model(nrec, said, lang)
-                            except Exception as e:    # noqa: BLE001 - it is best effort
-                                log('nemotron failed, vosk answers instead: ' + str(e)[-120:])
-                    elif text is None:        # the whisper ear (the settings name it) reads
-                        try:
-                            text = self.transcribe(said, lang, size)   # whisper reads the tape
-                        except Exception as e:    # noqa: BLE001 - whisper is best effort
-                            log('whisper failed, vosk answers instead: ' + str(e)[-120:])
+                    text = self.transcribe_said(said, lang, size, engine)
                 if not text:                  # whisper silent or away: vosk's words stand in
                     text = vtext
                 return {'text': text, 'vosk': vtext}   # both readings: the mind will choose
@@ -1444,13 +1476,17 @@ class Ears:
              sensitivity='normal', confirm=True, model_size=None, judge_log=False,
              engine='whisper', oww_ear='auto', diag=False):
         """wait for the wake word, keeping the microphone on:
-        {'woke': True, 'text': the phrase after it} — the name was heard, the rest came
+        {'woke': True, 'text': the phrase after it} — the name was heard, the phrase came
         {'woke': True, 'text': ''} — the name alone, a phrase may still come
+        {'woke': False, 'stop': True, ...} — «стоп» was heard: everything stops now
         {'woke': False, ...} — quiet the whole 'secs', or called off by /stop, or busy.
-        'text' is what was said after the wake word: the app recognizes nothing twice.
-        OpenWakeWord with yumi.onnx is the only ear that decides — Vosk, Nemotron and
-        Whisper stay out of the wake decision and only hear the command after it."""
+        OpenWakeWord with yumi.onnx is the only ear that decides (раздел 2 ТЗ) — Vosk,
+        Nemotron and Whisper stay out of the wake decision: vosk runs as the light
+        independent «стоп» channel (it works in every state, раздел 9), and after the
+        name the phrase is heard out by the VAD endpointing and read by the configured
+        STT (раздел 7), with the phrase's head restored from the ring buffer."""
         import selectors
+        from vosk import KaldiRecognizer
         echo = echo_ready(mic)
         if echo and not (shutil.which('pw-record') or shutil.which('parecord')):
             echo = None                 # arecord cannot aim at a PipeWire source: plain mic then
@@ -1459,15 +1495,14 @@ class Ears:
             raise RuntimeError('no parecord, pw-record or arecord for the microphone')
         word = ' '.join(str(word).split()).lower() or 'юми'
         diag = Diag(diag or judge_log)      # the book of doubts: diag=1 or the diary switch
+        spellings = variants(word) | hearsay_load(word)    # the stop's glued heads («юмистоп»)
         if self.busy:                       # a wake or a listen already owns the mic:
             return {'woke': False, 'text': None}   # answer at once, before anything runs
 
-        # the ring of the last ~8 s of clean sound: so the start of the phrase
-        # can be given to STT after the name is heard
+        # the ring of the last ~8 s of clean sound: the phrase's head (the name's
+        # own beginning among it) goes to STT from here after the wake (раздел 10)
         ring = bytearray()
         RING_MAX = RATE * 8 * 2          # 8 s of s16 mono
-        voice_t0 = 0.0                   # when the name was heard: wake latency
-        woken = False
 
         def wake_result(text, why):
             """the wake's answer and its diary line: the time from the first voice
@@ -1490,6 +1525,35 @@ class Ears:
             except OSError:
                 pass
 
+        def diag_base(state, voiced=False):
+            """the fields every diary line carries (раздел 11 ТЗ): the state
+            (SLEEP/LISTENING/SPEAKING), whether the VAD hears a voice now, whether
+            her own voice is on the air (the mute) and whether the AEC is on"""
+            return {'state': state, 'vad_active': bool(voiced),
+                    'wake_threshold': TUNE['oww_threshold'],
+                    'tts_active': muted(), 'aec_active': bool(_echo['on'])}
+
+        def wake_latency():
+            """ms from the first voice on the air to now: the wake's latency"""
+            return round((time.monotonic() - voice_t0) * 1000.0) if voice_t0 else None
+
+        def wake_result(text, why, score=0.0):
+            """the wake's answer and its diary line"""
+            diag.event(arbitration='WAKE', reason=why, wake_candidate=True,
+                       wake_detected=True, wake_score=round(score, 4),
+                       wake_latency_ms=wake_latency(),
+                       buffer_duration_ms=round(len(ring) / (RATE * 2.0), 2),
+                       judge_called=False, final_wake=True,
+                       **diag_base('LISTENING'))
+            return {'woke': True, 'text': text}
+
+        def stop_result(text, state):
+            """the stop's answer and its diary line: «стоп» overrides everything,
+            and the record of when it happened is part of the wake's story"""
+            diag.event(arbitration='STOP', reason='stop_command', vosk_text=text,
+                       judge_called=False, final_wake=False, **diag_base(state))
+            judge_note(f'STOP {text!r}')
+            return {'woke': False, 'stop': True, 'text': text}
         with self.lock:                     # one microphone at a time
             if self.busy:
                 return {'woke': False, 'text': None}
@@ -1497,35 +1561,55 @@ class Ears:
             proc = None                     # the recorder may never be born: the finally checks
             diag_wav = bool(TUNE['stt_diag_wav']) or bool(diag)
             ear_tape = bytearray() if diag_wav else None
+            ear_oww = None                  # the trained ear is born inside, dies in the finally
+            voiced = False                  # the last chunk had a voice on it
             try:
-                # the trained ear «Юми» (openWakeWord, ~2 MB): it hears the name alone,
-                # no Vosk, no Nemotron, no Whisper in the way. It is born here, inside
-                # the lock, after the busy check: born on a busy path it would never
-                # reach the finally below and would haunt the RAM as an orphan (a new
-                # ~190 MB ear every call that found the wake busy — the oom killer's
+                # the recorder is born first: whatever fails after it is cleaned
+                # up by the finally below. The trained ear is born after the busy
+                # check, inside the lock — born on a busy path it would never reach
+                # the finally and would haunt the RAM as an orphan (a new ~190 MB
+                # ear every call that found the wake busy — the oom killer's
                 # dinner). It dies with this wake, a new one is born on the next.
-                ear_oww = None
+                try:
+                    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                except OSError as e:
+                    raise RuntimeError(f'the microphone would not start: {e}') from e
                 if oww_ear in ('auto', 'oww'):
                     ear_oww = oww_ear_start()
                     if oww_ear == 'oww' and ear_oww is None:
                         log('the trained ear is not here: wake will not hear the name')
                     elif ear_oww is not None:
                         log('the trained ear «Юми» is on duty: OpenWakeWord alone decides')
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            except OSError as e:
-                self.busy = False
-                raise RuntimeError(f'the microphone would not start: {e}')
-            try:
                 sel = selectors.DefaultSelector()
                 sel.register(proc.stdout, selectors.EVENT_READ)
+                try:
+                    # the stop ear: the small vosk reads the cleaned sound as it
+                    # comes, so «стоп» works in every state (раздел 9 ТЗ) — the
+                    # name decision never touches it
+                    rec = KaldiRecognizer(self.model(lang, 'small'), RATE)
+                    rec.SetWords(False)
+                except Exception as e:      # noqa: BLE001 - no vosk: no stop channel
+                    log('the stop ear will not start: ' + str(e)[-120:])
+                    rec = None
+                det = Detector()            # one detector for the whole window: its state lives
                 gmin, gk = ear_gate(ear)
                 st = {'hp': 0.0, 'floor': None, 'gate_min': gmin, 'gate_k': gk}  # cleaner's memory
                 t0 = time.monotonic()
                 heard = False               # at least one byte of sound has arrived
                 last_chunk = t0             # when the recorder last gave a byte
                 respawns = 0                # how many times the recorder restarted
-                ear_stat = {'hi': 0.0, 'cur': 0.0, 'streak': 0, 'active': False,
-                            'hi_t': 0.0, 'mean': 0.0}   # the trained ear's hysteresis window
+                was_muted = False           # her voice was on the air when the last chunk came
+                woken = False               # the name has passed by: LISTENING now
+                wake_t = 0.0                # when the name was believed
+                wake_score = 0.0            # the ear's best score of the wake
+                voice_t0 = 0.0              # when a voice first came: the wake latency
+                was_voiced = False          # a voice was on the last chunk
+                phrase_ms = 0.0             # speech since the name: the phrase gathers
+                heard_after = ''            # the old ear's words past the name (vosk fallback)
+                ear_stat = EarStat()        # the trained ear's hysteresis window
+                utt = None                  # the phrase on tape, LISTENING only
+                ear_note = [0.0]            # when the ear's last loud frame was noted
+                cool_note = [False]         # the cooldown logged once a window, not a storm
                 judge_note(f'WAKE open {secs:.0f} s (OpenWakeWord only)')
                 while time.monotonic() - t0 < secs:
                     if self.abort:
@@ -1533,23 +1617,43 @@ class Ears:
                     if not sel.select(0.5):
                         if not heard and time.monotonic() - t0 > 8:
                             raise RuntimeError(f'{name} gave no sound')
-                        if woken and time.monotonic() - voice_t0 > WAKE_AFTER:
+                        if woken and phrase_ms == 0 and \
+                                time.monotonic() - wake_t > WAKE_AFTER:
                             # the name passed by, nothing followed it: her turn to greet
-                            return wake_result(heard_after, 'quiet_after_name')
+                            return wake_result('', 'name_alone', wake_score)
+                        if woken and time.monotonic() - wake_t > TUNE['wake_listen']:
+                            break           # the phrase ran long: hand out what has gathered
                         # the recorder went dumb mid-window (a source yanked away, a
                         # driver's sulks): the ears must not wait out the whole wake
-                        # deaf — the recorder starts over, vosk and the detector with it
+                        # deaf — the recorder starts over, the stop ear and the
+                        # detector with it, and whatever the gap tore goes
                         if heard and time.monotonic() - last_chunk > 6:
                             proc.terminate()
                             try:
                                 proc.wait(timeout=2)
                             except subprocess.TimeoutExpired:
                                 proc.kill()
+                            respawns += 1
+                            if respawns > 3:
+                                raise RuntimeError(f'{name} keeps going dumb')
+                            log(f'the microphone went dumb, {name} starts again ({respawns})')
                             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                                     stderr=subprocess.PIPE)
-                            respawns += 1
                             sel.register(proc.stdout, selectors.EVENT_READ)
                             last_chunk = time.monotonic()
+                            if rec is not None:
+                                rec = KaldiRecognizer(self.model(lang, 'small'), RATE)
+                                rec.SetWords(False)
+                            det = Detector()
+                            del ring[:]             # the gap tore the stream: a stitched
+                                                    # phrase would read as a dream
+                            if ear_oww is not None:
+                                oww_ear_score(ear_oww, b'', reset=True)   # the ear forgets it too
+                            ear_stat.reset()
+                            utt = None
+                            voice_t0 = 0.0
+                            was_voiced = False
+                        continue
                     chunk = os.read(proc.stdout.fileno(), 4000)     # ~0.125 s of audio
                     last_chunk = time.monotonic()
                     if not chunk:
@@ -1561,67 +1665,158 @@ class Ears:
                                 pass
                         if die not in (None, 0):
                             raise RuntimeError(f'{name} died ({die}){err}'.rstrip())
-                        if woken:
-                            return wake_result(heard_after, 'recorder_gone')   # the name was on tape
-                        break
+                        break               # the stream is over: what is on the tape stands
                     heard = True
                     clean = hp_pass(chunk, st)          # hum and rumble go
-                    det = Detector()
-                    det.feed(clean)
-                    voiced = det.speech_ms > 0
-                    chunk = gate_noise(clean, st, voiced)    # the hiss dies, speech is kept
-                    # feed the cleaned sound to the trained ear: one score per 80 ms frame
-                    if ear_oww is not None:
-                        score = oww_ear_score(ear_oww, clean)
-                        if score:
-                            now = time.monotonic()
-                            # keep the ring: the last ~8 s of clean sound
-                            ring += clean
-                            if len(ring) > RING_MAX:
-                                del ring[:-RING_MAX]
-                            if ear_tape is not None:
-                                ear_tape += clean
-                            # EarStat-style hysteresis inline:
-                            # a louder frame takes the top at once; a quiet frame
-                            # replaces the peak only when the window runs out
-                            if score > ear_stat['hi'] or now - ear_stat['hi_t'] > 3.0:
-                                ear_stat['hi'] = score
-                                ear_stat['hi_t'] = now
-                            ear_stat['cur'] = score
-                            if score >= TUNE['oww_sure']:
-                                ear_stat['streak'] += 1
-                            elif score >= TUNE['oww_threshold']:
-                                ear_stat['streak'] = ear_stat['streak'] + 1 if ear_stat['streak'] else 1
-                            else:
-                                ear_stat['streak'] = 0
-                            ear_stat['active'] = ear_stat['streak'] >= TUNE['oww_spike']
-                            ear_stat['mean'] = (ear_stat['mean'] * 0.9 + score * 0.1)
-                            # the name is sure: wake at once, no judge, no Vosk
-                            if ear_stat['active'] and ear_stat['cur'] >= TUNE['oww_sure']:
+                    voiced = det.feed(clean)            # the voice detector follows the frames
+                    if voiced and not was_voiced and not voice_t0:
+                        voice_t0 = time.monotonic()     # a voice began: the latency clock runs
+                    was_voiced = voiced
+                    chunk = gate_noise(clean, st, voiced)   # the hiss dies, speech is kept
+                    if muted():
+                        # she is speaking: the ears are shut to her own voice — the
+                        # trained ear, the ring and the tape do not see it. But «стоп»
+                        # must cut her off mid-word: the stop ear keeps running, and
+                        # through the closed ears only a stop and nothing else counts
+                        if rec is not None and rec.AcceptWaveform(chunk):
+                            words = ' '.join(json.loads(
+                                rec.FinalResult() or '{}').get('text', '').split())
+                            if stop_shout(words, spellings):
+                                return stop_result(words, 'SPEAKING')
+                        was_muted = True
+                        continue
+                    if was_muted:               # the mute ran out mid-window: her voice
+                        was_muted = False       # stays out of the stop ear, the ring,
+                        if rec is not None:     # the detector and the ear's memory
+                            rec = KaldiRecognizer(self.model(lang, 'small'), RATE)
+                            rec.SetWords(False)
+                        det = Detector()
+                        del ring[:]             # the buffer held only her voice: it goes
+                        if ear_oww is not None:
+                            oww_ear_score(ear_oww, b'', reset=True)   # the ear forgets her voice too
+                        ear_stat.reset()
+                        utt = None
+                        voice_t0 = 0.0
+                        was_voiced = False
+                    # the stop ear: «стоп» overrides everything, wake word or not —
+                    # in SLEEP a stop word in the passing speech stops her (as it
+                    # always did), in LISTENING only a phrase that is a stop and
+                    # nothing else does («останови музыку» is a command: it goes
+                    # to STT, not to the stop)
+                    if rec is not None:
+                        if rec.AcceptWaveform(chunk):
+                            words = ' '.join(json.loads(
+                                rec.FinalResult() or '{}').get('text', '').split())
+                            self.tap.note(words)    # the tap's diary takes the wake's phrases
+                        else:
+                            words = json.loads(rec.PartialResult() or '{}').get('partial', '')
+                        if stop_at(words) or stop_mush(words, spellings):
+                            if not woken or stop_shout(words, spellings):
+                                return stop_result(words, 'LISTENING' if woken else 'SLEEP')
+                    else:
+                        words = ''
+                    # the ring: every clean chunk lands here (not only the loud
+                    # ones — the phrase's head must be whole for STT)
+                    ring += clean
+                    if len(ring) > RING_MAX:
+                        del ring[:-RING_MAX]
+                    if ear_tape is not None:
+                        ear_tape += clean
+                    # the trained ear, SLEEP only: once the name is believed its
+                    # work is done, the phrase is nobody's but the user's
+                    if ear_oww is not None and not woken:
+                        score = oww_ear_score(ear_oww, clean if TUNE['oww_stream_raw'] else chunk)
+                        if judge_log and score >= 0.1 and \
+                                time.monotonic() - ear_note[0] > 0.5:
+                            ear_note[0] = time.monotonic()
+                            judge_note(f'EAR {score:.2f}')
+                        stat = ear_stat.feed(score, time.monotonic())
+                        if stat['active']:
+                            # a wake just handed over: the same name still ringing on
+                            # the air must not wake her twice (cooldown, configurable)
+                            if time.monotonic() - _last_wake[0] < TUNE['oww_cooldown']:
+                                if not cool_note[0]:
+                                    cool_note[0] = True
+                                    judge_note(f'WAKE held by cooldown (hi={stat["hi"]:.2f})')
+                            elif oww_wake_decision(stat):
+                                # the name is believed: OpenWakeWord alone decided
                                 woken = True
-                                voice_t0 = time.monotonic()
-                                judge_note(f'WAKE ear_sure (score={ear_stat["cur"]:.2f})')
-                                break
-                            # strong but not sure: still wake — OpenWakeWord alone decides
-                            elif ear_stat['active'] and ear_stat['hi'] >= TUNE['oww_threshold']:
-                                woken = True
-                                voice_t0 = time.monotonic()
-                                judge_note(f'WAKE ear_strong (hi={ear_stat["hi"]:.2f}, '
-                                           f'cur={ear_stat["cur"]:.2f})')
-                                break
-                    # keep the ring even when the ear is away (diagnostic / fallback)
-                    if ear_oww is None:
-                        ring += clean
-                        if len(ring) > RING_MAX:
-                            del ring[:-RING_MAX]
-                        if ear_tape is not None:
-                            ear_tape += clean
+                                wake_t = time.monotonic()
+                                wake_score = stat['hi']
+                                _last_wake[0] = wake_t
+                                judge_note(f'WAKE oww (hi={stat["hi"]:.2f}, '
+                                           f'cur={stat["cur"]:.2f})')
+                                diag.event(arbitration='CANDIDATE', reason='oww_stretch',
+                                           wake_candidate=True,
+                                           wake_score=round(stat['hi'], 4),
+                                           judge_called=False, final_wake=False,
+                                           **diag_base('LISTENING', voiced))
+                                # the phrase's head comes off the ring: OpenWakeWord
+                                # answers a frame or two INTO the name, the head must
+                                # be on the tape when STT reads it
+                                lead = int(TUNE['wake_lead_ms'] * RATE * 2 / 1000.0)
+                                utt = Utterance()
+                                utt.lead = bytearray(ring[-lead:]) if lead else bytearray()
+                                utt.lead_max = max(utt.LEAD, len(utt.lead))
+                                ear_stat.reset()    # the window starts over with her listening
+                                det = Detector()    # the phrase's own count of speech and quiet
+                                phrase_ms = 0.0
+                    elif ear_oww is None and not woken and words:
+                        # no trained ear (wake_ear: vosk, or auto without the
+                        # model): the name from vosk's own words, the way the ears
+                        # worked before the trained one arrived — not deaf, as before
+                        tail, said = wake_at(words, spellings, 1)
+                        if tail is not None:
+                            woken = True
+                            wake_t = time.monotonic()
+                            _last_wake[0] = wake_t
+                            heard_after = tail or ''
+                            judge_note(f'WAKE vosk ({words!r})')
+                            diag.event(arbitration='CANDIDATE', reason='vosk_name',
+                                       vosk_text=words, wake_candidate=True,
+                                       judge_called=False, final_wake=False,
+                                       **diag_base('LISTENING', voiced))
+                            lead = int(TUNE['wake_lead_ms'] * RATE * 2 / 1000.0)
+                            utt = Utterance()
+                            utt.lead = bytearray(ring[-lead:]) if lead else bytearray()
+                            utt.lead_max = max(utt.LEAD, len(utt.lead))
+                            det = Detector()
+                            phrase_ms = 0.0
+                    if woken:
+                        # LISTENING: the phrase after the name gathers on the tape,
+                        # its end comes from the same VAD endpointing as ever
+                        if utt is not None:
+                            utt.feed(clean, voiced)
+                        if voiced:
+                            phrase_ms += len(clean) / (RATE * 2.0) * 1000.0
+                        if phrase_ms >= 400 and det.silence_ms >= VAD_TAIL:
+                            break           # the voice died down: the phrase is over
+                        if phrase_ms == 0 and time.monotonic() - wake_t > WAKE_AFTER:
+                            # the name alone: her turn to greet (1.5 s of quiet)
+                            return wake_result('', 'name_alone', wake_score)
                 if not woken:
-                    diag.event(arbitration='TIMEOUT', reason='no_wake',
-                               judge_called=False, final_wake=False)
+                    diag.event(arbitration='TIMEOUT',
+                               reason='aborted' if self.abort else 'no_wake',
+                               judge_called=False, final_wake=False,
+                               **diag_base('SLEEP', voiced))
                     return {'woke': False, 'text': None}
-                # the name was heard: OpenWakeWord alone decided
-                return wake_result('', 'wake_word')
+                # the name was heard: the phrase on the tape goes to the configured
+                # STT (Nemotron/Whisper read it, vosk stays for the phrase ends —
+                # exactly as the settings say, раздел 7 ТЗ)
+                said = utt.take() if utt is not None else b''
+                text = ''
+                if len(said) >= RATE:           # under a second is a breath, not a phrase
+                    diag.event(arbitration='STT', reason='phrase_end', stt_start=True,
+                               judge_called=False, final_wake=False,
+                               **diag_base('LISTENING', voiced))
+                    text = self.transcribe_said(said, lang, size, engine) or ''
+                    diag.event(arbitration='STT', reason='stt_done', stt_text=text,
+                               judge_called=False, final_wake=False,
+                               **diag_base('LISTENING', voiced))
+                if not text and heard_after:
+                    text = heard_after          # the old ear's words past the name stand in
+                return wake_result(text, 'phrase_after_name' if text else 'name_alone',
+                                   wake_score)
             finally:
                 if diag_wav and ear_tape:
                     wake_feed_wav(ear_tape)     # what the ear heard, for the shelf
