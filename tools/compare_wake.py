@@ -191,7 +191,9 @@ def main():
         line2.update(engine='old', final_wake=old_woke, text=old_text)
         lines.append(line2)
 
-        print(f'{path.name:45s} truth={truth} new={new_woke} (score={new_score:.3f} if new_score else None) old={old_woke} text={old_text!r}')
+        score_txt = f'{new_score:.3f}' if new_score is not None else 'None'
+        print(f'{path.name:45s} truth={truth} new={new_woke} (score={score_txt}) '
+              f'old={old_woke} text={old_text!r}')
 
     # append to the diary
     with open(OUT, 'a', encoding='utf-8') as f:
