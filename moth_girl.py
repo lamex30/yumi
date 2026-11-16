@@ -1124,7 +1124,28 @@ class App(Gtk.Application):
                     continue            # she got busy in those seconds: the word is spent
                 if b.now < b.talk_until or self.talking():
                     self.hush()         # her own line was still sounding: it dies, your turn now
-                GLib.idle_add(lambda t=tail: self.ev(lambda br: br.wake_up(t)) and False)
+                if tail:
+                    # name + text already recognised: pass the whole phrase straight to the brain
+                    GLib.idle_add(lambda t=tail: self.ev(lambda br: br.wake_up(t)) and False)
+                else:
+                    # «юми» без текста: ухо openWakeWord seules détecte l'イмя,
+                    # команда за ней теряется — слушаем фразу, которая пошла после имени
+                    cmd = ears.listen(lang=self.settings.get('speech_lang', 'ru'),
+                                      secs=15,
+                                      size=self.settings.get('stt_size', 'small'),
+                                      mic=self.settings.get('stt_mic'),
+                                      ear=self.settings.get('ears_range', 'mid'),
+                                      engine=self.settings.get('stt_engine'))
+                    if cmd:
+                        said = cmd.get('text') or ''
+                        if said:
+                            GLib.idle_add(lambda t=said: self.ev(lambda br: br.wake_up(t)) and False)
+                        else:
+                            # silence after the name: she asks what you wanted
+                            GLib.idle_add(lambda: self.ev(lambda br: br.wake_up('')) and False)
+                    else:
+                        # ears unavailable: fall back to asking
+                        GLib.idle_add(lambda: self.ev(lambda br: br.wake_up('')) and False)
 
         self.wake_thread = threading.Thread(target=work, daemon=True)
         self.wake_thread.start()
