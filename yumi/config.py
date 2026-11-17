@@ -40,6 +40,14 @@ DEFAULT_SETTINGS = {
     'ollama_url': 'http://127.0.0.1:11434',   # where her local Ollama lives
     'polza_url': 'https://polza.ai/api/v1',   # Polza.ai OpenAI-compatible endpoint
     'polza_api_key': '',   # Polza.ai API key (get it at polza.ai)
+    'chat_history_n': 10,     # how many of her last messages go along with every
+                              # new question, so the answer knows the whole turn
+    'chat_memory': True,      # she keeps the talks in a sqlite diary and recalls
+                              # the older lines about the same thing into the
+                              # context (yumi/memory.py)
+    'embed_model': 'nomic-embed-text',   # the Ollama mind's embeddings for the
+                              # recall; without it a light hashed bag-of-words
+                              # stands in, so the diary works offline all the same
     'wake_ears': True,        # she starts listening the moment you say the wake word
     'music_skill': True,      # music control via voice commands
     'nlu': True,              # her own voice commands: the phrases in actions.json
@@ -263,6 +271,7 @@ UI = {
         'joke': 'Joke',
         'chat_refresh': 'Find the model',
         'chat_think': 'Let her think first',
+        'chat_history_n': 'Messages in mind', 'chat_memory': 'Recall older talks',
         'wake_ears': 'Wake when you say «Yumi»', 'stt_engine': 'Ear for phrases',
         'eng_whisper': 'Whisper', 'eng_nemotron': 'Nemotron 0.6b (fast)',
         'stt_size': 'Whisper ear size', 'e_small': 'Lite (~460 MB)',
@@ -321,6 +330,7 @@ UI = {
         'joke': 'Анекдот',
         'chat_refresh': 'Найти модель',
         'chat_think': 'Дать ей подумать',
+        'chat_history_n': 'Сообщений в памяти', 'chat_memory': 'Помнить разговоры',
         'wake_ears': 'Будить, когда скажешь «Юми»', 'stt_engine': 'Ухо для фраз',
         'eng_whisper': 'Whisper', 'eng_nemotron': 'Nemotron 0.6b (быстрое)',
         'stt_size': 'Размер whisper-уха', 'e_small': 'Лёгкая (~460 МБ)',

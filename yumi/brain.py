@@ -510,6 +510,7 @@ class Brain(Extras):
                 'wake_judge_log': [True, False],
                 'chat_provider': ['ollama', 'polza.ai'],
                 'chat_model': self.chat_models or [self.settings.get('chat_model')],
+                'chat_history_n': [2, 4, 6, 10, 16, 24],
                 'music_source': ['auto', 'jellyfin', 'local']}
 
     outfit_names = []                 # outfit folders found in sprites/outfits (set by the app)
@@ -937,7 +938,8 @@ class Brain(Extras):
             if not self.chat_models and 'chat_model' not in self.unavailable:
                 self.requests.append(('chat_models',))
             rows = [('set', 'chat_provider', t('chat_provider')), ('set', 'chat_model', t('chat_model')),
-                    ('set', 'chat_think', t('chat_think')), ('set', 'nlu', t('nlu')),
+                    ('set', 'chat_think', t('chat_think')), ('set', 'chat_history_n', t('chat_history_n')),
+                    ('set', 'chat_memory', t('chat_memory')), ('set', 'nlu', t('nlu')),
                     ('set', 'intents', t('intents'))]
             if self.chat_models:        # the list may have grown stale: a way to look again
                 rows.append(('chat_refresh', None, t('chat_refresh')))
@@ -988,10 +990,6 @@ class Brain(Extras):
     def do(self, action, arg):
         data = (self.menu or {}).get('data') or {}
         if self.extras_do(action, arg):
-            return
-        if action == 'search':
-            # Search for files - will be handled via requests
-            self.requests.append(('search_files', arg))
             return
         if action == 'pile':
             self.menu = None
@@ -1271,7 +1269,10 @@ class Brain(Extras):
         _mind_log('chat')
         # Fall through to normal text processing if music skill is disabled
         self.chat_history.append({'role': 'user', 'content': text})
-        del self.chat_history[:-10]     # she remembers her last five turns
+        n = max(2, int(self.settings.get('chat_history_n', 10)))
+        del self.chat_history[:-n]     # the recent turn goes along (Settings → Her mind);
+                                       # the older lines come back through the diary,
+                                       # only those about the same thing (yumi/memory.py)
         self.thinking = True
         self.requests.append(('chat_ask', list(self.chat_history)))
 

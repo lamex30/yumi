@@ -101,6 +101,23 @@ def _think(settings):
     return bool(settings.get('chat_think', False))
 
 
+def recalled_note(turns, lang='en'):
+    """the older lines the diary recalled as one system note for the mind:
+    they are far away in time, so they matter only when the phrase right now
+    really follows them (the talks about other things must not bleed in)"""
+    if not turns:
+        return ''
+    lines = '\n'.join(('— вы: ' if t['role'] == 'user' else '— она: ') + t['text']
+                      for t in turns)
+    if str(lang) == 'ru':
+        return ('Из ваших давних разговоров на похожую тему (давно; используй их, '
+                'только если это важно и сейчас):\n' + lines)
+    return ('From your older talks about a similar topic (long ago; use them only '
+            'when they still matter now):\n'
+            + '\n'.join(('— you: ' if t['role'] == 'user' else '— she: ') + t['text']
+                        for t in turns))
+
+
 def _strip_think(text):
     """the mind's silent reasoning sometimes leaks into the answer as a
     «<think>...» block: it never reaches the bubble"""

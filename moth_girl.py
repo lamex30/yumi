@@ -40,7 +40,7 @@ from gi.repository import Gdk, GdkPixbuf, Gio, GLib, GObject, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from yumi import chat, config, ears, files, jobs, music, pixfont, pixui, system, tts, voice  # noqa: E402
+from yumi import chat, config, ears, files, jobs, memory, music, pixfont, pixui, system, tts, voice  # noqa: E402
 from yumi.brain import UI_PX, Brain  # noqa: E402
 from yumi.phrases import Speech  # noqa: E402
 from yumi.sprites import Meta, palette_delta, palette_from_hue, recolor_bgra, ui_colors  # noqa: E402
@@ -768,77 +768,6 @@ class App(Gtk.Application):
                     b.nap = False          # you asked her to wake: the nap guard must not ignore it
                 self.world.set_dnd(r[1])
                 b.set_sleep(r[1])          # the notification daemon will confirm; act now
-            elif kind == 'search_files':
-                query = r[1] if len(r) > 1 else ''
-                if query:
-                    # Search for files using find or fd
-                    import subprocess
-                    from pathlib import Path
-                    
-                    expand_path = Path.home()
-                    results = []
-                    
-                    # Try fd first
-                    try:
-                        result = subprocess.run(
-                            ['fd', '-t', 'f', '--glob', query, str(expand_path)],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        if result.returncode == 0 and result.stdout.strip():
-                            results = [Path(p) for p in result.stdout.strip().split('\n') if p.strip()]
-                    except Exception:
-                        pass
-                    
-                    # Fall back to find
-                    if not results:
-                        try:
-                            result = subprocess.run(
-                                ['find', str(expand_path), '-name', query, '-type', 'f'],
-                                capture_output=True, text=True, timeout=30
-                            )
-                            if result.returncode == 0:
-                                results = [Path(p) for p in result.stdout.strip().split('\n') if p.strip()]
-                        except Exception:
-                            pass
-                    
-                    # Return results to brain
-                    if results:
-                        b.requests.append(('search_results', results))
-                    else:
-                        b.requests.append(('search_done', []))
-            elif kind == 'search_results':
-                # Display search results in a menu
-                results = r[1]
-                if results:
-                    # Create a menu with search results
-                    lang = b.settings.get('ui_lang', 'en')
-                    ui = config.UI.get(lang, config.UI['en'])
-                    
-                    rows = []
-                    for i, path in enumerate(results[:10]):  # Show max 10 results
-                        name = path.name
-                        rows.append(('menu', f'search_{i}', name))
-                    
-                    if len(results) > 10:
-                        rows.append(('more', None, f'... и еще {len(results) - 10}'))
-                    
-                    rows.append(('back', None, ui.get('back', 'Back')))
-                    
-                    b.menu = {
-                        'kind': 'search',
-                        'rows': rows,
-                        'title': ui.get('search_title', 'Результаты поиска'),
-                        'data': {'query': r[2] if len(r) > 2 else query, 'results': [str(p) for p in results]}
-                    }
-                else:
-                    b.menu = {
-                        'kind': 'search',
-                        'rows': [('none', None, 'Файлы не найдены')],
-                        'title': ui.get('search_title', 'Результаты поиска'),
-                    }
-            elif kind == 'search_done':
-                # Clear search state
-                b.menu = None
             elif kind == 'copy':
                 if not system.copy_text(r[1]):
                     Gdk.Display.get_default().get_clipboard().set(r[1])
@@ -1159,8 +1088,29 @@ class App(Gtk.Application):
     def chat_ask(self, history):
         """the question is away to Ollama; the answer comes back into her bubble"""
         def work():
-            prompt = chat.system_prompt(self.settings.get('speech_lang', 'en'))
-            reply = chat.ask(self.settings, [{'role': 'system', 'content': prompt}] + history)
+            s = self.settings
+            lang = s.get('speech_lang', 'en')
+            user_text = str(history[-1].get('content') or '')   # the question just asked
+            history = list(history)
+            # the diary: older lines about the same thing join the question, the
+            # talks about other things stay out of the way (yumi/memory.py)
+            if s.get('chat_memory', True):
+                try:
+                    note = chat.recalled_note(
+                        memory.recall(user_text, s, skip_recent=len(history)), lang)
+                except Exception:
+                    note = ''
+                if note:
+                    history.append({'role': 'system', 'content': note})
+            prompt = chat.system_prompt(lang)
+            reply = chat.ask(s, [{'role': 'system', 'content': prompt}] + history)
+            if s.get('chat_memory', True):
+                try:
+                    memory.remember('user', user_text, s)
+                    if reply:
+                        memory.remember('assistant', reply, s)
+                except Exception:
+                    pass
             GLib.idle_add(lambda: self.ev(lambda b: b.replied(reply)) and False)
         threading.Thread(target=work, daemon=True).start()
 
