@@ -3,6 +3,7 @@
 to the source that is awake. Run: python3 tests/test_library.py"""
 import importlib.util
 import json
+import socket
 import sys
 import tempfile
 from pathlib import Path
@@ -143,16 +144,28 @@ assert srv.search('несуществующее слово') == []
 # the address is parsed the way she reads music_server: 'password@host:port'
 srv = library.ServerMpd({'music_server': '12qwaszx@192.168.0.189:6600'})
 assert srv.password == '12qwaszx' and srv.host == '192.168.0.189' and srv.port == '6600'
+# the knock: a plain door on her own machine answers, no real server is asked
+door = socket.socket()
+door.bind(('127.0.0.1', 0))
+door.listen()
+srv = library.ServerMpd({'music_server': f'12qwaszx@127.0.0.1:{door.getsockname()[1]}'})
 assert srv.ok() and srv.available()
+door.close()
 srv = library.ServerMpd({})
 assert not srv.ok() and not srv.available()
 
 # the chain: a dead jellyfin steps aside in auto, the server comes next —
-# and a server that is not named anywhere leaves the folders
-assert library.pick(dead)[0] == 'local'          # no music_server in `dead`
-chain = dict(dead, music_server='12qwaszx@192.168.0.189:6600')
-assert library.pick(chain)[0] == 'server', library.pick(chain)[0]
-assert library.pick(dict(chain, music_source='local'))[0] == 'local'
+# and a server that is not named anywhere leaves the folders (the knock is
+# faked here, too: no network of her own is asked)
+saved_available = library.ServerMpd.available
+library.ServerMpd.available = lambda self, timeout=1.5: True
+try:
+    assert library.pick(dead)[0] == 'local'          # no music_server in `dead`
+    chain = dict(dead, music_server='12qwaszx@192.168.0.189:6600')
+    assert library.pick(chain)[0] == 'server', library.pick(chain)[0]
+    assert library.pick(dict(chain, music_source='local'))[0] == 'local'
+finally:
+    library.ServerMpd.available = saved_available
 
 # the search goes down the chain when the name is found nowhere: a jellyfin
 # that never answers is followed by the server's mpd, then her folders
@@ -161,9 +174,10 @@ empty_jf.search = lambda q, limit=5: []
 empty_jf.by_artist = lambda q, limit=25: []
 empty_jf.by_album = lambda q, limit=40: []
 saved_pick = library.pick
+saved = library.ServerMpd.available, library.ServerMpd.tracks
 library.pick = lambda settings: ('jellyfin', empty_jf)
-srv = library.ServerMpd({'music_server': '12qwaszx@192.168.0.189:6600'})
-srv.tracks = lambda: srv_tracks
+library.ServerMpd.available = lambda self, timeout=1.5: True
+library.ServerMpd.tracks = lambda self: srv_tracks
 res = library.resolve({'music_server': '12qwaszx@192.168.0.189:6600'}, 'song', 'california love')
 assert res['source'] == 'server' and 'California' in res['tracks'][0]['title'], res
 res = library.resolve({}, 'song', 'крылья')   # neither jellyfin nor the server has it: her folders do
@@ -171,6 +185,7 @@ assert res['source'] == 'local' and res['tracks'][0]['title'] == 'Крылья',
 res = library.resolve({}, 'random')                 # a surprise never leaves the house it woke in
 assert res['source'] == 'jellyfin' and res['tracks'] == []
 library.pick = saved_pick
+library.ServerMpd.available, library.ServerMpd.tracks = saved
 
 # her mind spells the name the way the covers do («тупак» is 2Pac)
 import yumi.chat as chat
