@@ -40,6 +40,21 @@ assert stt.OWW_VETO < stt.OWW_THRESHOLD < stt.OWW_SURE
 assert stt.TUNE['oww_cooldown'] == stt.OWW_COOLDOWN
 assert stt.TUNE['wake_lead_ms'] == stt.WAKE_LEAD_MS
 assert stt.TUNE['wake_listen'] == stt.WAKE_LISTEN
+# vosk-фолбэк: финалы стоп-ухи в окне вокруг пробуждения настраиваются и зажаты
+assert stt.TUNE['wake_vosk_fallback'] == stt.WAKE_VOSK_FALLBACK
+now = 1000.0
+# команда, закончившаяся до имени, стоит (финал прямо на пробуждении)
+assert stt.fresh_vosk([(now, 'включи музыку')], now) == 'включи музыку'
+# первые слова после имени — команда; хвост позже окна — мимо
+assert stt.fresh_vosk([(now + 2.0, 'включи музыку'),
+                       (now + 7.0, 'вели и ревущий')], now) == 'включи музыку'
+# болтовня задолго до пробуждения не считается командой
+assert stt.fresh_vosk([(now - 10.0, 'привет как дела')], now) == ''
+# пустой памяти — пустой фолбэк
+assert stt.fresh_vosk([], now) == ''
+# несколько финалов в окне идут вместе
+assert stt.fresh_vosk([(now - 1.0, 'юми'), (now + 2.0, 'включи музыку')],
+                      now) == 'юми включи музыку'
 
 # ---- решение wake(): одиночный всплеск не будит, растяжка будит (§6) ----
 now = 1000.0

@@ -502,7 +502,6 @@ class Brain(Extras):
                 'stt_engine': ['whisper', 'nemotron'],
                 'stt_size': ['small', 'big'],
                 'stt_mic': [None] + [m['name'] for m in self.mics],
-                'ears_range': ['near', 'mid', 'far'],
                 'stt_echo': [True, False],
                 'wake_sensitivity': ['normal', 'strict'],
                 'wake_confirm': [True, False],
@@ -529,8 +528,6 @@ class Brain(Extras):
             return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
         if arg == 'stt_engine':
             return t('eng_' + str(val)) if f'eng_{val}' in UI['en'] else str(val)
-        if arg == 'ears_range':
-            return t('r_' + str(val)) if f'r_{val}' in UI['en'] else str(val)
         if arg == 'stt_echo':
             return t('on') if val else t('off')
         if arg == 'wake_sensitivity':
@@ -916,8 +913,7 @@ class Brain(Extras):
             if (self.settings.get('stt_engine') or 'whisper') == 'whisper':
                 # the whisper ear's size: with the nemotron ear named, this row does nothing
                 rows.append(('set', 'stt_size', t('stt_size')))
-            rows += [('set', 'stt_mic', t('stt_mic')), ('set', 'ears_range', t('ears_range')),
-                    ('set', 'stt_echo', t('stt_echo')),
+            rows += [('set', 'stt_mic', t('stt_mic')), ('set', 'stt_echo', t('stt_echo')),
                     ('set', 'tap_ears', t('tap_ears')), ('set', 'wake_sensitivity', t('wake_sensitivity')),
                     ('set', 'wake_confirm', t('wake_confirm')), ('set', 'wake_ear', t('wake_ear')),
                     ('set', 'wake_model_size', t('wake_model_size')),
@@ -1089,8 +1085,6 @@ class Brain(Extras):
                 self.requests.append(('wake_set', s[arg]))
             if arg == 'tap_ears':
                 self.requests.append(('tap_set', s[arg]))
-            if arg == 'ears_range':
-                self.requests.append(('tap_set', s.get('tap_ears')))   # the diary re-ears too
             if arg in ('voice_vol', 'voice_kind') and s[arg]:
                 self.say_sample()
             if arg == 'chat_provider':
@@ -1295,8 +1289,6 @@ class Brain(Extras):
             reader = ('немотрон 0.6b' if s.get('stt_engine') == 'nemotron'
                       else 'whisper ' + ear)
             wsize = 'точная' if s.get('wake_model_size') == 'big' else 'лёгкая'
-            rng = {'near': 'на расстоянии руки', 'mid': 'по всей комнате',
-                   'far': 'даже через комнату'}.get(s.get('ears_range', 'mid'), 'по всей комнате')
             mic = ('микрофон ' + (s.get('stt_mic') or 'авто')) if s.get('stt_mic') else 'микрофон авто'
             wake = ('Имя «Юми» слушаю' if s.get('wake_ears', True) else 'имя «Юми» не слушаю')
             judge = ('пробуждения перепроверяю whisper-ом, модель ' + wsize
@@ -1305,14 +1297,12 @@ class Brain(Extras):
                     else 'мозги: локальный оллама, модель ' + model)
             voice = 'говорю своим голосом' if s.get('voice_kind') != 'blips' else 'говорю звуками'
             return (f'Мои ушки: {reader} читает фразы, vosk {wsize} слушает имя, '
-                    f'слышу {rng}, {mic}. {wake}, {judge}. '
+                    f'{mic}. {wake}, {judge}. '
                     f'{mind}. Команды по переформулировкам '
                     f'{"понимаю" if intents else "выключены"}. {voice}.')
         ear = 'sharp' if s.get('stt_size') == 'big' else 'lite'
         reader = ('nemotron 0.6b' if s.get('stt_engine') == 'nemotron' else 'whisper ' + ear)
         wsize = 'sharp' if s.get('wake_model_size') == 'big' else 'lite'
-        rng = {'near': 'an arm away', 'mid': 'across the room',
-               'far': 'even from the next room'}.get(s.get('ears_range', 'mid'), 'across the room')
         mic = 'mic auto' if not s.get('stt_mic') else 'mic ' + (s.get('stt_mic') or '')
         wake = ('I listen for the name Yumi' if s.get('wake_ears', True) else 'I do not listen for my name')
         judge = ('wakes are double-checked with whisper, the ' + wsize + ' model'
@@ -1321,7 +1311,7 @@ class Brain(Extras):
                 else 'mind: local ollama, model ' + model)
         voice = 'I speak with my voice' if s.get('voice_kind') != 'blips' else 'I speak in sounds'
         return (f'My ears: {reader} reads the phrases, vosk {wsize} listens for the name, '
-                f'I hear {rng}, {mic}. {wake}, {judge}. '
+                f'{mic}. {wake}, {judge}. '
                 f'{mind}. Rephrased voice commands '
                 f'{"are on" if intents else "are off"}. {voice}.')
 

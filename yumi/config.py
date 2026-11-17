@@ -69,7 +69,6 @@ DEFAULT_SETTINGS = {
     'phrase_tail_ms': 1200,   # ms of quiet that ends a phrase: raise it when she cuts you
                               # off during your pauses, lower it when answers come too slow
     'wake_after': 1.5,        # s of quiet after the name before the half-heard words count
-    'ears_range': 'mid',      # how far the ears reach: near / mid / far (the noise gate decides)
     'tap_ears': False,        # a diary of everything the ears hear: /tmp/yumi (sound + words)
     'hourly_chimes': True,    # she speaks the time with a joke every hour
     'weather_city': 'Анапа',  # the city she peeks the weather at ('' = wherever she is);
@@ -275,9 +274,8 @@ UI = {
         'we_oww': 'the trained ear (openWakeWord)', 'we_vosk': 'vosk, as before', 'wake_judge_log': 'Write the whisper judge to /tmp/yumi/judge.log',
         'mic_refresh': 'Find the microphone', 'mic_auto': 'auto', 'chat_provider': 'Mind provider',
         'polza_url': 'Polza.ai address', 'polza_api_key': 'Polza.ai API key',
-        'tap_ears': 'Write everything it hears (/tmp/yumi)', 'ears_range': 'How far it hears',
+        'tap_ears': 'Write everything it hears (/tmp/yumi)',
         'stt_echo': 'Echo canceller (she never hears herself)',
-        'r_near': 'Close', 'r_mid': 'Normal', 'r_far': 'Across the room',
         'hourly_chimes': 'She says the time every hour',
         'tour1': "Hi! I'm Yumi. I live at the bottom edge of your screen. Let me show you around.",
         'tour2': 'Click me and round buttons appear: files, shelf, pipette, timer, Do Not Disturb and settings.',
@@ -336,9 +334,8 @@ UI = {
         'we_oww': 'обученное ухо (openWakeWord)', 'we_vosk': 'vosk, как раньше',
         'mic_refresh': 'Найти микрофон', 'mic_auto': 'авто',
         'chat_provider': 'Провайдер мозгов', 'polza_url': 'Адрес Polza.ai', 'polza_api_key': 'Ключ Polza.ai',
-        'tap_ears': 'Записывать всё услышанное (/tmp/yumi)', 'ears_range': 'С какой дальности слышит',
+        'tap_ears': 'Записывать всё услышанное (/tmp/yumi)',
         'stt_echo': 'Подавление эха (не слышит себя)',
-        'r_near': 'Близко', 'r_mid': 'Обычно', 'r_far': 'Через комнату',
         'hourly_chimes': 'Каждый час она говорит время',
         'tour1': 'Привет! Я Юми. Я живу у нижнего края твоего экрана. Давай я всё покажу.',
         'tour2': 'Нажми на меня, и вокруг появятся кружочки: файлы, полка, пипетка, таймер, «Не мешать» и настройки.',
