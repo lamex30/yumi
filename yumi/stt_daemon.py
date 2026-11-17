@@ -1498,6 +1498,12 @@ class Ears:
 
         def wake_result(text, why, score=0.0):
             """the wake's answer and its diary line"""
+            # the diary takes the wake's word too: without it a line of
+            # recogn.txt never says the name was heard and what was read
+            # after it — the name stands first unless the reading already
+            # begins with it (the lead often carries the name into STT)
+            head = text.split()[0] if text else ''
+            self.tap.note(text if head in spellings else f'{word} {text}'.strip())
             diag.event(arbitration='WAKE', reason=why, wake_candidate=True,
                        wake_detected=True, wake_score=round(score, 4),
                        wake_latency_ms=wake_latency(),
