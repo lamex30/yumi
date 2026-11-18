@@ -32,7 +32,7 @@ CONF = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'yum
 STATE = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'yumi' / 'tts' / 'port.json'
 HUB = 'snakers4/silero-models'
 LANGS = {'ru': ('v4_ru', 24000), 'en': ('v3_en', 24000)}   # fallback tags and sample rates
-DEFAULTS = {'ru_speaker': 'kseniya', 'en_speaker': 'en_0', 'pitch': 1.15,
+DEFAULTS = {'ru_speaker': 'kseniya', 'en_speaker': 'en_100', 'pitch': 1.12,
             'ru_model': 'v5_6_ru'}   # «ru_model»: «v4_ru» in tts.json rolls the voice back
 MAX_TEXT = 500
 
