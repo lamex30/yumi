@@ -46,6 +46,8 @@ def main():
          'ignored': 0, 'ear_ignored': 0, 'wakes': 0, 'stops': 0,
          'latencies': [], 'labeled': 0, 'truth_pos': 0, 'truth_neg': 0,
          'tp': 0, 'fp': 0, 'fn': 0, 'tn': 0}
+    by_engine = {}          # engine -> the same truth counts (compare_wake labels
+                            # every line with the engine it came from)
     for line in lines:
         arb = line.get('arbitration')
         if line.get('wake_candidate'):
@@ -80,6 +82,19 @@ def main():
                 c['fp'] += 1
             else:
                 c['tn'] += 1
+            eng = line.get('engine')
+            if eng:
+                e = by_engine.setdefault(eng, {'pos': 0, 'neg': 0, 'tp': 0, 'fp': 0,
+                                               'fn': 0, 'tn': 0})
+                e['pos' if truth else 'neg'] += 1
+                if truth and woke:
+                    e['tp'] += 1
+                elif truth and not woke:
+                    e['fn'] += 1
+                elif not truth and woke:
+                    e['fp'] += 1
+                else:
+                    e['tn'] += 1
 
     print(f'diary: {path} ({len(lines)} moments)')
     for key in ('candidates', 'sent', 'held', 'confirmed', 'rejected', 'ignored',
@@ -105,6 +120,18 @@ def main():
         print('  no truth labels in the diary: the rates of recall, precision, FAR'
               ' and FRR are not guessed — label a test session (truth: true/false'
               ' in the lines) to get them')
+    if len(by_engine) > 1:
+        # compare_wake's diary: the same recordings through different engines
+        print('  by engine:')
+        for eng, e in sorted(by_engine.items()):
+            row = [f'{eng}:']
+            if e['pos']:
+                row.append(f"recall {e['tp'] / e['pos']:.0%} (tp={e['tp']} fn={e['fn']})")
+            if e['neg']:
+                row.append(f"FAR {e['fp'] / e['neg']:.0%} (fp={e['fp']} tn={e['tn']})")
+            if e['tp'] + e['fp']:
+                row.append(f"precision {e['tp'] / (e['tp'] + e['fp']):.0%}")
+            print('    ' + '  '.join(row))
 
 
 if __name__ == '__main__':

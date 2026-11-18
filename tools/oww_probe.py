@@ -167,7 +167,15 @@ def listen(models, mic=None, debug=False, threshold=THRESHOLD):
 
 
 def read_wav(models, path, threshold=THRESHOLD):
-    """feed a wav file to the ear: every moment above the threshold is printed"""
+    """feed a wav file to the ear: every moment above the threshold is printed,
+    and the last line is always `max score (X.XX)` — the best of the whole tape,
+    even when it stayed under the threshold (compare_wake reads that line).
+
+    A second of silence goes on both ends, the way the model is scored in
+    training/eval (oww-work/eval_model.py, stock predict_clip): a clip of
+    0.3–1.2 s is shorter than the model's own 16-frame window, and without
+    the quiet lead-in it never builds up context — a live mic always has that
+    context, the bare file does not."""
     import wave
     from openwakeword.model import Model
     import numpy as np
@@ -175,18 +183,26 @@ def read_wav(models, path, threshold=THRESHOLD):
         assert w.getframerate() == RATE and w.getnchannels() == 1, \
             f'{path}: a 16 kHz mono wav is wanted'
         pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    pcm = np.concatenate([np.zeros(RATE, dtype=np.int16), pcm,
+                          np.zeros(RATE, dtype=np.int16)])
     m = Model(wakeword_models=models, inference_framework='onnx')
-    hits = 0
-    for i in range(0, len(pcm) - 1280, 1280):
+    n = len(pcm)
+    hits, best = 0, 0.0
+    # every window is scored, padding included — the model decides on the last
+    # 16 frames of history, so its peak lands just AFTER the word ends, inside
+    # the tail padding (eval_model.score_wav scores the padded tape the same way)
+    for i in range(0, n - 1280, 1280):
         for name, score in m.predict(pcm[i:i + 1280]).items():
+            best = max(best, score)
             if score > threshold:
                 hits += 1
-                print(f'{i/RATE:6.2f} s  {name} ({score:.2f})', flush=True)
+                print(f'{max(0.0, (i - RATE)/RATE):6.2f} s  {name} ({score:.2f})', flush=True)
     if clip_hint(pcm, np):
         print('this tape is clipped (the mic gain was too hot when it was made) — '
               'a live ear hears a clean voice far better', flush=True)
     if not hits:
         print('nothing heard', flush=True)
+    print(f'max score ({best:.2f})', flush=True)
 
 
 def main():

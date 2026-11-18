@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """Сравнение старого (vosk+судья) и нового (oww-only) движков пробуждения на одних и тех же записях.
 
-Записи берутся из /tmp/yumi (кольцо ушей) и dataset/ (размеченные clean/complex/noisy).
+Записи берутся из /tmp/yumi (кольцо ушей) и dataset/ (живые записи «юми» —
+ВСЕ четыре папки позитивы, так они и шли в тренировку модели: handoff-oww,
+v4: positive_train 6880 = 4000 TTS + ir 1000 + ru 1000 + no 590 + cx 290;
+yumi_complex/yumi_noisy — тихие и шумные записи имени, а не фон без имени).
+Настоящие негативы (для FAR) лежат вне репозитория:
+    --dir ~/.local/share/yumi/oww-work/my_custom_model/yumi/negative_test
+(имя файла без «юми» → truth=False автоматически).
+
 Каждой записи ставится метка truth: True — в записи есть обращение «юми», False — нет.
 Результаты пишутся в wake.jsonl (старая и новая маркируются полем 'engine'), чтобы
 затем tools/wake_metrics.py мог посчитать recall, precision, FAR, FRR.
@@ -39,12 +46,12 @@ def truth_for(path: Path) -> bool:
     name = path.name.lower()
     if any(k in name for k in ('юми', 'yumi', 'umi', 'wake', 'positive', 'pos')):
         return True
-    # dataset/yumi_clean/* — чистые голоса, считаем позитивом
-    if path.parent.parent.name == 'yumi_clean':
+    # весь dataset/ — живые записи «юми»: чистые, тихие (complex) и шумные
+    # (noisy) — они так и лежат в positive_train/positive_test модели
+    # (handoff-oww, v4/v5); лежат плоско и вложенно — ищем имя папки в пути.
+    # Негативы — другой набор (negative_test, см. докстринг)
+    if {'yumi_clean', 'yumi_complex', 'yumi_noisy'} & set(path.parts):
         return True
-    # dataset/yumi_complex / yumi_noisy — шум/видео без обращения: негатив
-    if path.parent.parent.name in ('yumi_complex', 'yumi_noisy'):
-        return False
     return False
 
 
@@ -105,8 +112,8 @@ def vosk_text(path: Path) -> str:
     code = f'''
 from vosk import Model, KaldiRecognizer
 import wave, json, sys
-m = Model({model_dir!r})
-w = wave.open({path!r}, 'rb')
+m = Model({str(model_dir)!r})
+w = wave.open({str(path)!r}, 'rb')
 rec = KaldiRecognizer(m, w.getframerate())
 rec.SetWords(False)
 out = []
@@ -188,7 +195,9 @@ def main():
         }
         lines.append(line)
         line2 = dict(line)
-        line2.update(engine='old', final_wake=old_woke, text=old_text)
+        # у старого движка свой результат: его score — не score oww (раньше тут
+        # была копия, и в дневнике у обоих движков стоял один и тот же балл)
+        line2.update(engine='old', final_wake=old_woke, text=old_text, score=None)
         lines.append(line2)
 
         score_txt = f'{new_score:.3f}' if new_score is not None else 'None'
