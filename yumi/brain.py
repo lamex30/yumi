@@ -1016,9 +1016,11 @@ class Brain(Extras):
             self.close_radial()
             self.menu = None
             if self.visible() and not self.sleeping and not self.bubble and not self.thinking:
+                lang = self.settings.get('speech_lang', 'en')
                 self.thinking = True
                 self.requests.append(('joke_ask',
-                                      {'lang': self.settings.get('speech_lang', 'en')}))
+                                      {'lang': lang,
+                                       'text': 'анекдот' if str(lang) == 'ru' else 'a joke'}))
         elif action == 'timer':
             self.close_radial()
             self.timer_new()
@@ -1080,6 +1082,11 @@ class Brain(Extras):
             self.requests.append(('save_settings',))
             if arg == 'sassy':
                 self.say('sassy_on' if s[arg] else 'sassy_off')
+                if not s[arg]:
+                    # the mode is off: its talks and jokes leave the diary together,
+                    # and the mind stops carrying the brat's last turns
+                    self.chat_history = []
+                    self.requests.append(('memory_clear_sassy',))
             if arg == 'recolor':
                 self.requests.append(('recolor',))
             if arg == 'wake_ears':
@@ -1280,7 +1287,7 @@ class Brain(Extras):
             return
         if chat.joke_question(text):       # a joke: her mind makes one up fresh, not from the chat
             self.thinking = True
-            self.requests.append(('joke_ask', {'lang': lang}))
+            self.requests.append(('joke_ask', {'lang': lang, 'text': text}))
             return
         if chat.params_question(text):     # «юми, твои параметры»: she names herself
             self.say_text(self.params_report(lang))
@@ -1434,12 +1441,15 @@ class Brain(Extras):
         self.thinking = True
         self.requests.append(('hourly_ask', {'hour': hour, 'lang': lang, 'time': t}))
 
-    def joked(self, reply):
-        """the mind answered with a joke (reply is '' when it did not work out)"""
+    def joked(self, reply, tired=False):
+        """the mind answered with a joke (reply is '' when it did not work out);
+        tired is the «Дерзкая 18+» brush-off after too many jokes in a row"""
         self.thinking = False
         reply = ' '.join(str(reply or '').split())
         if reply:
             self.say_text(reply)
+        elif tired:
+            self.say('joke_tired')
         else:
             self.say('joke_fail')
 

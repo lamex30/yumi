@@ -538,6 +538,11 @@ class App(Gtk.Application):
         self.tap_set(bool(self.settings.get('tap_ears')))     # the diary, too, if it was asked
         music.apply_settings(self.settings)   # her mpd, or the server's (music_server)
         threading.Thread(target=music.service_start, daemon=True).start()   # mpd lives with her
+        if not self.settings.get('sassy'):
+            # a crash may have kept the brat's lines after the mode went off:
+            # the diary is swept at every start while the mode is off
+            threading.Thread(target=memory.clear_tag,
+                             args=(memory.TAG_SASSY,), daemon=True).start()
         self.fetch_chat_models()        # her answer model for the settings, in the background
         self.on_caps(initial=True)
         GLib.timeout_add_seconds(3600, lambda: self.apply_outfit() or True)    # the calendar moves on
@@ -846,6 +851,11 @@ class App(Gtk.Application):
             elif kind == 'save_settings':
                 self.settings.save()
                 music.apply_settings(self.settings)   # the server mpd may have moved
+            elif kind == 'memory_clear_sassy':
+                # «Дерзкая 18+» went off: its talks and jokes leave the diary,
+                # vectors and all (yumi/memory.py, tag «sassy…»)
+                threading.Thread(target=memory.clear_tag,
+                                 args=(memory.TAG_SASSY,), daemon=True).start()
             elif kind == 'recolor':
                 self.apply_palette(self.effective_palette())
             elif kind == 'quit':
@@ -1120,13 +1130,18 @@ class App(Gtk.Application):
                     note = ''
                 if note:
                     hist.append({'role': 'system', 'content': note})
-            prompt = chat.system_prompt(lang, bool(s.get('sassy')))
+            sassy = bool(s.get('sassy'))
+            prompt = chat.system_prompt(lang, sassy)
             reply = chat.ask(s, [{'role': 'system', 'content': prompt}] + hist)
-            if s.get('chat_memory', True):
+            # the «Дерзкая 18+» lines carry their tag too: switching the mode
+            # off wipes them from the diary together with the jokes. A switch
+            # made while the answer was on its way leaves the diary clean
+            tag = memory.TAG_SASSY if sassy else None
+            if s.get('chat_memory', True) and bool(s.get('sassy')) == sassy:
                 try:
-                    memory.remember('user', user_text, s)
+                    memory.remember('user', user_text, s, tag=tag)
                     if reply:
-                        memory.remember('assistant', reply, s)
+                        memory.remember('assistant', reply, s, tag=tag)
                 except Exception:
                     pass
             GLib.idle_add(lambda: self.ev(lambda b: b.replied(reply)) and False)
@@ -1169,10 +1184,37 @@ class App(Gtk.Application):
         threading.Thread(target=work, daemon=True).start()
 
     def joke_ask(self, payload):
-        """her mind is asked for a joke; the reply goes back to the brain"""
+        """her mind is asked for a joke; the request and the joke go into the
+        diary tagged (the vectors too), and in «Дерзкая 18+» the fourth one in a
+        row gets a model-written brush-off instead"""
         def work():
-            reply = chat.joke(self.settings, payload.get('lang', 'en'))
-            GLib.idle_add(lambda: self.ev(lambda b: b.joked(reply)) and False)
+            s = self.settings
+            lang = payload.get('lang', 'en')
+            sassy = bool(s.get('sassy'))
+            tag = memory.TAG_SASSY_JOKE if sassy else memory.TAG_JOKE
+            asked = str(payload.get('text') or '').strip() or (
+                'анекдот' if str(lang) == 'ru' else 'a joke')
+            # how many jokes in a row this one makes: the diary holds the ones
+            # already asked, the current request has not been written down yet
+            try:
+                streak = memory.joke_streak(tag) + 1
+            except Exception:
+                streak = 1
+            tired = sassy and streak >= chat.JOKE_TIRED_AFTER
+            reply = chat.joke_tired(s, lang, streak) if tired else chat.joke(s, lang)
+            GLib.idle_add(lambda: self.ev(lambda b: b.joked(reply, tired)) and False)
+            # the request and the joke go into the diary tagged, with their
+            # vectors (the jokes are written even when the resting chats are
+            # not: the run is counted from them, and the mode's lines must be
+            # found and wiped when «Дерзкая 18+» goes off)
+            if bool(s.get('sassy')) != sassy:
+                return                  # the mode changed mid-joke: leave the diary clean
+            try:
+                memory.remember('user', asked, s, tag=tag)
+                if reply:
+                    memory.remember('assistant', reply, s, tag=tag)
+            except Exception:
+                pass
         threading.Thread(target=work, daemon=True).start()
 
     def fetch_chat_models(self):

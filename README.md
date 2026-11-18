@@ -385,6 +385,9 @@ in **Settings → Her mind → Answer model** (it cycles through the installed o
 Ollama lives lives in `~/.config/yumi/settings.json` as `ollama_url`. Right there,
 **Settings → Her mind → Sassy 18+** turns her into a foul-mouthed street-smart brat
 (off by default): she swears, roasts dumb questions and still helps with the real ones.
+The mode's lines go into her diary tagged, and so do the jokes: ask for four jokes in a
+row and she snaps back with a line her mind makes up — «you're not my stand-up comic».
+Switch the mode off and every line of it, jokes included, is wiped from the diary.
 **Settings → Her ears → Ears diary** — while it is on, she writes everything she hears into
 `/tmp/yumi`: the sound into `ears-*.wav` files (no bigger than 10 MB and ten minutes each,
 only the five freshest stay on the shelf) and the heard phrases into `recogn.txt`, one
@@ -425,7 +428,9 @@ peek at [wttr.in](https://wttr.in) (this one small look needs the internet; ever
 stays offline as before); with a place in the phrase («какая погода в Москве») she looks there,
 otherwise out of her own window — the city where you are, recognized from your network.
 Say «расскажи анекдот» (or «tell me a joke») and she asks her neural net to make one up,
-then tells it out loud. And «кто играет» («what's playing») she answers by herself too:
+then tells it out loud. Every joke is written into her diary with its vectors and a tag —
+the polite ones and the «Sassy 18+» ones apart. And «кто играет» («what's playing») she
+answers by herself too:
 the artist and the track of whatever is sounding right now.
 
 **Music from the library.** Say «Юми, включи песню город золотой» and she finds the song

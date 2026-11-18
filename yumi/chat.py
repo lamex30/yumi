@@ -411,6 +411,33 @@ def joke(settings, lang='en', timeout=90):
     return _one_shot(settings, user, 160, lang, timeout, temp=0.9)
 
 
+JOKE_TIRED_AFTER = 4         # the fourth «анекдот» in a row in «Дерзкая 18+» gets a brush-off
+
+
+def joke_tired(settings, lang='ru', count=JOKE_TIRED_AFTER, timeout=60):
+    """the mind writes the brush-off for yet another joke in a row in «Дерзкая
+    18+»: «заебал со своими анекдотами, я тебе не <имя российского
+    стендап-комика>»; '' when the mind is out of reach (a dry line stands in)"""
+    if str(lang) == 'ru':
+        user = (f'Пользователь просит анекдот уже {count}-й раз подряд, ты '
+                'заебалась. Отшей его одной короткой грубой фразой с матом, '
+                'можешь послать нахуй: скажи, что он заебал со своими '
+                'анекдотами и что ты ему не <имя известного российского '
+                'стендап-комика> — назови настоящего комика, например Славу '
+                'Комиссаренко или Павла Волю, и придумай фразу сама. '
+                'Без эмодзи и списков.')
+    else:
+        user = (f'The user has asked for a joke {count} times in a row and you are '
+                'fed up. Brush him off in one short rude sentence with swearing, '
+                'tell him to piss off: say he is tiresome with his jokes and that '
+                'you are not <name of a famous Russian stand-up comedian> — name a '
+                'real one and write the line yourself. No emoji, no lists.')
+    got = _one_shot(settings, user, 120, lang, timeout, temp=0.9)
+    if not got or '<' in got or '>' in got:
+        return ''                   # a placeholder leaked: the dry line stands in
+    return got
+
+
 def _degrees_ru(n):
     """градус / градуса / градусов, по числу, что стоит перед словом"""
     try:

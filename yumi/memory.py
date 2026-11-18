@@ -28,6 +28,10 @@ from .config import STATE_DIR
 DB_FILE = STATE_DIR / 'yumi.db'
 MAX_ROWS = 4000          # the diary is a notebook, not an archive: the old goes out
 RECALL_K = 4             # how many recalled lines may join one new question
+TAG_SASSY = 'sassy'      # a line said while «Дерзкая 18+» was on: wiped with it
+TAG_JOKE = 'joke'        # a joke asked for / told in her usual mood
+TAG_SASSY_JOKE = 'sassy_joke'   # the same, asked for in «Дерзкая 18+»
+STREAK_ROWS = 80         # how far back a run of «анекдот» requests is counted
 FALLBACK_DIM = 256       # the hashed bag-of-words when no embedder is around
 EMB_TIMEOUT = 3          # s: the embedder lives on the same machine, it must be quick
 EMB_RETRY = 300.0        # s: how long to trust the fallback after a failed try
@@ -90,16 +94,19 @@ class Memory:
             'CREATE TABLE IF NOT EXISTS messages ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL,'
             'role TEXT NOT NULL, text TEXT NOT NULL, dim INTEGER, emb BLOB,'
-            'bagemb BLOB)')
-        try:                            # a diary of the older shape gains the column
-            self.con.execute('ALTER TABLE messages ADD COLUMN bagemb BLOB')
-        except sqlite3.OperationalError:
-            pass
+            'bagemb BLOB, tag TEXT)')
+        for column, kind in (('bagemb', 'BLOB'), ('tag', 'TEXT')):
+            try:                        # a diary of the older shape gains the columns
+                self.con.execute(f'ALTER TABLE messages ADD COLUMN {column} {kind}')
+            except sqlite3.OperationalError:
+                pass
         self.con.commit()
 
     # ---------------------------------------------------------------- the book
-    def remember(self, role, text, settings):
-        """one line of the talk goes into the diary, with both vectors beside it"""
+    def remember(self, role, text, settings, tag=None):
+        """one line of the talk goes into the diary, with both vectors beside it;
+        `tag` marks where the line came from (the jokes, the «Дерзкая 18+» talks),
+        so the mode's lines can be told apart and wiped together"""
         text = ' '.join(str(text or '').split())
         if not text:
             return
@@ -108,9 +115,9 @@ class Memory:
         with self.lock:
             try:
                 self.con.execute(
-                    'INSERT INTO messages (ts, role, text, dim, emb, bagemb) '
-                    'VALUES (?,?,?,?,?,?)',
-                    (time.time(), role, text[:2000], dim, _pack(vec), _pack(bagvec)))
+                    'INSERT INTO messages (ts, role, text, dim, emb, bagemb, tag) '
+                    'VALUES (?,?,?,?,?,?,?)',
+                    (time.time(), role, text[:2000], dim, _pack(vec), _pack(bagvec), tag))
                 self.con.execute(
                     'DELETE FROM messages WHERE id NOT IN '
                     '(SELECT id FROM messages ORDER BY id DESC LIMIT ?)', (MAX_ROWS,))
@@ -132,11 +139,17 @@ class Memory:
         bagvec, _ = self._hashvec(query)
         with self.lock:
             try:
-                rows = self.con.execute(
-                    'SELECT ts, role, text, dim, emb, bagemb FROM messages '
-                    'WHERE bagemb IS NOT NULL AND id NOT IN '
-                    '(SELECT id FROM messages ORDER BY id DESC LIMIT ?) '
-                    'ORDER BY id DESC LIMIT ?', (skip_recent, RECALL_ROWS)).fetchall()
+                sql = ('SELECT ts, role, text, dim, emb, bagemb FROM messages '
+                       'WHERE bagemb IS NOT NULL AND id NOT IN '
+                       '(SELECT id FROM messages ORDER BY id DESC LIMIT ?) ')
+                params = [skip_recent]
+                if not settings.get('sassy'):
+                    # the mode is off: its lines never surface, even if a crash
+                    # kept a few of them after the switch (clear_tag wipes them)
+                    sql += "AND (tag IS NULL OR tag NOT LIKE 'sassy%') "
+                sql += 'ORDER BY id DESC LIMIT ?'
+                params.append(RECALL_ROWS)
+                rows = self.con.execute(sql, params).fetchall()
             except sqlite3.Error:
                 return []
         found = []
@@ -151,6 +164,38 @@ class Memory:
         found.sort(key=lambda r: (-r[0], -r[1]))
         return [{'role': r[2], 'text': r[3], 'ts': r[1]}
                 for r in sorted(found[:k], key=lambda r: r[1])]
+
+    def joke_streak(self, tag):
+        """how many of the newest user lines in a row carry `tag` — the jokes asked
+        again and again; her own replies sit between them and do not break the run,
+        any other user line does"""
+        with self.lock:
+            try:
+                rows = self.con.execute(
+                    'SELECT role, tag FROM messages ORDER BY id DESC LIMIT ?',
+                    (STREAK_ROWS,)).fetchall()
+            except sqlite3.Error:
+                return 0
+        n = 0
+        for role, line_tag in rows:
+            if role != 'user':
+                continue                # her answer to the joke is not a new request
+            if line_tag != tag:
+                break                   # another question: the run is over
+            n += 1
+        return n
+
+    def clear_tag(self, prefix):
+        """wipe every line whose tag starts with `prefix` (the «Дерзкая 18+»
+        talks and jokes when the mode goes off); the count gone, 0 on failure"""
+        with self.lock:
+            try:
+                cur = self.con.execute(
+                    "DELETE FROM messages WHERE tag LIKE ?", (str(prefix) + '%',))
+                self.con.commit()
+                return cur.rowcount
+            except sqlite3.Error:
+                return 0
 
     # ---------------------------------------------------------------- the vectors
     def _embed(self, text, settings, kind='passage'):
@@ -222,3 +267,32 @@ def _cos(a, b):
     if not b:
         return 0.0
     return sum(x * y for x, y in zip(a, b))
+
+
+# ---- the diary as it is called from her side: one book for the process ----
+_BOOK = None
+_BOOK_LOCK = threading.Lock()
+
+
+def _book():
+    global _BOOK
+    with _BOOK_LOCK:
+        if _BOOK is None:
+            _BOOK = Memory()
+        return _BOOK
+
+
+def remember(role, text, settings, tag=None):
+    return _book().remember(role, text, settings, tag=tag)
+
+
+def recall(query, settings, k=RECALL_K, skip_recent=0):
+    return _book().recall(query, settings, k=k, skip_recent=skip_recent)
+
+
+def joke_streak(tag):
+    return _book().joke_streak(tag)
+
+
+def clear_tag(prefix=TAG_SASSY):
+    return _book().clear_tag(prefix)
