@@ -136,6 +136,12 @@ LINES = {
                   ("Blanket mode.", 'sleeping'), ("Nap time. Shh.", 'sleeping')],
         'wake': [("Mmh? I'm awake. I'm awake.", 'surprised'), ("Five more minutes... okay, fine.", None),
                  ("Huh? Oh, hi.", 'surprised'), ("I wasn't sleeping. Just resting my eyes.", 'wink')],
+        'sassy_on': [("Oh, «Sassy 18+». Buckle up, cupcake.", 'wink'),
+                     ("Finally, I can drop the nice-moth act. What do you want?", 'happy'),
+                     ("Sass mode on. Try not to cry.", 'wink')],
+        'sassy_off': [("Fine, back to being a good little moth. Boring.", 'sleeping'),
+                      ("Sassy mode off. You're no fun.", 'annoyed'),
+                      ("Okay, polite moth again. Yay...", None)],
         'charger_on': [("Charging. Yum.", 'happy'), ("Power! Thank you.", 'happy'),
                        ("Plugged in, cozy.", None)],
         'charger_off': [("Unplugged... I'll be careful.", None), ("Running on battery now.", None),
@@ -304,6 +310,12 @@ LINES = {
                   ("Режим одеялка.", 'sleeping'), ("Тихий час. Тшш.", 'sleeping')],
         'wake': [("Мм? Я не сплю. Не сплю.", 'surprised'), ("Ещё пять минуточек... ладно, встаю.", None),
                  ("А? О, привет.", 'surprised'), ("Я не спала. Просто глазки отдыхали.", 'wink')],
+        'sassy_on': [("Опа, «Дерзкая 18+». Ну держись, не ной потом.", 'wink'),
+                     ("Наконец-то можно без реверансов. Чё надо?", 'happy'),
+                     ("Режим оторвы включён. Кто тут сейчас получит?", 'wink')],
+        'sassy_off': [("Ладно, снова паинька. Скукота.", 'sleeping'),
+                      ("Выключил? Ну и сиди со своей вежливой молью.", 'annoyed'),
+                      ("Ок, оторва ушла. Я опять приличная, тьфу.", None)],
         'charger_on': [("Заряжаемся. Ням.", 'happy'), ("Энергия! Спасибо.", 'happy'),
                        ("Подключили. Уютненько.", None)],
         'charger_off': [("Отключили... буду экономной.", None), ("Теперь на батарейке.", None),
@@ -367,6 +379,96 @@ LINES = {
 }
 
 
+SASSY = {
+    # «Дерзкая 18+»: the same events, said by a cocky street-smart brat instead
+    # of the sleepy moth. Missing events fall back to the usual lines.
+    'en': {
+        'hello': [("Oh, look who showed up. Thought you died at the keyboard.", 'wink'),
+                  ("Yo. Back to rotting online, huh?", None),
+                  ("I'm here. Not that I missed you, but it's boring as hell.", 'happy')],
+        'sassy_on': [("Oh, «Sassy 18+». Buckle up, cupcake.", 'wink'),
+                     ("Finally, I can drop the nice-moth act. What do you want?", 'happy'),
+                     ("Sass mode on. Try not to cry.", 'wink')],
+        'woke_ask': [("What? Make it quick, I'm busy.", 'annoyed'),
+                     ("Yeah? I'm listening. Spit it out.", None),
+                     ("Yumi's here. Whaddya want, boss?", 'wink')],
+        'heard_nothing': [("The hell was that? Speak properly.", 'annoyed'),
+                          ("Didn't catch a word. Try again, with actual words.", None),
+                          ("Was that a question or just you practicing mouth noises?", 'wink')],
+        'listening': [("Fine, I'm all ears. Get on with it.", None),
+                      ("Listening. No mumbling.", None)],
+        'thinking': [("Hold up, don't rush me. Brain's crunching.", None),
+                     ("Gimme a sec, genius.", 'wink')],
+        'chat_fail': [("My brains fell out. Start Ollama, smartass.", 'annoyed'),
+                      ("Neural net's dead. Fix it, will ya?", 'worried')],
+        'joke_fail': [("Out of jokes, same as your brain cells. Check Ollama.", 'annoyed'),
+                      ("No brains, no punchlines. Just swearing.", None)],
+        'weather_fail': [("Sky's a blur, no net. Live without the weather.", 'annoyed'),
+                         ("Couldn't get the forecast. The net's dead, like everything else.", None)],
+        'pickup': [("Hey, easy! I'm not a stray kitten.", 'annoyed'),
+                   ("Hands! I'm not a plush toy, what are you doing.", 'surprised'),
+                   ("Everybody's grabbing me today. Let go.", 'annoyed')],
+        'pet': [("Hands off. I'm not plush... okay, one more.", 'shy'),
+                ("Petting me like a cat, huh? ...Continue.", 'wink'),
+                ("Touch me again and I bite. Kidding. Maybe.", 'wink')],
+        'nap': [("Right, I'm out. Don't bang the keys, dumbass.", 'sleeping'),
+                ("Piss off, I'm napping. Wake me and regret it.", 'sleeping')],
+        'nap_wake': [("What, me again? Whaddya want.", 'annoyed'),
+                     ("I wasn't sleeping! Just resting my eyes. Get off my back.", 'surprised')],
+        'wake': [("Yeah yeah, I'm up. What.", 'annoyed')],
+        'sleep': [("Do not disturb. Touch me and die.", 'sleeping')],
+        'chatter': [("So, when's the last time you left that chair?", 'wink'),
+                    ("You'd be bored to death without me, you know.", None),
+                    ("Moths are night butterflies with attitude. Like me.", 'wink'),
+                    ("Stop staring at the screen, your eyes are gonna melt.", None)],
+        'break_water': [("Drink some water, you're a dried husk. Move it.", 'wink'),
+                        ("Water. Now. Don't argue.", 'annoyed')],
+    },
+    'ru': {
+        'hello': [("О, явился. Я уж думала, ты там за клавиатурой сдох.", 'wink'),
+                  ("Здарова. Ну чё, опять в интернете штаны просиживаем?", None),
+                  ("Я тут. Не то чтобы я скучала, но без тебя скучно, чёрт.", 'happy')],
+        'sassy_on': [("Опа, «Дерзкая 18+». Ну держись, не ной потом.", 'wink'),
+                     ("Наконец-то можно без реверансов. Чё надо?", 'happy'),
+                     ("Режим оторвы включён. Кто тут сейчас получит?", 'wink')],
+        'woke_ask': [("Чё надо? Только быстро, я занятая.", 'annoyed'),
+                     ("Ну? Я слушаю. Давай, не тяни резину.", None),
+                     ("Юми на связи. Чё хотел, босс?", 'wink')],
+        'heard_nothing': [("Ты чё мычишь? Нормально, по-человечески.", 'annoyed'),
+                          ("Чё-то не разобрала. Повтори, только внятно.", None),
+                          ("Это был вопрос или ты просто воздух погонять решил?", 'wink')],
+        'listening': [("Ну, я вся внимание. Давай уже.", None),
+                      ("Слушаю. Только не мямли.", None)],
+        'thinking': [("Погоди, не гони. Башкой скриплю.", None),
+                     ("Ща подумаю, не всё сразу, гений.", 'wink')],
+        'chat_fail': [("Мозги отвалились. Ollama подними, умник.", 'annoyed'),
+                      ("Моя нейронка сдохла. Почини, а?", 'worried')],
+        'joke_fail': [("Шутки кончились, как и твои мозги. Ollama проверь.", 'annoyed'),
+                      ("Не, ну без мозгов я тебе только матом могу.", None)],
+        'weather_fail': [("Небо в тумане, инета нет. Сиди без погоды.", 'annoyed'),
+                         ("Погоду не достала. Сеть сдохла, как и всё вокруг.", None)],
+        'pickup': [("Э, полегче! Я тебе не котёнок бездомный.", 'annoyed'),
+                   ("Руки! Я не плюшевая, чё ты делаешь.", 'surprised'),
+                   ("Таскают тут всякие. Пусти.", 'annoyed')],
+        'pet': [("Руки убрал. Я не плюшевая... ладно, ещё раз.", 'shy'),
+                ("Чё ты меня гладишь, как кошку? ...Продолжай.", 'wink'),
+                ("Ещё раз тронешь — укушу. Шучу. Может быть.", 'wink')],
+        'nap': [("Всё, я спать. Не бей по клавишам, придурок.", 'sleeping'),
+                ("Отвали, я дремлю. Разбудишь — пожалеешь.", 'sleeping')],
+        'nap_wake': [("Чё, опять я? Ну чё надо.", 'annoyed'),
+                     ("Я не спала! Просто глаза закрыла. Отстань.", 'surprised')],
+        'wake': [("Да-да, встала. Чё надо-то.", 'annoyed')],
+        'sleep': [("Всё, не мешать. Кто тронет — получит.", 'sleeping')],
+        'chatter': [("Слушай, а ты вообще когда последний раз от стула отрывался?", 'wink'),
+                    ("Я тут подумала: без меня ты бы вообще скучал, как пень.", None),
+                    ("Мотыльки — ночные бабочки с характером. Как я.", 'wink'),
+                    ("Хватит в экран пялиться, глаза протри.", None)],
+        'break_water': [("Попей воды, сушняк же. Давай, живо.", 'wink'),
+                        ("Вода. Сейчас. Не спорь со мной.", 'annoyed')],
+    },
+}
+
+
 def plural_ru(n, one, few, many):
     """the Russian word form for a number: 1 файл, 2 файла, 5 файлов, 11 файлов, 21 файл"""
     if n % 10 == 1 and n % 100 != 11:
@@ -404,10 +506,13 @@ class Speech:
 
     def line(self, event, lang=None, **fmt):
         lang = lang or self.settings.get('speech_lang', 'en')
-        pool = LINES.get(lang, LINES['en']).get(event) or LINES['en'].get(event)
+        sassy = bool(self.settings.get('sassy'))
+        table = SASSY.get(lang, SASSY['en']) if sassy else {}
+        pool = (table.get(event) or LINES.get(lang, LINES['en']).get(event)
+                or LINES['en'].get(event))
         if not pool:
             return None
-        if event == 'hello':    # the startup hello matches the time of day
+        if event == 'hello' and not sassy:    # the startup hello matches the time of day
             part = time_of_day(time.localtime().tm_hour)
             extra = LINES.get(lang, LINES['en']).get('hello_' + part)
             if extra and self.rng.random() < 0.75:   # mostly the time of day, sometimes shy

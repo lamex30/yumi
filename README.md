@@ -382,7 +382,9 @@ of the room (a whisper by the screen is gone too), «Across the room» lets even
 one pass. The real range lives in the microphone itself: the input slider in the sound
 settings and the mic's directivity matter more than any gate. The answer model is picked
 in **Settings → Her mind → Answer model** (it cycles through the installed ones); where
-Ollama lives lives in `~/.config/yumi/settings.json` as `ollama_url`.
+Ollama lives lives in `~/.config/yumi/settings.json` as `ollama_url`. Right there,
+**Settings → Her mind → Sassy 18+** turns her into a foul-mouthed street-smart brat
+(off by default): she swears, roasts dumb questions and still helps with the real ones.
 **Settings → Her ears → Ears diary** — while it is on, she writes everything she hears into
 `/tmp/yumi`: the sound into `ears-*.wav` files (no bigger than 10 MB and ten minutes each,
 only the five freshest stay on the shelf) and the heard phrases into `recogn.txt`, one

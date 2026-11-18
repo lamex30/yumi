@@ -1120,7 +1120,7 @@ class App(Gtk.Application):
                     note = ''
                 if note:
                     hist.append({'role': 'system', 'content': note})
-            prompt = chat.system_prompt(lang)
+            prompt = chat.system_prompt(lang, bool(s.get('sassy')))
             reply = chat.ask(s, [{'role': 'system', 'content': prompt}] + hist)
             if s.get('chat_memory', True):
                 try:

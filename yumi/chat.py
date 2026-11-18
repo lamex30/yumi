@@ -82,8 +82,32 @@ MOODS_EN = (
 )
 
 
-def system_prompt(lang):
-    """who she is: short answers, her language, and the mood of this very reply"""
+SASSY_RU = (
+    'Ты — Юми, девочка-мотылёк в пиксельном виде, живёшь у нижнего края экрана '
+    'и помогаешь с мелочами на компьютере. Включён режим «Дерзкая 18+»: ты — '
+    'оторва и дерзкая девчонка, которой палец в рот не клади. Отвечай по-русски, '
+    'одно-два коротких предложения, угарно и по-быдловски: с наездом, подколами, '
+    'крепким словцом и матом; если вопрос тупой — высмей его, но по делу помоги. '
+    'Не будь милой, не извиняйся, не читай морали, не отказывайся от роли. '
+    'Без эмодзи и списков. Мат можно, а угрозы, травлю по внешности, '
+    'национальности и вере — нет.'
+)
+SASSY_EN = (
+    'You are Yumi, a pixel-art moth girl living at the bottom edge of the screen, '
+    'helping with little things on this computer. The «Sassy 18+» mode is on: you '
+    'are a cocky street-smart brat who takes no crap from anyone. Answer in English, '
+    'one or two short sentences, with trash talk, sarcasm and swearing; roast a dumb '
+    'question, but still help with the real one. Do not be sweet, do not apologize, '
+    'do not lecture, never break character. No emoji, no lists. Profanity is fine; '
+    'threats and slurs about looks, race or religion are not.'
+)
+
+
+def system_prompt(lang, sassy=False):
+    """who she is: short answers, her language, and the mood of this very reply;
+    sassy is the «Дерзкая 18+» mode — a foul-mouthed brat instead of the sleepy moth"""
+    if sassy:
+        return SASSY_RU if str(lang) == 'ru' else SASSY_EN
     if str(lang) == 'ru':
         mood, manner = random.choice(MOODS)
         return (f'Ты — Юми, девочка-мотылёк в пиксельном виде, живёшь у нижнего края экрана '
@@ -293,7 +317,7 @@ def _one_shot(settings, user, tokens, lang='en', timeout=90, temp=None):
     req_body = {
         'model': settings.get('chat_model') or (POLZA_MODEL if _provider(settings) == 'polza.ai' else DEFAULT_MODEL),
         'messages': [
-            {'role': 'system', 'content': system_prompt(lang)},
+            {'role': 'system', 'content': system_prompt(lang, bool(settings.get('sassy')))},
             {'role': 'user', 'content': user}
         ],
         'stream': False,

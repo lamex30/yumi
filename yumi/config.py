@@ -36,6 +36,8 @@ DEFAULT_SETTINGS = {
     'chat_provider': 'ollama',   # ollama or polza.ai: who answers when she listens
     'chat_think': False,      # her mind thinks out loud before answering (deepseek-r1,
                               # qwen3 and friends); off = the answer comes right away
+    'sassy': False,           # «Дерзкая 18+»: she talks like a street-smart brat —
+                              # swears, mocks, no sweet moth-girl manners (off by default)
     'chat_model': 'lakomoor/vikhr-llama-3.2-1b-instruct:1b',   # who answers when she listens
     'ollama_url': 'http://127.0.0.1:11434',   # where her local Ollama lives
     'polza_url': 'https://polza.ai/api/v1',   # Polza.ai OpenAI-compatible endpoint
@@ -271,6 +273,7 @@ UI = {
         'joke': 'Joke',
         'chat_refresh': 'Find the model',
         'chat_think': 'Let her think first',
+        'sassy': 'Sassy 18+',
         'chat_history_n': 'Messages in mind', 'chat_memory': 'Recall older talks',
         'wake_ears': 'Wake when you say «Yumi»', 'stt_engine': 'Ear for phrases',
         'eng_whisper': 'Whisper', 'eng_nemotron': 'Nemotron 0.6b (fast)',
@@ -330,6 +333,7 @@ UI = {
         'joke': 'Анекдот',
         'chat_refresh': 'Найти модель',
         'chat_think': 'Дать ей подумать',
+        'sassy': 'Дерзкая 18+',
         'chat_history_n': 'Сообщений в памяти', 'chat_memory': 'Помнить разговоры',
         'wake_ears': 'Будить, когда скажешь «Юми»', 'stt_engine': 'Ухо для фраз',
         'eng_whisper': 'Whisper', 'eng_nemotron': 'Nemotron 0.6b (быстрое)',

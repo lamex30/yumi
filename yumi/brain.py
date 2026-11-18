@@ -938,6 +938,7 @@ class Brain(Extras):
             if not self.chat_models and 'chat_model' not in self.unavailable:
                 self.requests.append(('chat_models',))
             rows = [('set', 'chat_provider', t('chat_provider')), ('set', 'chat_model', t('chat_model')),
+                    ('set', 'sassy', t('sassy')),
                     ('set', 'chat_think', t('chat_think')), ('set', 'chat_history_n', t('chat_history_n')),
                     ('set', 'chat_memory', t('chat_memory')), ('set', 'nlu', t('nlu')),
                     ('set', 'intents', t('intents'))]
@@ -1077,6 +1078,8 @@ class Brain(Extras):
                 if arg == 'pinned' and s[arg]:
                     self.pop(True)
             self.requests.append(('save_settings',))
+            if arg == 'sassy':
+                self.say('sassy_on' if s[arg] else 'sassy_off')
             if arg == 'recolor':
                 self.requests.append(('recolor',))
             if arg == 'wake_ears':
