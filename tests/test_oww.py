@@ -55,6 +55,26 @@ assert stt.fresh_vosk([], now) == ''
 # несколько финалов в окне идут вместе
 assert stt.fresh_vosk([(now - 1.0, 'юми'), (now + 2.0, 'включи музыку')],
                       now) == 'юми включи музыку'
+# ---- быстрый путь: окно доходит до момента, когда спрашивающий стоит на конце
+# фразы — фраза, произнесённая медленнее хвоста окна, читается целиком ----
+assert stt.fresh_vosk([(now + 2.0, 'включи музыку'),
+                       (now + 7.0, 'вели и ревущий')], now,
+                      until=now + 7.0) == 'включи музыку вели и ревущий'
+# ---- свежесть (VOSK_STALE): финал задолго до имени — чужая болтовня, и STT
+# должен прочитать ленту вместо того, чтобы действовать по ней ----
+assert stt.VOSK_STALE > 0
+assert stt.fresh_vosk([(now - 3.5, 'привет как дела')], now,
+                      until=now, slack=stt.VOSK_STALE) == ''
+# свежий финал проходит — и до имени вплотную, и после него
+assert stt.fresh_vosk([(now - 1.0, 'включи музыку')], now,
+                      until=now, slack=stt.VOSK_STALE) == 'включи музыку'
+assert stt.fresh_vosk([(now - 3.5, 'привет как дела'),
+                       (now + 1.0, 'включи музыку')], now,
+                      until=now + 1.0, slack=stt.VOSK_STALE) == \
+    'привет как дела включи музыку'
+# без slack окно прежнее: дневник alt не теряет старые финалы
+assert stt.fresh_vosk([(now - 3.5, 'привет как дела')], now) == 'привет как дела'
+assert stt.fresh_vosk([], now, until=now, slack=stt.VOSK_STALE) == ''
 
 # ---- решение wake(): одиночный всплеск не будит, растяжка будит (§6) ----
 now = 1000.0
@@ -165,6 +185,13 @@ assert 'bytearray(ring[-lead:])' in wake_src, 'the phrase head must come off the
 assert 'elif ear_oww is None' in wake_src, 'vosk fallback: wake_ear vosk must not be deaf'
 assert "if not woken or stop_shout(words, spellings)" in wake_src, \
     'already listening, «останови музыку» is a command, not a stop'
+# ---- быстрый путь STT: свежее чтение стоп-ухи идёт первым, умный ум запасной ----
+assert 'stt_fast' in wake_src, 'the wake lost its vosk-first fast path'
+assert 'vosk_fallback(time.monotonic(), VOSK_STALE)' in wake_src, \
+    'the fast path must take only a fresh final'
+assert wake_src.index('heard_after or vosk_fallback(') < \
+    wake_src.index('self.transcribe_said'), \
+    'the big ear must read only when the small ear has nothing to say'
 
 
 # ---- stop_at / stop_shout unchanged ----

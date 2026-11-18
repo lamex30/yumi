@@ -124,5 +124,27 @@ assert w(hi, t, 0.9, 2.0) == (0.9, 2.0)      # a sure name takes the top at once
 assert w(0.9, 1.0, 0.1, 5.0) == (0.1, 5.0)   # the window ran out: silence is silence
 assert stt.OWW_VETO < stt.OWW_THRESHOLD      # the veto sits under the ear's own doubt
 
+# after_name: the one verdict on every moment after the name. The (0, 400) ms
+# breath — the name's own tail — used to satisfy neither the greeting nor the
+# endpoint, and the wake then sat mute until the user spoke again or the window
+# timed out (15–120 s stalls in the logs)
+a = stt.after_name
+# only the name stood after it, the quiet came: her turn to greet
+assert a(0.0, 1.6, 3.0, 15.0) == 'greet'
+assert a(250.0, 1.6, 3.0, 15.0) == 'greet'        # a breath: still the name alone
+# the words may still be coming: keep listening
+assert a(0.0, 0.3, 3.0, 15.0) is None             # quiet has not settled yet
+assert a(250.0, 0.3, 3.0, 15.0) is None
+assert a(900.0, 0.3, 3.0, 15.0) is None           # a real phrase, mid-flight
+# voice, then VAD_TAIL of quiet: the phrase is over
+assert a(900.0, 1.3, 3.0, 15.0) == 'end'
+assert a(stt.PHRASE_MIN, 1.3, 3.0, 15.0) == 'end'  # 400 ms is a phrase already
+assert a(900.0, 1.1, 3.0, 15.0) is None            # a pause shorter than the tail
+# the listen ran out: whatever gathered goes to the ear, this wake waits no longer
+assert a(900.0, 0.3, 16.0, 15.0) == 'ceiling'
+assert a(100.0, 0.3, 16.0, 15.0) == 'ceiling'      # reachable in the (0, 400) hole too
+assert a(0.0, 0.3, 16.0, 15.0) == 'ceiling'        # and with nothing on the tape
+assert a(900.0, 1.3, 16.0, 15.0) == 'end'          # a finished phrase still ends first
+
 print('test_wake: ok')
 sys.exit(0)

@@ -82,12 +82,17 @@ WAKE_AFTER = 1.5                        # s of quiet after the name before she a
 WAKE_TAPE = RATE * 8 * 2                # bytes of the recent sound the judge reads: ~8 s
 WAKE_REJUDGE = 3.0                      # s before the judge reads the tape again after a dream
 VAD_TAIL = 1200                         # ms of quiet after speech: the phrase is really over
+PHRASE_MIN = 400                        # ms of voice after the name: a phrase, not a breath
 WAKE_SENSITIVITY = {'normal': 1, 'strict': 0}  # edit-distance budget for a wake match
 WAKE_WIDE = 3                 # when the judge is on duty, the pre-filter forgives three
 WAKE_VOSK_FALLBACK = 4.0      # s: how long ago the stop ear's last final may stand —
                               # the name is believed a frame or two late, and may come
                               # at the phrase's very end: the big ear then reads an
                               # empty tape, the small ear's words are what was said
+VOSK_STALE = 2.0              # s: how fresh the small ear's final must be to stand in
+                              # for STT (the fast path). Older than this before the name
+                              # and it is someone else's talk from before the wake — the
+                              # big ear reads the tape instead of acting on those words
 
 OWW_THRESHOLD = 0.5          # the trained ear's score that counts as her name
 OWW_SURE = 0.7               # above it the name is sure: the judge is not asked
@@ -633,15 +638,54 @@ def ear_window_hi(hi, hi_t, score, now, keep=3.0):
     return hi, hi_t
 
 
-def fresh_vosk(said, wake_t):
+def fresh_vosk(said, wake_t, until=None, slack=0.0):
     """vosk's finals that stand around the wake (a few seconds before it, a few
     after): the phrase may have ended before the name was believed, and its
     first words after the wake are the command — what was said long before
     (someone else's talk) and long after (the tail the phrase ran into) stays
-    out. The finals come from the stop ear, one (time, words) per phrase"""
+    out. The finals come from the stop ear, one (time, words) per phrase.
+    `until` is the moment the caller stands at (the phrase's end): the window
+    then reaches from `keep` seconds before the name up to that moment, so a
+    phrase spoken slower than the window's tail is read whole instead of being
+    cut at wake_t + keep — nothing later than that moment is on the list
+    anyway, the finals are stamped as they land.
+    `slack` is the freshness the readings that stand in for STT need: when the
+    newest final in the window is older than `slack` seconds before the name,
+    those words are someone else's talk from before the wake and say nothing
+    about the phrase after it — '' answers, and the big ear reads the tape
+    instead. 0 keeps the window exactly as the diary's alt wants it"""
     keep = TUNE['wake_vosk_fallback']
-    words = [w for t, w in said if wake_t - keep <= t <= wake_t + keep]
-    return ' '.join(words) if words else ''
+    end = wake_t + keep if until is None else until
+    words = [(t, w) for t, w in said if wake_t - keep <= t <= end]
+    if not words:
+        return ''
+    if slack and max(t for t, _ in words) < wake_t - slack:
+        return ''
+    return ' '.join(w for _, w in words)
+
+
+def after_name(phrase_ms, quiet_s, age_s, listen_s):
+    """the verdict on one moment after the name — pure, so the tests hold it:
+    'greet' — only the name and a breath of sound stood after it, then the
+    quiet came (the name's own tail is not a phrase: it used to leave
+    phrase_ms in (0, 400), which satisfied neither the greeting (== 0) nor
+    the endpoint (>= 400) — the wake then sat mute 15–120 s until the user
+    spoke again or the window timed out);
+    'end' — the phrase is over: voice, then VAD_TAIL of quiet after it;
+    'ceiling' — the listen ran out (age_s over listen_s): whatever gathered
+    goes to the ear, this wake waits no longer;
+    None — the words may still be coming: keep listening.
+    quiet_s is wall-clock quiet since the last voice (or the wake, whichever
+    is later) — unlike the detector's own silence count it keeps moving when
+    the tape runs dry, so the ceiling is reachable in every branch of the
+    loop. The caller passes the current TUNE['wake_listen']."""
+    if phrase_ms >= PHRASE_MIN and quiet_s * 1000 >= VAD_TAIL:
+        return 'end'
+    if phrase_ms < PHRASE_MIN and quiet_s > WAKE_AFTER:
+        return 'greet'
+    if age_s > listen_s:
+        return 'ceiling'
+    return None
 
 
 class EarStat:
@@ -1511,13 +1555,15 @@ class Ears:
             # path — «heard … (vosk: …)» in the mind's diary must not be empty
             return {'woke': True, 'text': text, 'alt': vosk_fallback()}
 
-        def vosk_fallback():
+        def vosk_fallback(until=None, slack=0.0):
             """vosk's finals around the wake, while they are fresh (fresh_vosk):
             the trained ear believes the name a frame or two late, and the name
             may stand at the phrase's very end — then the big ear reads an
             empty tape, and the small ear's words are the only reading of what
-            was actually said (раздел 10 ТЗ)"""
-            return fresh_vosk(vosk_said, wake_t)
+            was actually said (раздел 10 ТЗ). `until` passes the phrase's end
+            down, so the fast path reads a slow phrase whole; `slack` the
+            freshness that same path needs before it skips the big ear"""
+            return fresh_vosk(vosk_said, wake_t, until, slack)
 
         def greet_or_fallback(why):
             """nothing followed the name: her turn to greet — unless the small
@@ -1583,6 +1629,10 @@ class Ears:
                 wake_t = 0.0                # when the name was believed
                 wake_score = 0.0            # the ear's best score of the wake
                 voice_t0 = 0.0              # when a voice first came: the wake latency
+                last_voice_t = 0.0          # wall clock of the last voiced chunk: the quiet
+                                            # after the name is counted from here, not from
+                                            # the detector's frame count (which freezes when
+                                            # the tape runs dry)
                 was_voiced = False          # a voice was on the last chunk
                 phrase_ms = 0.0             # speech since the name: the phrase gathers
                 heard_after = ''            # the old ear's words past the name (vosk fallback)
@@ -1599,14 +1649,21 @@ class Ears:
                     if not sel.select(0.5):
                         if not heard and time.monotonic() - t0 > 8:
                             raise RuntimeError(f'{name} gave no sound')
-                        if woken and phrase_ms == 0 and \
-                                time.monotonic() - wake_t > WAKE_AFTER:
-                            # the name passed by, nothing followed it: her turn
-                            # to greet — unless the small ear just finalised
-                            # the phrase the name stood at the end of
-                            return greet_or_fallback('name_alone')
-                        if woken and time.monotonic() - wake_t > TUNE['wake_listen']:
-                            break           # the phrase ran long: hand out what has gathered
+                        if woken:
+                            now = time.monotonic()
+                            verdict = after_name(phrase_ms,
+                                                 now - max(last_voice_t, wake_t),
+                                                 now - wake_t, TUNE['wake_listen'])
+                            if verdict == 'greet':
+                                # the name passed by, nothing followed it: her turn
+                                # to greet — unless the small ear just finalised
+                                # the phrase the name stood at the end of
+                                return greet_or_fallback('name_alone')
+                            if verdict in ('end', 'ceiling'):
+                                if verdict == 'ceiling':
+                                    judge_note('woken: listen ran out after %.1f s'
+                                               % (now - wake_t))
+                                break       # hand out what has gathered
                         # the recorder went dumb mid-window (a source yanked away, a
                         # driver's sulks): the ears must not wait out the whole wake
                         # deaf — the recorder starts over, the stop ear and the
@@ -1653,6 +1710,11 @@ class Ears:
                         break               # the stream is over: what is on the tape stands
                     heard = True
                     voiced = det.feed(chunk)            # the voice detector follows the frames
+                    if voiced:
+                        last_voice_t = time.monotonic() # the quiet after the name is counted
+                                                        # from the last voice, not from the
+                                                        # frame counter (which stops at the
+                                                        # end of the tape)
                     if voiced and not was_voiced and not voice_t0:
                         voice_t0 = time.monotonic()     # a voice began: the latency clock runs
                     was_voiced = voiced
@@ -1772,17 +1834,27 @@ class Ears:
                             phrase_ms = 0.0
                     if woken:
                         # LISTENING: the phrase after the name gathers on the tape,
-                        # its end comes from the same VAD endpointing as ever
+                        # its end comes from the same VAD endpointing as ever — and
+                        # from the one verdict that covers every shape of what may
+                        # follow the name (the (0, 400) ms breath used to satisfy
+                        # neither branch and the wake sat mute until the window died)
                         if utt is not None:
                             utt.feed(chunk, voiced)
                         if voiced:
                             phrase_ms += len(chunk) / (RATE * 2.0) * 1000.0
-                        if phrase_ms >= 400 and det.silence_ms >= VAD_TAIL:
+                        now = time.monotonic()
+                        verdict = after_name(phrase_ms, now - max(last_voice_t, wake_t),
+                                             now - wake_t, TUNE['wake_listen'])
+                        if verdict == 'end':
                             break           # the voice died down: the phrase is over
-                        if phrase_ms == 0 and time.monotonic() - wake_t > WAKE_AFTER:
-                            # the name alone: her turn to greet (1.5 s of quiet),
-                            # unless the small ear's fresh final holds the phrase
+                        if verdict == 'greet':
+                            # the name alone: her turn to greet, unless the small
+                            # ear's fresh final holds the phrase
                             return greet_or_fallback('name_alone')
+                        if verdict == 'ceiling':
+                            judge_note('woken: listen ran out after %.1f s'
+                                       % (now - wake_t))
+                            break           # hand out what has gathered
                 if not woken:
                     diag.event(arbitration='TIMEOUT',
                                reason='aborted' if self.abort else 'no_wake',
@@ -1791,10 +1863,28 @@ class Ears:
                     return {'woke': False, 'text': None}
                 # the name was heard: the phrase on the tape goes to the configured
                 # STT (Nemotron/Whisper read it, vosk stays for the phrase ends —
-                # exactly as the settings say, раздел 7 ТЗ)
+                # exactly as the settings say, раздел 7 ТЗ). But the stop ear was
+                # reading the air the whole time the phrase gathered on the tape:
+                # when its fresh final already holds the words, the big ear's pass
+                # buys nothing — that pass took a median 8.5 s and grows with the
+                # phrase (a 150-word monologue waited a minute), while the small
+                # ear's reading had arrived before the phrase ended. So the reading
+                # that came first is the reading; Nemotron/Whisper are asked only
+                # when the small ear has nothing to say (the fast path's own diary
+                # line is stt_fast — no phrase_end/stt_done pair, no STT ran). The
+                # small ear's words count only while they are fresh (VOSK_STALE):
+                # a final from before the wake is someone else's talk, and the big
+                # ear must read the tape rather than act on it
                 said = utt.take() if utt is not None else b''
                 text = ''
-                if len(said) >= RATE:           # under a second is a breath, not a phrase
+                fast = heard_after or vosk_fallback(time.monotonic(), VOSK_STALE)
+                if fast:
+                    text = fast
+                    judge_note(f'WAKE vosk first ({text!r})')
+                    diag.event(arbitration='STT', reason='stt_fast', stt_text=text,
+                               judge_called=False, final_wake=False,
+                               **diag_base('LISTENING', voiced))
+                elif len(said) >= RATE:       # under a second is a breath, not a phrase
                     diag.event(arbitration='STT', reason='phrase_end', stt_start=True,
                                judge_called=False, final_wake=False,
                                **diag_base('LISTENING', voiced))
@@ -1802,12 +1892,6 @@ class Ears:
                     diag.event(arbitration='STT', reason='stt_done', stt_text=text,
                                judge_called=False, final_wake=False,
                                **diag_base('LISTENING', voiced))
-                if not text and heard_after:
-                    text = heard_after          # the old ear's words past the name stand in
-                if not text:
-                    text = vosk_fallback()      # the small ear's fresh final: the phrase
-                    if text:                    # may have ended before the name was believed
-                        judge_note(f'WAKE vosk fallback ({text!r})')
                 return wake_result(text, 'phrase_after_name' if text else 'name_alone',
                                    wake_score)
             finally:
