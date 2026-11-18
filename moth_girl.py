@@ -1095,20 +1095,23 @@ class App(Gtk.Application):
         def work():
             s = self.settings
             lang = s.get('speech_lang', 'en')
-            user_text = str(history[-1].get('content') or '')   # the question just asked
-            history = list(history)
+            # the copy the worker walks: `history` is the caller's list, and an
+            # assignment to it here would make every read of it a crash
+            # (UnboundLocalError — every question died before the answer)
+            hist = list(history)
+            user_text = str(hist[-1].get('content') or '')   # the question just asked
             # the diary: older lines about the same thing join the question, the
             # talks about other things stay out of the way (yumi/memory.py)
             if s.get('chat_memory', True):
                 try:
                     note = chat.recalled_note(
-                        memory.recall(user_text, s, skip_recent=len(history)), lang)
+                        memory.recall(user_text, s, skip_recent=len(hist)), lang)
                 except Exception:
                     note = ''
                 if note:
-                    history.append({'role': 'system', 'content': note})
+                    hist.append({'role': 'system', 'content': note})
             prompt = chat.system_prompt(lang)
-            reply = chat.ask(s, [{'role': 'system', 'content': prompt}] + history)
+            reply = chat.ask(s, [{'role': 'system', 'content': prompt}] + hist)
             if s.get('chat_memory', True):
                 try:
                     memory.remember('user', user_text, s)

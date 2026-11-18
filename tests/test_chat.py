@@ -141,4 +141,12 @@ assert chat.ask({'chat_provider': 'polza.ai'}, [{'role': 'user', 'content': 'hi'
 assert chat.hourly_joke({'chat_provider': 'polza.ai'}, 14) == ''
 assert chat.joke({'chat_provider': 'polza.ai'}, 'ru') == ''
 
+# the question must reach Ollama: chat_ask's worker walks a COPY of the history —
+# an assignment to `history` inside work() makes every earlier read of it an
+# UnboundLocalError, and every chat question dies before the answer
+src = (_root / 'moth_girl.py').read_text(encoding='utf-8')
+assert 'hist = list(history)' in src, 'chat_ask must walk a copy of the history'
+assert 'history = list(history)' not in src, \
+    'rebinding history inside work() crashes every read of it (UnboundLocalError)'
+
 print('ok')
