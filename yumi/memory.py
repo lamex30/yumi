@@ -197,6 +197,32 @@ class Memory:
             except sqlite3.Error:
                 return 0
 
+    def recent(self, limit=50, hide_sassy=True):
+        """the newest lines of the diary for the browser panel"""
+        limit = max(1, min(int(limit or 50), 500))
+        sql = 'SELECT ts, role, text, tag FROM messages '
+        params = []
+        if hide_sassy:
+            sql += "WHERE (tag IS NULL OR tag NOT LIKE 'sassy%') "
+        sql += 'ORDER BY id DESC LIMIT ?'
+        params.append(limit)
+        with self.lock:
+            try:
+                rows = self.con.execute(sql, params).fetchall()
+            except sqlite3.Error:
+                return []
+        return [{'ts': r[0], 'role': r[1], 'text': r[2], 'tag': r[3]} for r in rows]
+
+    def clear_all(self):
+        """empty the diary (the panel's explicit «forget everything» button)"""
+        with self.lock:
+            try:
+                cur = self.con.execute('DELETE FROM messages')
+                self.con.commit()
+                return cur.rowcount
+            except sqlite3.Error:
+                return 0
+
     # ---------------------------------------------------------------- the vectors
     def _embed(self, text, settings, kind='passage'):
         """(vector, dim, kind) of a line: Ollama's embeddings ('model') when they
@@ -296,3 +322,11 @@ def joke_streak(tag):
 
 def clear_tag(prefix=TAG_SASSY):
     return _book().clear_tag(prefix)
+
+
+def recent(limit=50, hide_sassy=True):
+    return _book().recent(limit, hide_sassy)
+
+
+def clear_all():
+    return _book().clear_all()

@@ -476,6 +476,23 @@ The waiting hears nothing else: everything is computed on the spot, offline.
 
 `YUMI_SCALE=2 yumi` draws her twice as big (integer pixel scale).
 
+## The browser panel
+
+- **Turning it on:** Settings → Browser panel → “Browser panel”, then “Open in the browser”.
+  Or run `yumi --web`. It is **off by default**; no port is opened until you ask.
+- **Signing in:** Yumi prints a link with a one-time token (`http://127.0.0.1:8765/?t=…`).
+  It is exchanged for an HttpOnly session. You can rotate the token on the Security page
+  without signing out the tabs that are already open.
+- **What is inside:** overview, talk, files, music, ears and voice, buttons, look, every
+  setting, memory, config files, security and logs. Changes apply live and are saved to
+  the same files the desktop Yumi uses.
+- **Network:** it listens on `127.0.0.1` only by default. `0.0.0.0` exposes it to the LAN;
+  do that only with a strong token and a firewall. There is no HTTPS yet.
+- **Data:** the token and signing secret live in `~/.config/yumi/webpanel.json` (mode
+  `0600`), config backups in `~/.config/yumi/backups/`, and the access log in
+  `~/.local/state/yumi/web-audit.log`.
+- Developer handoff: [docs/handoff-web-panel.md](docs/handoff-web-panel.md).
+
 ## Troubleshooting
 
 - **`gtk4-layer-shell is not installed`**: install it (see the table above). If it lives

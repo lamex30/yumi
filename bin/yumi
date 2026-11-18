@@ -1,6 +1,6 @@
 #!/bin/sh
 # Yumi, a sleepy pixel-art moth girl for Wayland desktops.
-#   yumi [--toggle|--pipette|--home|--recent|--sleep|--monitor|--quit|--ask "фраза"|--version|--help]
+#   yumi [--toggle|--pipette|--home|--recent|--sleep|--monitor|--web|--quit|--ask "фраза"|--version|--help]
 # Flags go straight to the running Yumi over D-Bus (fast) and start her if she is not running.
 # She runs on her own (closing the terminal does not close her); --foreground keeps her attached.
 DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"   # @DIR@ (make install puts the real path here)
@@ -9,7 +9,7 @@ OBJ=/io/github/lamex30/Yumi
 unset WAYLAND_SOCKET
 
 case "$1" in
-    --toggle|--pipette|--home|--recent|--sleep|--monitor|--quit)
+    --toggle|--pipette|--home|--recent|--sleep|--monitor|--web|--quit)
         gdbus call --session --dest "$APP" --object-path "$OBJ" \
             --method org.gtk.Actions.Activate "${1#--}" "[]" "{}" >/dev/null 2>&1 && exit 0
         [ "$1" = --quit ] && exit 0

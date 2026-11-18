@@ -16,6 +16,7 @@ file monitors, the job queue and the system watchers to it.
   yumi --quit          let her go
 Env: YUMI_SCALE (integer pixel scale, overrides settings).
 """
+import json
 import math
 import os
 import random
@@ -42,12 +43,14 @@ from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from yumi import chat, config, ears, files, jobs, memory, music, pixfont, pixui, system, tts, voice  # noqa: E402
+from yumi import webpanel  # noqa: E402
+from yumi.webpanel import catalog as webcatalog  # noqa: E402
 from yumi.brain import UI_PX, Brain  # noqa: E402
 from yumi.phrases import Speech  # noqa: E402
 from yumi.sprites import Meta, palette_delta, palette_from_hue, recolor_bgra, ui_colors  # noqa: E402
 
 APP_ID = 'io.github.lamex30.Yumi'
-ACTIONS = ('toggle', 'pipette', 'home', 'recent', 'sleep', 'monitor', 'quit')
+ACTIONS = ('toggle', 'pipette', 'home', 'recent', 'sleep', 'monitor', 'web', 'quit')
 ASK = 'ask'          # the one action that carries a phrase («yumi --ask "какая погода"»)
 FADE = 0.6          # s of crossfade when the wallpaper palette changes
 
@@ -492,6 +495,19 @@ class App(Gtk.Application):
         self.duck_saved = None          # the loudness before the duck (the name_duck setting)
         self.duck_restore = None        # the timer that brings the loudness back
         self.form_picking = False       # the file dialog of the button form is open
+        self.started = time.time()
+        self.web = None                 # the optional browser panel (off by default)
+        self.web_sig = None             # (enabled, host, port, session hours) it was started with
+        self.web_sync_src = None
+        self.web_opened = False
+        self._web_music_at = 0.0
+        self._web_music = None
+        self._web_volume = None
+        self._web_bubble = ''
+        self._web_status_at = 0.0
+        self.web_chat_path = config.STATE_DIR / 'web-chat.json'
+        self.web_chat_lock = threading.Lock()
+        self.web_chat = self.load_web_chat()
         ask_type = GLib.VariantType.new('s')
         for name in ACTIONS + (ASK,):
             a = Gio.SimpleAction.new(name, ask_type if name == ASK else None)
@@ -552,6 +568,7 @@ class App(Gtk.Application):
         self.dl_announced = {}          # the model a daemon fetches now: src -> name, told about
         GLib.timeout_add_seconds(4, self.watch_downloads)
         self.hold()                                  # keep running without a mapped window too
+        self.web_sync()                              # the browser panel, only if switched on
         GLib.timeout_add(1500, lambda: self.ev(lambda b: b.say('hello', force=True)) and False)
 
     def pick_outfit(self):
@@ -572,6 +589,10 @@ class App(Gtk.Application):
         """let all her companion services go before she does: the TTS daemon,
         the STT daemon, her music and anything else that outlives her process."""
         self.wake_on = False            # the wake loop stops asking: no ears rise after her
+        if self.web:
+            self.web.stop()
+            self.web = None
+            self.web_sig = None
         self.duck_end()                 # the ducked loudness comes back before she goes
         if self.duck_restore:
             GLib.source_remove(self.duck_restore)
@@ -719,6 +740,8 @@ class App(Gtk.Application):
             self.ev(lambda b: b.toggle_pile('recent'))
         elif name == 'sleep':
             self.ev(lambda b: b.requests.append(('dnd', not b.sleeping)))
+        elif name == 'web':
+            self.web_open()
         elif name == 'quit':
             self.close()
             self.quit()
@@ -740,6 +763,7 @@ class App(Gtk.Application):
         if self.voice_proc and (not b.bubble or b.bubble.get('id') != self.voice_id):
             self.hush()                              # the bubble went away: so does her voice
         self.ops = b.scene()
+        self.web_tick()
         for w in self.windows:
             if w is self.active:
                 w.area.queue_draw()
@@ -851,6 +875,13 @@ class App(Gtk.Application):
             elif kind == 'save_settings':
                 self.settings.save()
                 music.apply_settings(self.settings)   # the server mpd may have moved
+                self.web_sync_soon()                  # on / off / another port, live
+            elif kind == 'web_open':
+                self.web_open()
+            elif kind == 'web_copy':
+                self.web_copy()
+            elif kind == 'web_rotate':
+                self.web_rotate()
             elif kind == 'memory_clear_sassy':
                 # «Дерзкая 18+» went off: its talks and jokes leave the diary,
                 # vectors and all (yumi/memory.py, tag «sassy…»)
@@ -1388,6 +1419,854 @@ class App(Gtk.Application):
             surfaces = load_surfaces(meta, delta)
             GLib.idle_add(lambda: done(surfaces))
         threading.Thread(target=work, daemon=True).start()
+
+
+    # ------------------------------------------------------------------ browser panel
+    def load_web_chat(self):
+        """the panel's own conversation, so a browser reload does not lose the talk"""
+        try:
+            data = json.loads(self.web_chat_path.read_text())
+            if isinstance(data, list):
+                return [m for m in data if isinstance(m, dict) and m.get('text')][-100:]
+        except (OSError, ValueError):
+            pass
+        return []
+
+    def save_web_chat(self):
+        try:
+            self.web_chat_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.web_chat_path.with_suffix('.tmp')
+            tmp.write_text(json.dumps(self.web_chat[-100:], indent=1, ensure_ascii=False))
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+            tmp.replace(self.web_chat_path)
+        except OSError:
+            pass
+
+    def web_config_sig(self):
+        try:
+            return (bool(self.settings.get('web_panel')), str(self.settings.get('web_panel_host')),
+                    int(self.settings.get('web_panel_port') or 8765),
+                    int(self.settings.get('web_panel_session_hours') or 168))
+        except (TypeError, ValueError):
+            return (bool(self.settings.get('web_panel')), '127.0.0.1', 8765, 168)
+
+    def web_sync_soon(self):
+        """a setting changed: start/stop/restart after the frame, so the response can leave"""
+        if self.web_sync_src:
+            return
+        self.web_sync_src = GLib.timeout_add(250, self._web_sync_later)
+
+    def _web_sync_later(self):
+        self.web_sync_src = None
+        self.web_sync()
+        return False
+
+    def web_sync(self):
+        sig = self.web_config_sig()
+        if not sig[0]:
+            if self.web:
+                self.web.stop()
+                self.web = None
+            self.web_sig = None
+            self.web_opened = False
+            return
+        if self.web and self.web.running and self.web_sig == sig:
+            self.web.auth.set_session_hours(sig[3])
+            return
+        if self.web:
+            self.web.stop()
+            self.web = None
+        panel = webpanel.Panel(self.settings, WebBridge(self))
+        if panel.start():
+            self.web = panel
+            self.web_sig = sig
+            print(f'yumi: browser panel at {panel.url(True)}', file=sys.stderr)
+            if self.settings.get('web_panel_open') and not self.web_opened:
+                self.web_opened = True
+                system.open_url(panel.url(True))
+        else:
+            self.web = None
+            self.web_sig = None
+            print(f'yumi: the browser panel did not start: {panel.error}', file=sys.stderr)
+            b = getattr(self, 'brain', None)
+            if b:
+                b.say_text(config.tr(self.settings, 'web_fail', err=panel.error or 'port is busy'))
+
+    def web_open(self):
+        was_running = bool(self.web and self.web.running)
+        if not self.settings.get('web_panel'):
+            self.settings['web_panel'] = True
+            self.settings.save()
+            self.web_sync()
+        elif not self.web:
+            self.web_sync()
+        if self.web and self.web.running:
+            # web_sync() may already have opened the browser via web_panel_open
+            if was_running or not self.settings.get('web_panel_open'):
+                system.open_url(self.web.url(True))
+            self.brain.say_text(config.tr(self.settings, 'web_on', url=self.web.url(False)))
+        else:
+            err = (self.web.error if self.web else 'port is busy') or 'port is busy'
+            self.brain.say_text(config.tr(self.settings, 'web_fail', err=err))
+
+    def web_copy(self):
+        if not self.web or not self.web.running:
+            self.web_sync()
+        if self.web and self.web.running:
+            url = self.web.url(True)
+            if not system.copy_text(url):
+                Gdk.Display.get_default().get_clipboard().set(url)
+            self.brain.say_text(config.tr(self.settings, 'web_on', url=self.web.url(False)))
+        else:
+            self.brain.say_text(config.tr(self.settings, 'web_off'))
+
+    def web_rotate(self):
+        if not self.web or not self.web.running:
+            self.brain.say_text(config.tr(self.settings, 'web_off'))
+            return
+        token = self.web.rotate()
+        url = self.web.url(False) + '?t=' + token
+        if not system.copy_text(url):
+            Gdk.Display.get_default().get_clipboard().set(url)
+        self.brain.say_text(config.tr(self.settings, 'web_on', url=self.web.url(False)))
+
+    def _web_call(self, fn, timeout=30):
+        """run a bridge call on the GTK thread; the HTTP worker waits for the answer"""
+        if threading.current_thread() is threading.main_thread():
+            return fn()
+        box = {}
+        done = threading.Event()
+
+        def run():
+            try:
+                box['value'] = fn()
+            except BaseException as exc:      # the HTTP layer turns it into a response
+                box['error'] = exc
+            finally:
+                done.set()
+            return False
+        GLib.idle_add(run)
+        if not done.wait(timeout):
+            raise TimeoutError('Yumi is busy')
+        if 'error' in box:
+            raise box['error']
+        return box.get('value')
+
+    def web_tick(self):
+        """the live feed: the bubble and a light status, only while a browser listens"""
+        web = self.web
+        if not web or not web.running:
+            return
+        with web.bus.lock:
+            listening = bool(web.bus.subs)
+        if not listening:
+            return
+        b = self.brain
+        text = str((b.bubble or {}).get('text') or '')
+        if text != self._web_bubble:
+            self._web_bubble = text
+            web.publish('bubble', {'text': text,
+                                   'kind': (b.bubble or {}).get('kind'),
+                                   'until': (b.bubble or {}).get('until')})
+        now = time.monotonic()
+        if now - self._web_status_at > 2.0:
+            self._web_status_at = now
+            try:
+                web.publish('status', self._web_snapshot(light=True))
+            except Exception:
+                pass
+
+    @staticmethod
+    def _hex_color(rgb, fallback=None):
+        try:
+            if isinstance(rgb, str):
+                return rgb
+            return '#%02x%02x%02x' % tuple(max(0, min(255, round(float(c) * 255))) for c in rgb[:3])
+        except (TypeError, ValueError):
+            return fallback or '#c7a8db'
+
+    def _web_snapshot(self, light=False):
+        b = self.brain
+        s = self.settings
+        st = self.state
+        now = time.monotonic()
+        if now - self._web_music_at > 4.0:
+            self._web_music_at = now
+            try:
+                self._web_music = music.now_playing()
+            except Exception:
+                self._web_music = None
+            try:
+                self._web_volume = music.read_volume()
+            except Exception:
+                self._web_volume = None
+        tm = b.timer or {}
+        timer = {
+            'seconds': int(round(b.timer_seconds())),
+            'text': b.timer_text() if tm else '',
+            'running': bool(tm and not tm.get('done') and tm.get('end') is not None),
+            'pending': bool(tm.get('pending')),
+            'paused': bool(tm.get('paused')),
+            'done': bool(tm.get('done')),
+        }
+        palette = self.palette or {}
+        ui = {}
+        try:
+            ui = {k: self._hex_color(v) for k, v in ui_colors(palette).items()}
+        except Exception:
+            pass
+        queue = self.queue
+        cur = queue.current if queue else None
+        jobs = {
+            'busy': bool(queue.busy) if queue else False,
+            'current': None if not cur else {
+                'op': cur.op, 'src': str(cur.src), 'arg': cur.arg,
+                'fraction': round(float(cur.fraction or 0), 3)},
+            'queued': [{'op': j.op, 'src': str(j.src), 'arg': j.arg}
+                       for j in (queue.jobs if queue else [])][:20],
+        }
+        data = {
+            'time': time.time(),
+            'version': __import__('yumi').__version__,
+            'uptime': int(time.time() - self.started),
+            'settings': webcatalog.redact(s),
+            'state': {
+                'mode': st.get('mode'), 'monitor': st.get('monitor'),
+                'shelf': st.get('shelf') or [], 'colors': st.get('colors') or [],
+            },
+            'runtime': {
+                'mode': b.mode, 'out': bool(b.out), 'sleeping': bool(b.sleeping),
+                'pinned': bool(s.get('pinned')), 'thinking': bool(b.thinking),
+                'listening': bool(b.listening), 'busy': bool(b.busy),
+                'progress': b.progress,
+                'bubble': (b.bubble or {}).get('text') or '',
+                'face': b.face,
+                'timer': timer,
+                'monitors': int(getattr(b, 'monitors', 1) or 1),
+                'chat_models': list(b.chat_models or []),
+                'mics': list(b.mics or []),
+                'unavailable': sorted(b.unavailable or []),
+                'palette': palette,
+                'ui_colors': ui,
+                'music': {'now_playing': self._web_music, 'volume': self._web_volume},
+                'wake_on': bool(self.wake_on),
+                'tap_ears': bool(s.get('tap_ears')),
+                'downloads': self.dl_announced,
+                'outfit': getattr(self.meta, 'outfit', None),
+                'shelf_count': len([p for p in (st.get('shelf') or []) if Path(p).exists()]),
+                'recent_count': len(getattr(self.recent, 'items', {}) or {}),
+            },
+            'jobs': jobs,
+            'panel': self.web.info() if self.web else {'running': False},
+            'features': {
+                'ffmpeg': bool(shutil.which('ffmpeg')),
+                'magick': bool(shutil.which('magick') or shutil.which('convert')),
+                'playerctl': bool(shutil.which('playerctl')),
+                'mpd': bool(shutil.which('mpc') or shutil.which('mpd')),
+                'idle': bool(getattr(self.world, 'can_idle', False)),
+                'wallpaper': bool(getattr(self.world, 'wall', None)),
+                'desktop': 'wayland',
+            },
+        }
+        if not light:
+            data['settings_full'] = webcatalog.redact(s)
+        return data
+
+    def _web_apply_settings(self, patch):
+        old = {k: self.settings.get(k) for k in patch}
+        self.settings.update(patch)
+        self.settings.save()
+        b = self.brain
+        if 'outfit' in patch:
+            b.requests.append(('outfit',))
+        if 'recolor' in patch or 'hue' in patch:
+            b.requests.append(('recolor',))
+        if 'wake_ears' in patch:
+            b.requests.append(('wake_set', bool(self.settings.get('wake_ears'))))
+        if 'tap_ears' in patch:
+            b.requests.append(('tap_set', bool(self.settings.get('tap_ears'))))
+        if 'pinned' in patch and self.settings.get('pinned'):
+            b.pop(True)
+        if 'sassy' in patch and not self.settings.get('sassy'):
+            b.chat_history = []
+            threading.Thread(target=memory.clear_tag, args=(memory.TAG_SASSY,),
+                             daemon=True).start()
+        if 'chat_provider' in patch:
+            b.chat_models = []
+            b.requests.append(('chat_models',))
+        try:
+            music.apply_settings(self.settings)
+        except Exception:
+            pass
+        self.web_sync_soon()
+        return {'saved': {k: self.settings.get(k) for k in patch},
+                'before': old, 'restart': 'scale' in patch}
+
+    def _web_timer_get(self):
+        b = self.brain
+        tm = b.timer or {}
+        return {'seconds': int(round(b.timer_seconds())), 'text': b.timer_text() if tm else '',
+                'running': bool(tm and not tm.get('done') and tm.get('end') is not None),
+                'pending': bool(tm.get('pending')), 'paused': bool(tm.get('paused')),
+                'done': bool(tm.get('done'))}
+
+    def _web_timer(self, action, seconds):
+        b = self.brain
+        try:
+            secs = int(seconds or 0)
+        except (TypeError, ValueError):
+            raise ValueError('seconds must be a number')
+        if action in ('set', 'start'):
+            if secs <= 0:
+                b.timer = None
+                b.kb_hover = False
+            else:
+                b.timer_set(min(secs, 24 * 3600 - 1), start_in=0)
+                if b.mode == 'docked' and not b.out:
+                    b.pop(True)
+        elif action == 'add':
+            b.timer_set(int(b.timer_seconds()) + max(1, secs), start_in=0)
+        elif action == 'stop':
+            b.timer = None
+            b.kb_hover = False
+        elif action == 'pause':
+            tm = b.timer
+            if tm and not tm.get('done'):
+                tm['left'] = b.timer_seconds()
+                tm['end'] = None
+                tm['pending'] = None
+                tm['paused'] = True
+        elif action == 'resume':
+            tm = b.timer
+            if tm and not tm.get('done'):
+                left = tm.get('left') or tm.get('total') or 0
+                tm['end'] = b.now + left
+                tm['pending'] = None
+                tm['paused'] = False
+        else:
+            raise ValueError('unknown timer action')
+        return {'timer': self._web_timer_get()}
+
+    def _web_backup(self, name, path):
+        path = Path(path)
+        if not path.exists():
+            return ''
+        try:
+            folder = config.CONFIG_DIR / 'backups'
+            folder.mkdir(parents=True, exist_ok=True)
+            dest = folder / f"{name}-{time.strftime('%Y%m%d-%H%M%S')}.json"
+            shutil.copyfile(path, dest)
+            old = sorted(folder.glob(f'{name}-*.json'))
+            for extra in old[:-20]:
+                try:
+                    extra.unlink()
+                except OSError:
+                    pass
+            return str(dest)
+        except OSError:
+            return ''
+
+    def _web_config_info(self, name):
+        spec = webcatalog.CONFIG_FILES[name]
+        path = Path(spec['path']())
+        try:
+            st = path.stat()
+            return {'name': name, 'path': str(path), 'exists': True,
+                    'size': st.st_size, 'mtime': st.st_mtime,
+                    'title': spec['title'], 'kind': spec['kind']}
+        except OSError:
+            return {'name': name, 'path': str(path), 'exists': False,
+                    'size': 0, 'mtime': 0, 'title': spec['title'], 'kind': spec['kind']}
+
+    def _web_configs(self):
+        return [self._web_config_info(name) for name in webcatalog.CONFIG_FILES]
+
+    def _web_config_get(self, name):
+        info = self._web_config_info(name)
+        spec = webcatalog.CONFIG_FILES[name]
+        path = Path(spec['path']())
+        writable = name != 'webpanel'
+        data = None
+        raw = ''
+        if name == 'settings':
+            data = webcatalog.redact(self.settings)
+            raw = json.dumps(data, indent=1, ensure_ascii=False)
+        elif name == 'actions':
+            data = [dict(a) for a in self.brain.custom]
+            raw = path.read_text() if path.exists() else json.dumps(data, indent=1, ensure_ascii=False)
+        elif name == 'state':
+            data = dict(self.state)
+            raw = json.dumps(data, indent=1, ensure_ascii=False)
+        elif name == 'webpanel':
+            data = {'token': webcatalog.MASK if self.web else '',
+                    'secret': webcatalog.MASK, 'created': None,
+                    'path': str(path), 'note': 'managed on the Security page'}
+            raw = json.dumps(data, indent=1, ensure_ascii=False)
+        else:
+            try:
+                text = path.read_text()
+            except OSError:
+                text = '{\n}\n'
+            try:
+                data = json.loads(text)
+            except ValueError:
+                data = None
+            raw = text
+        return {'file': info, 'data': data, 'text': raw, 'writable': writable}
+
+    def _web_config_save(self, name, value):
+        if name not in webcatalog.CONFIG_FILES:
+            raise ValueError('unknown config file')
+        if name == 'webpanel':
+            raise ValueError('the panel token is changed on the Security page')
+        spec = webcatalog.CONFIG_FILES[name]
+        path = Path(spec['path']())
+        if isinstance(value, str):
+            try:
+                data = json.loads(value)
+            except ValueError as exc:
+                raise ValueError(f'this is not JSON: {exc}')
+        else:
+            data = value
+        backup = self._web_backup(name, path)
+        if name == 'settings':
+            if not isinstance(data, dict):
+                raise ValueError('settings must be an object')
+            patch = webcatalog.validate_settings_patch(data)
+            result = self._web_apply_settings(patch)
+            return {'saved': list(patch), 'backup': backup, 'restart': result.get('restart')}
+        if name == 'actions':
+            cleaned = self._clean_actions(data)
+            config.save_actions(cleaned)
+            self.brain.custom = config.load_actions()
+            self.brain.actions_check()
+            return {'saved': len(cleaned), 'backup': backup}
+        if name == 'state':
+            if not isinstance(data, dict):
+                raise ValueError('state must be an object')
+            if data.get('mode') not in (None, 'docked', 'air'):
+                raise ValueError('mode must be docked or air')
+            self.state.update(data)
+            self.state.save()
+            return {'saved': list(data), 'backup': backup}
+        if not isinstance(data, (dict, list)):
+            raise ValueError('this file holds a JSON object or list')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix('.tmp')
+        tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False))
+        tmp.replace(path)
+        if name == 'palette':
+            self.brain.requests.append(('recolor',))
+        return {'saved': True, 'backup': backup}
+
+    def _clean_actions(self, actions):
+        if not isinstance(actions, list):
+            raise ValueError('actions must be a list')
+        out = []
+        seen = set()
+        for raw in actions:
+            if not isinstance(raw, dict):
+                continue
+            command = str(raw.get('command') or '').strip()
+            if not command or command in seen:
+                continue
+            seen.add(command)
+            label = str(raw.get('label') or command)[:18]
+            label_ru = str(raw.get('label_ru') or label)[:18]
+            item = {'label': label, 'label_ru': label_ru,
+                    'icon': str(raw.get('icon') or 'star')[:120],
+                    'command': command[:2000]}
+            phrases = [str(p)[:200] for p in (raw.get('phrases') or []) if str(p).strip()]
+            keywords = [str(k)[:80] for k in (raw.get('keywords') or []) if str(k).strip()]
+            if phrases:
+                item['phrases'] = phrases
+            if keywords:
+                item['keywords'] = keywords
+            if str(raw.get('speak') or '').strip():
+                item['speak'] = str(raw['speak'])[:300]
+            if str(raw.get('url') or '').strip():
+                item['url'] = str(raw['url'])[:2000]
+            out.append(item)
+        return out
+
+    def _web_actions_get(self):
+        b = self.brain
+        table = b.ring_table()
+        ids = b.ring_ids(table)
+        ring = []
+        for i in ids:
+            if i not in table:
+                continue
+            action, arg, icon, label, ident = table[i]
+            ring.append({'id': i, 'label': label, 'icon': icon,
+                         'custom': i.startswith('cmd:') or i.startswith('/'),
+                         'off': not b.ring_shown(i), 'fixed': i == 'settings'})
+        return {'actions': [dict(a) for a in b.custom], 'ring': ring,
+                'ring_order': list(b.settings.get('ring') or []),
+                'ring_off': list(b.settings.get('ring_off') or []),
+                'icons': sorted(pixui.ICONS),
+                'icon_patterns': dict(pixui.ICONS)}
+
+    def _web_logs(self, name, lines):
+        paths = {
+            'yumi': config.STATE_DIR / 'yumi.log',
+            'judge': Path('/tmp/yumi/judge.log'),
+            'ears': Path('/tmp/yumi/recogn.txt'),
+            'web': Path(config.STATE_DIR) / 'web-audit.log',
+        }
+        path = paths.get(name)
+        if path is None:
+            raise ValueError('unknown log')
+        try:
+            with path.open('rb') as fh:
+                fh.seek(0, 2)
+                size = fh.tell()
+                fh.seek(max(0, size - 512 * 1024))
+                text = fh.read().decode('utf-8', 'replace')
+        except OSError:
+            text = ''
+        return {'name': name, 'path': str(path), 'text': '\n'.join(text.splitlines()[-lines:])}
+
+    def _web_file_allowed(self, path):
+        """the panel may preview or open the files it knows about: recent, shelf and
+        its own uploads.  A crafted ``?path=/home/…/secret.png`` gets nothing."""
+        try:
+            target = Path(str(path or '')).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            return False
+        if not target.is_file():
+            return False
+        known = set()
+        for source in ((self.state.get('shelf') or []),
+                       list(getattr(self.recent, 'items', {}) or {})):
+            for item in source:
+                try:
+                    known.add(Path(str(item)).expanduser().resolve())
+                except (OSError, RuntimeError, ValueError):
+                    pass
+        if target in known:
+            return True
+        try:
+            uploads = (Path(config.CACHE_DIR) / 'uploads').resolve()
+        except (OSError, RuntimeError):
+            return False
+        return target == uploads or uploads in target.parents
+
+    def _web_chat(self, text):
+        """the panel's own talk with the same mind and diary, away from the GTK thread"""
+        text = ' '.join(str(text or '').split())
+        if not text:
+            raise ValueError('a message is needed')
+        with self.web_chat_lock:
+            history = list(self.web_chat)
+        s = self.settings
+        lang = s.get('speech_lang', 'en')
+        n = max(2, int(s.get('chat_history_n', 10)))
+        turns = [{'role': m['role'], 'content': m['text']} for m in history[-n:]]
+        note = ''
+        if s.get('chat_memory', True):
+            try:
+                note = chat.recalled_note(memory.recall(text, s, skip_recent=len(turns)), lang)
+            except Exception:
+                note = ''
+        messages = [{'role': 'system', 'content': chat.system_prompt(lang, bool(s.get('sassy')))}]
+        messages += turns
+        if note:
+            messages.append({'role': 'system', 'content': note})
+        messages.append({'role': 'user', 'content': text})
+        reply = chat.ask(s, messages)
+        with self.web_chat_lock:
+            self.web_chat.append({'role': 'user', 'text': text, 'ts': time.time()})
+            if reply:
+                self.web_chat.append({'role': 'assistant', 'text': reply, 'ts': time.time()})
+            self.web_chat = self.web_chat[-100:]
+            self.save_web_chat()
+        sassy = bool(s.get('sassy'))
+        if s.get('chat_memory', True) and bool(s.get('sassy')) == sassy:
+            tag = memory.TAG_SASSY if sassy else None
+            try:
+                memory.remember('user', text, s, tag=tag)
+                if reply:
+                    memory.remember('assistant', reply, s, tag=tag)
+            except Exception:
+                pass
+        return {'reply': reply or '', 'recalled': note != '',
+                'history': len(self.web_chat)}
+
+
+class WebBridge:
+    """The bridge the HTTP server sees. Every call that touches GTK is wrapped by
+    ``App._web_call``; the pure ones (chat, music, memory) stay on the HTTP thread."""
+
+    def __init__(self, app):
+        self.app = app
+
+    def _on(self, fn, timeout=30):
+        return self.app._web_call(fn, timeout)
+
+    # ---- read side
+    def snapshot(self):
+        return self._on(self.app._web_snapshot)
+
+    def configs(self):
+        return self._on(self.app._web_configs)
+
+    def config_get(self, name):
+        return self._on(lambda: self.app._web_config_get(name))
+
+    def config_save(self, name, value):
+        return self._on(lambda: self.app._web_config_save(name, value), 60)
+
+    def actions_get(self):
+        return self._on(self.app._web_actions_get)
+
+    def actions_save(self, actions):
+        return self._on(lambda: self.app._web_config_save('actions', actions), 60)
+
+    def action_run(self, index):
+        b = self.app.brain
+        self._on(lambda: b.extras_do('custom', int(index)))
+        return {'ran': int(index)}
+
+    def apply_settings(self, patch):
+        return self._on(lambda: self.app._web_apply_settings(patch), 60)
+
+    # ---- world actions
+    def state_action(self, name, payload):
+        a = self.app
+        b = a.brain
+
+        def run():
+            if name in ('toggle', 'show'):
+                b.toggle()
+            elif name == 'hide':
+                b.close_all()
+                b.pop(False)
+            elif name == 'home':
+                b.go_home()
+            elif name == 'monitor':
+                a.cycle_monitor()
+            elif name == 'pipette':
+                b.start_pipette()
+            elif name == 'recent':
+                b.toggle_pile('recent')
+            elif name == 'shelf':
+                b.toggle_pile('shelf')
+            elif name == 'dnd':
+                on = bool(payload.get('on', not b.sleeping))
+                if not on:
+                    b.nap = False
+                b.requests.append(('dnd', on))
+            elif name == 'pin':
+                on = bool(payload.get('on', not a.settings.get('pinned')))
+                a.settings['pinned'] = on
+                a.settings.save()
+                if on:
+                    b.pop(True)
+            elif name == 'sound':
+                b.requests.append(('sound', 'timer'))
+            elif name == 'stop':
+                b.stop_all()
+            elif name == 'listen':
+                b.requests.append(('listen', int(payload.get('seconds') or 8)))
+            elif name == 'joke':
+                b.requests.append(('joke_ask', {'lang': a.settings.get('speech_lang', 'en'),
+                                                'text': payload.get('text') or ''}))
+            elif name == 'tour':
+                b.start_tour()
+            elif name == 'config-dir':
+                system.spawn('xdg-open', str(config.CONFIG_DIR))
+            elif name == 'restart':
+                b.requests.append(('restart',))
+            elif name == 'quit':
+                b.requests.append(('quit',))
+            else:
+                raise ValueError(f'unknown action: {name}')
+            return {'action': name}
+        return self._on(run)
+
+    def files_recent(self):
+        return self._on(self._files_recent)
+
+    def _files_recent(self):
+        items = sorted(getattr(self.app.recent, 'items', {}).items(), key=lambda x: -x[1])[:60]
+        return [self._file_info(p, t) for p, t in items]
+
+    @staticmethod
+    def _file_info(path, mtime=None):
+        p = Path(path)
+        try:
+            st = p.stat()
+            size, mtime, exists = st.st_size, mtime or st.st_mtime, True
+        except OSError:
+            size, exists = 0, False
+        kind = jobs.kind_of(p) or ('archive' if p.suffix.lower().lstrip('.') in
+                                   ('zip', 'tar', 'gz', 'xz', 'zst', '7z', 'rar', 'bz2') else 'other')
+        return {'path': str(p), 'name': p.name, 'size': size, 'mtime': mtime,
+                'exists': exists, 'kind': kind, 'ext': p.suffix.lower().lstrip('.')}
+
+    def files_shelf(self):
+        return self._on(lambda: [self._file_info(p) for p in
+                                 (self.app.state.get('shelf') or [])])
+
+    def shelf_change(self, paths, add=True):
+        def run():
+            shelf = self.app.state.setdefault('shelf', [])
+            for path in paths:
+                p = str(Path(path).expanduser())
+                if add:
+                    if p not in shelf:
+                        shelf.insert(0, p)
+                else:
+                    while p in shelf:
+                        shelf.remove(p)
+            del shelf[40:]
+            self.app.state.save()
+            return {'shelf': list(shelf)}
+        return self._on(run)
+
+    def files_open(self, path):
+        def run():
+            if not self.app._web_file_allowed(path):
+                raise ValueError('this file is not one the panel knows')
+            return {'opened': bool(files.open_path(path))}
+        return self._on(run)
+
+    def file_allowed(self, path):
+        return self._on(lambda: self.app._web_file_allowed(path))
+
+    def job_add(self, op, path, arg):
+        def run():
+            if op not in ('convert', 'compress'):
+                raise ValueError('unknown job')
+            if not self.app._web_file_allowed(path):
+                raise ValueError('this file is not one the panel knows')
+            p = Path(path).expanduser()
+            if not p.is_file():
+                raise ValueError('the file is gone')
+            kind = jobs.kind_of(p)
+            if not kind:
+                raise ValueError('this file is not a picture, sound or video')
+            allowed = jobs.TARGETS.get(kind, []) if op == 'convert' else jobs.PRESETS.get(kind, [])
+            if arg not in allowed:
+                raise ValueError(f'unknown target: {arg}')
+            self.app.queue.add(op, str(p), arg)
+            return {'queued': True, 'kind': kind, 'op': op, 'arg': arg}
+        return self._on(run)
+
+    def jobs_cancel(self):
+        return self._on(lambda: self.app.queue.cancel())
+
+    def timer_get(self):
+        return self._on(self.app._web_timer_get)
+
+    def timer(self, action, seconds):
+        return self._on(lambda: self.app._web_timer(action, seconds))
+
+    def ask(self, text, speak=True):
+        def run():
+            b = self.app.brain
+            if b.thinking:
+                return {'queued': False, 'reason': 'she is thinking already'}
+            b.wake_up(text)
+            return {'queued': True}
+        return self._on(run)
+
+    def chat(self, text):
+        return self.app._web_chat(text)
+
+    def chat_history(self):
+        with self.app.web_chat_lock:
+            return list(self.app.web_chat)
+
+    def chat_clear(self):
+        with self.app.web_chat_lock:
+            self.app.web_chat = []
+            self.app.save_web_chat()
+        return {'cleared': True}
+
+    def memory_recent(self, limit=50):
+        return memory.recent(limit, hide_sassy=not self.app.settings.get('sassy'))
+
+    def memory_search(self, query, limit=50):
+        return memory.recall(query, self.app.settings, k=min(50, limit))
+
+    def memory_clear(self, tag):
+        if tag == 'all':
+            return {'deleted': memory.clear_all()}
+        return {'deleted': memory.clear_tag(tag)}
+
+    def music_status(self):
+        playing = music.now_playing()
+        return {'now_playing': playing, 'volume': music.read_volume(),
+                'mpd': bool(music.get_mpd_status()),
+                'source': self.app.settings.get('music_source')}
+
+    def music_search(self, kind, query):
+        from yumi import library
+        res = library.resolve(self.app.settings, kind, query)
+        tracks = [{'title': t.get('title', ''), 'artist': t.get('artist', ''),
+                   'album': t.get('album', ''), 'source': t.get('source', ''),
+                   'path': t.get('path', ''), 'url': t.get('url', '')}
+                  for t in (res.get('tracks') or [])[:40]]
+        return {'source': res.get('source'), 'tracks': tracks, 'kind': kind, 'query': query}
+
+    def music_play(self, kind, query):
+        music.apply_settings(self.app.settings)
+        report = music.play_query(kind, query, self.app.settings)
+        track = report.get('track')
+        return {'report': {'ok': report.get('ok'), 'source': report.get('source'),
+                           'count': report.get('count'), 'kind': report.get('kind'),
+                           'query': report.get('query'),
+                           'track': {'artist': track[0], 'title': track[1]} if track else None}}
+
+    def music_control(self, cmd):
+        ok = music.music_control(cmd)
+        return {'ok': bool(ok), 'cmd': cmd, 'volume': music.read_volume()}
+
+    def voice_listen(self, seconds):
+        res = ears.listen(lang=self.app.settings.get('speech_lang', 'en'),
+                          secs=max(2, min(30, float(seconds or 8))),
+                          size=self.app.settings.get('stt_size', 'small'),
+                          mic=self.app.settings.get('stt_mic'),
+                          engine=self.app.settings.get('stt_engine'))
+        if not res:
+            return {'heard': None, 'readings': None}
+        heard = str(res.get('text') or res.get('vosk') or '').strip()
+        return {'heard': heard or None, 'readings': res}
+
+    def voice_stop(self):
+        threading.Thread(target=ears.stop, daemon=True).start()
+        return {'stopped': True}
+
+    def voice_speak(self, text):
+        self._on(lambda: self.app.brain.say_text(text))
+        return {'spoke': True}
+
+    def tools_time(self):
+        return {'time': chat.the_time(self.app.settings.get('speech_lang', 'en')),
+                'stamp': time.strftime('%Y-%m-%d %H:%M:%S')}
+
+    def tools_weather(self, where, when):
+        s = self.app.settings
+        lang = s.get('speech_lang', 'en')
+        place = where or str(s.get('weather_city') or '')
+        return {'report': chat.weather_report(place, lang, when or 'today'),
+                'place': place, 'when': when or 'today'}
+
+    def tools_joke(self):
+        s = self.app.settings
+        return {'joke': chat.joke(s, s.get('speech_lang', 'en'))}
+
+    def tools_params(self):
+        lang = self.app.settings.get('speech_lang', 'en')
+        return {'report': self._on(lambda: self.app.brain.params_report(lang))}
+
+    def logs(self, name, lines):
+        return self.app._web_logs(name, lines)
 
 
 def main(argv):

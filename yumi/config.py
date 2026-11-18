@@ -26,6 +26,7 @@ DEFAULT_SETTINGS = {
     'voice_kind': 'blips',    # her voice: blips (8-bit) / tts (a real one, tools/tts_setup.sh)
     'scale': 1,               # integer pixel scale of the sprites
     'recolor': True,          # follow the wallpaper palette
+    'gaze': True,             # her eyes follow the pointer
     'hue': None,              # manual color when not following: None = her own colors, else 0..1
     'timer_sound': None,      # None = her 8-bit chime (sounds/timer.wav), else a path
     'breaks': 0,              # health reminders every N minutes (0 = off)
@@ -103,6 +104,11 @@ DEFAULT_SETTINGS = {
     'music_stream': '',       # the server mpd's httpd stream to pull the sound
                               # home by (http://192.168.0.189:8123); without it
                               # the server's songs sound on the server
+    'web_panel': False,       # the browser panel (off by default: no port is opened)
+    'web_panel_host': '127.0.0.1',   # 127.0.0.1 only this machine sees it; 0.0.0.0 = LAN
+    'web_panel_port': 8765,   # where the browser panel listens
+    'web_panel_open': False,  # open the browser when the panel is switched on
+    'web_panel_session_hours': 168,  # how long a browser session stays signed in
 }
 DEFAULT_STATE = {
     'mode': 'docked',         # docked / air
@@ -298,6 +304,11 @@ UI = {
         'cat_music': 'Music', 'music_source': 'Where the songs come from',
         'm_auto': 'auto (Jellyfin at home)', 'm_jellyfin': 'Jellyfin',
         'm_local': 'my folders', 'music_skill': 'Music control by voice',
+        'cat_web': 'Browser panel', 'web_panel': 'Browser panel',
+        'web_open': 'Open in the browser', 'web_copy': 'Copy the link',
+        'web_rotate': 'New link', 'web_on': 'The panel is at {url}',
+        'web_fail': 'The panel did not start: {err}',
+        'web_off': 'The browser panel is off (it opens no port)',
     },
     'ru': {
         'recent': 'Недавние', 'shelf': 'Полка', 'pipette': 'Пипетка', 'clock': 'Время',
@@ -360,6 +371,11 @@ UI = {
         'cat_music': 'Музыка', 'music_source': 'Откуда брать песни',
         'm_auto': 'авто (Джеллифин дома)', 'm_jellyfin': 'Jellyfin',
         'm_local': 'мои папки', 'music_skill': 'Управление музыкой голосом',
+        'cat_web': 'Веб-панель', 'web_panel': 'Панель в браузере',
+        'web_open': 'Открыть в браузере', 'web_copy': 'Скопировать ссылку',
+        'web_rotate': 'Новая ссылка', 'web_on': 'Панель тут: {url}',
+        'web_fail': 'Панель не запустилась: {err}',
+        'web_off': 'Веб-панель выключена (порт не открывается)',
     },
 }
 

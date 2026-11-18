@@ -879,6 +879,7 @@ class Brain(Extras):
                     ('menu', 'set_music', t('cat_music')),
                     ('menu', 'set_ears', t('cat_ears')), ('menu', 'set_look', t('cat_look')),
                     ('menu', 'set_lang', t('cat_lang')), ('menu', 'set_chat', t('cat_chat')),
+                    ('menu', 'set_web', t('cat_web')),
                     ('ring_edit', None, t('cat_ring')),
                     ('tour_again', None, t('tour_again')), ('restart', None, t('restart'))]
             home_x = self.clamp_x(self.W - EDGE_MARGIN * self.S - self.meta.bw * self.S / 2)
@@ -944,6 +945,13 @@ class Brain(Extras):
                     ('set', 'intents', t('intents'))]
             if self.chat_models:        # the list may have grown stale: a way to look again
                 rows.append(('chat_refresh', None, t('chat_refresh')))
+            rows.append(('menu', 'settings', t('back')))
+        elif kind == 'set_web':
+            rows = [('set', 'web_panel', t('web_panel'))]
+            if self.settings.get('web_panel'):
+                rows.append(('web_open', None, t('web_open')))
+                rows.append(('web_copy', None, t('web_copy')))
+                rows.append(('web_rotate', None, t('web_rotate')))
             rows.append(('menu', 'settings', t('back')))
         elif kind == 'files':
             paths = data['paths']
@@ -1112,6 +1120,13 @@ class Brain(Extras):
             self.requests.append(('sound', 'timer'))
         elif action == 'chat_refresh':
             self.requests.append(('chat_models',))
+        elif action == 'web_open':
+            self.menu = None
+            self.requests.append(('web_open',))
+        elif action == 'web_copy':
+            self.requests.append(('web_copy',))
+        elif action == 'web_rotate':
+            self.requests.append(('web_rotate',))
         elif action == 'mic_refresh':
             self.unavailable.discard('stt_mic')     # a new look, whatever the last one found
             self.requests.append(('mics',))
