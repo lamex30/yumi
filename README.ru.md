@@ -125,7 +125,9 @@ yumi
 
 `yumi` запускает её в фоне: терминал можно закрыть, она останется. `yumi --toggle` достаёт её,
 прячет, а в режиме «Не мешать» открывает меню. Ещё есть `--pipette`, `--recent`, `--sleep` («Не мешать»), `--home`,
-`--monitor`, `--quit` и `--foreground`, чтобы она осталась привязана к терминалу (для отладки). Примеры для sway, Hyprland, niri, river,
+`--monitor`, `--quit` и `--foreground`, чтобы она осталась привязана к терминалу (для отладки).
+`yumi --ask "какая погода"` вкладывает фразу ей в уши вместо микрофона: она отвечает голосом и
+пузырём, как обычно. Примеры для sway, Hyprland, niri, river,
 Wayfire, labwc, KDE и COSMIC есть в [английском README](README.md#3-start-her-with-your-session-and-give-her-a-hotkey).
 Для sway:
 

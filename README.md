@@ -129,7 +129,8 @@ put `inputs.yumi.packages.${system}.default` in `environment.systemPackages` (or
 `yumi` starts her in the background: you can close the terminal, she stays. `yumi --toggle` pops
 her out, hides her, or in Do Not Disturb opens her menu. Other flags: `--pipette`, `--recent`, `--sleep` (Do Not
 Disturb), `--home`, `--monitor`, `--quit`, and `--foreground` to keep her attached to the
-terminal (handy for debugging).
+terminal (handy for debugging). `yumi --ask "какая погода"` types a phrase into her ears
+instead of the microphone: she answers with her voice and bubble as usual.
 
 <details open>
 <summary><b>sway</b> (<code>~/.config/sway/config</code>)</summary>

@@ -12,6 +12,7 @@ file monitors, the job queue and the system watchers to it.
   yumi --recent        open the pile of recent files
   yumi --sleep         Do Not Disturb on / off
   yumi --monitor       move her to the next screen
+  yumi --ask "фраза"   say it to her as if the mic had heard it (voice, bubble, answer)
   yumi --quit          let her go
 Env: YUMI_SCALE (integer pixel scale, overrides settings).
 """
@@ -47,6 +48,7 @@ from yumi.sprites import Meta, palette_delta, palette_from_hue, recolor_bgra, ui
 
 APP_ID = 'io.github.lamex30.Yumi'
 ACTIONS = ('toggle', 'pipette', 'home', 'recent', 'sleep', 'monitor', 'quit')
+ASK = 'ask'          # the one action that carries a phrase («yumi --ask "какая погода"»)
 FADE = 0.6          # s of crossfade when the wallpaper palette changes
 
 
@@ -490,8 +492,9 @@ class App(Gtk.Application):
         self.duck_saved = None          # the loudness before the duck (the name_duck setting)
         self.duck_restore = None        # the timer that brings the loudness back
         self.form_picking = False       # the file dialog of the button form is open
-        for name in ACTIONS:
-            a = Gio.SimpleAction.new(name, None)
+        ask_type = GLib.VariantType.new('s')
+        for name in ACTIONS + (ASK,):
+            a = Gio.SimpleAction.new(name, ask_type if name == ASK else None)
             a.connect('activate', self.on_action, name)
             self.add_action(a)
 
@@ -688,9 +691,16 @@ class App(Gtk.Application):
         self.switch_to(self.windows[(i + 1) % len(self.windows)])
         self.ev(lambda b: b.go_home())
 
-    def on_action(self, _a, _p, name):
+    def on_action(self, _a, param, name):
         self.do_activate()
         b = self.brain
+        if name == ASK:
+            # the phrase goes in where the mic's words go: she wakes, says it back
+            # and answers with her voice, as if it had been heard in the room
+            phrase = ' '.join(str(param.get_string() if param is not None else '').split())
+            if phrase:
+                self.ev(lambda b: b.wake_up(phrase))
+            return
         if name == 'toggle':
             self.ev(lambda b: b.toggle())
         elif name == 'pipette':
@@ -1340,19 +1350,28 @@ class App(Gtk.Application):
 
 def main(argv):
     app = App()
-    action = next((a[2:] for a in argv[1:] if a.startswith('--') and a[2:] in ACTIONS), None)
+    action, param = None, None
+    args = argv[1:]
+    for i, a in enumerate(args):
+        if a == '--' + ASK:
+            phrase = args[i + 1] if i + 1 < len(args) else ''
+            action, param = ASK, GLib.Variant('s', phrase)
+            break
+        if a.startswith('--') and a[2:] in ACTIONS:
+            action = a[2:]
+            break
     try:
         app.register(None)
     except GLib.Error:
         pass
     if app.get_is_remote():
         if action:
-            app.activate_action(action, None)
+            app.activate_action(action, param)
         else:
             app.activate()
         return 0
     if action:
-        GLib.idle_add(lambda: app.activate_action(action, None) and False)
+        GLib.idle_add(lambda: app.activate_action(action, param) and False)
     rc = app.run([argv[0]])
     return 1 if app.failed else rc
 
