@@ -1045,17 +1045,21 @@ class App(Gtk.Application):
                 if not res.get('woke'):
                     continue            # quiet: nobody called her name
                 tail = res.get('text') or ''
+                alt = res.get('alt') or ''  # the stop ear's reading, the other ear
                 GLib.idle_add(self.duck_begin)   # her name passed: quiet now, whatever comes
-                busy = (b.sleeping or b.thinking or b.listening)
-                if busy:
+                if b.thinking or b.listening:
                     continue            # she got busy in those seconds: the word is spent
+                # the name was heard: the moth that marks where she hides becomes the
+                # girl — asleep she wakes, hidden she comes out, right now, while the
+                # phrase (or the wait for it) is still going
+                GLib.idle_add(lambda: self.ev(lambda br: br.wake_form()) and False)
                 if b.now < b.talk_until or self.talking():
                     self.hush()         # her own line was still sounding: it dies, your turn now
                 if tail:
                     # name + text already recognised: pass the whole phrase straight to the brain
-                    GLib.idle_add(lambda t=tail: self.ev(lambda br: br.wake_up(t)) and False)
+                    GLib.idle_add(lambda t=tail, a=alt: self.ev(lambda br: br.wake_up(t, a)) and False)
                 else:
-                    # «юми» без текста: ухо openWakeWord seules détecte l'イмя,
+                    # «юми» без текста: ухо openWakeWord только имя ловит,
                     # команда за ней теряется — слушаем фразу, которая пошла после имени
                     cmd = ears.listen(lang=self.settings.get('speech_lang', 'ru'),
                                       secs=15,
@@ -1064,8 +1068,9 @@ class App(Gtk.Application):
                                       engine=self.settings.get('stt_engine'))
                     if cmd:
                         said = cmd.get('text') or ''
+                        vtxt = cmd.get('vosk') or ''   # the other reading, as on the click-listen
                         if said:
-                            GLib.idle_add(lambda t=said: self.ev(lambda br: br.wake_up(t)) and False)
+                            GLib.idle_add(lambda t=said, v=vtxt: self.ev(lambda br: br.wake_up(t, v)) and False)
                         else:
                             # silence after the name: she asks what you wanted
                             GLib.idle_add(lambda: self.ev(lambda br: br.wake_up('')) and False)

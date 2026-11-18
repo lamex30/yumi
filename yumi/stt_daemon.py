@@ -575,6 +575,10 @@ def oww_ear_score(ear, chunk, reset=False):
             proc.stdin.write(b'R')
             ear['in'] = bytearray()         # the frame on hold is forgotten too
             ear['fed'] = ear['read'] = 0
+            fed = 1                         # the 'R' is one command and owes one
+                                            # line back: both counters count it —
+                                            # else read runs one ahead of fed
+                                            # (SUMMARY read=fed+1 after a mute)
         else:
             # the chunks of the mic are not a multiple of the 80 ms frame, and
             # the whole remainder waits in `in` for the next chunk: dropping it
@@ -1463,14 +1467,6 @@ class Ears:
         ring = bytearray()
         RING_MAX = RATE * 8 * 2          # 8 s of s16 mono
 
-        def wake_result(text, why):
-            """the wake's answer and its diary line: the time from the first voice
-            on the air to this moment is the latency the metrics read"""
-            latency = round((time.monotonic() - voice_t0) * 1000.0) if voice_t0 else None
-            diag.event(arbitration='WAKE', reason=why, wake_candidate=True,
-                       judge_called=False, final_wake=True, latency_ms=latency)
-            return {'woke': True, 'text': text}
-
         def judge_note(what):
             """one line into the wake's diary (judge.log): what the ear heard and why
             it woke or stayed quiet — without it a failed wake is a guess. The judge
@@ -1510,7 +1506,10 @@ class Ears:
                        buffer_duration_ms=round(len(ring) / (RATE * 2.0), 2),
                        judge_called=False, final_wake=True,
                        **diag_base('LISTENING'))
-            return {'woke': True, 'text': text}
+            # the stop ear read the air while the big ear read the tape: its
+            # reading travels with the phrase as alt, just like on the listen
+            # path — «heard … (vosk: …)» in the mind's diary must not be empty
+            return {'woke': True, 'text': text, 'alt': vosk_fallback()}
 
         def vosk_fallback():
             """vosk's finals around the wake, while they are fresh (fresh_vosk):
@@ -2105,6 +2104,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.ears.error = str(e)
                 return self._json({'error': str(e)}, 500)
             return self._json({'ok': True, 'woke': res['woke'], 'text': res.get('text'),
+                               'alt': res.get('alt'),
                                'stop': bool(res.get('stop'))})
         if u.path != '/listen':
             return self._json({'error': 'no such path'}, 404)

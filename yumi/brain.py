@@ -1173,12 +1173,28 @@ class Brain(Extras):
         self.listening = False
         self.heard_text(text, wake=True, alt=alt)
 
-    def wake_up(self, text):
-        """her name was heard («юми»): text is what was said after it, '' when it was said alone"""
-        if self.sleeping or self.thinking or self.listening:
-            return                          # a stray sound while she was busy: not her name
+    def wake_form(self):
+        """her name passed by («юми»): the moth that marks where she hides becomes
+        the girl — asleep she rises from the blanket, hidden she comes out of the
+        edge, right now: the transformation is the first thing the name does"""
+        if self.sleeping:
+            nap = self.nap
+            self.nap = False                # she was woken: the stale-DND guard
+                                             # must not swallow it (moth_girl:768)
+            self.set_sleep(False, nap=nap)  # yoff springs her up: the moth is the girl
+        elif self.mode == 'docked' and not self.out:
+            self.pop(True)                  # the moth by the edge: she comes out
+
+    def wake_up(self, text, alt=None):
+        """her name was heard («юми»): text is what was said after it, '' when it was said alone;
+        alt is what vosk read while whisper read the tape — two ears, one phrase"""
+        if self.listening:
+            return                          # the mic is lent to a click-listen: not her name
+        if self.thinking:
+            return                          # an answer is in flight: the word is spent
+        self.wake_form()                    # the moth becomes the girl: at once, the phrase waits
         if text:
-            self.heard_text(text, wake=True)   # recognized on the go: the question is whole
+            self.heard_text(text, wake=True, alt=alt)   # recognized on the go: the question is whole
             return
         if self.say('woke_ask'):            # the name alone: she asks right away what you wanted
             self.listening = True

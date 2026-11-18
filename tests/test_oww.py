@@ -78,6 +78,40 @@ u.lead_max = max(u.LEAD, len(u.lead))
 u.feed(b'\x00\x00' * 100, False)            # a quiet chunk: the lead must survive
 assert len(u.lead) >= 16000, 'the wake lead was trimmed by the quiet'
 
+# ---- oww_ear_score: reset не оставляет read впереди fed (SUMMARY fed=read) ----
+# раньше 'R' прибавлял строку к read, но не кадр к fed — после mute/перезапуска
+# рекордера SUMMARY печатал read=fed+1
+_r, _w = os.pipe()                          # the ear's answers (a real ear answers
+os.write(_w, b'0.1000\n')                   # on its own pipe: this is that pipe)
+_c, _cw = os.pipe()                         # the daemon's commands: a fake ear that
+
+
+class _FakeEarProc:                         # never reads them (the real one does)
+    def __init__(self):
+        self.stdout = os.fdopen(_r, 'rb', 0)
+        self.stdin = os.fdopen(_cw, 'wb', 0)
+
+    def poll(self):
+        return None                          # alive: the counters must count
+
+
+ear = {'proc': _FakeEarProc(), 'buf': bytearray(), 'in': bytearray(),
+       'dead': False, 'fed': 0, 'read': 0}
+score = stt.oww_ear_score(ear, b'', reset=True)
+assert ear['fed'] == 1 and ear['read'] == 1, \
+    f"reset left fed={ear['fed']} read={ear['read']}: SUMMARY would show read=fed+1"
+assert abs(score - 0.1) < 1e-6, f'reset answered {score}'
+# the next frame: one written, one line back — both counters move together
+os.write(_w, b'0.2000\n')
+score = stt.oww_ear_score(ear, b'\x00' * stt.OWW_CHUNK)
+assert ear['fed'] == 2 and ear['read'] == 2, \
+    f"a frame left fed={ear['fed']} read={ear['read']}"
+assert abs(score - 0.2) < 1e-6, f'the frame answered {score}'
+ear['proc'].stdin.close()
+ear['proc'].stdout.close()
+os.close(_w)
+os.close(_c)
+
 
 # ---- загрузка trained ear (опционально) ----
 try:
@@ -105,14 +139,24 @@ else:
 # ---- moth_girl.py wake loop: после wake_up(tail) вызывается ears.listen при пустом tail ----
 src = (_root / 'moth_girl.py').read_text(encoding='utf-8')
 assert 'ears.listen' in src, 'moth_girl lost the ears.listen call after wake'
-assert 'wake_up(t)' in src, 'moth_girl lost the wake_up call'
+assert 'wake_up(t' in src, 'moth_girl lost the wake_up call'
+# «юми» услышана: мотылек становится девочкой сразу, ещё до фразы
+assert 'wake_form' in src, 'moth_girl lost the wake_form call on the wake'
 # stop branch present and calls brain
 m = re.search(r"if res\.get\('stop'\):\n(.*?)\n(\s*)continue", src, re.S)
 assert m, 'the wake loop lost its stop branch'
 assert 'b.stop_all' in m.group(1), 'stop must reach the brain'
 
-# ---- канал стопа и mute в wake(): разделы 8 и 9 ТЗ ----
+# ---- alt (чтение стоп-ухи) доходит с пробуждением до мозгов ----
+src_brain = (_root / 'yumi' / 'brain.py').read_text(encoding='utf-8')
+assert 'def wake_up(self, text, alt=None)' in src_brain, 'brain.wake_up lost the alt'
+assert 'alt=alt' in src_brain, 'wake_up does not pass alt into heard_text'
+src_ears = (_root / 'yumi' / 'ears.py').read_text(encoding='utf-8')
+assert "'alt': str(data.get('alt') or '')" in src_ears, 'ears.wake drops the alt'
 src_stt = (_root / 'yumi' / 'stt_daemon.py').read_text(encoding='utf-8')
+assert "'alt': res.get('alt')" in src_stt, 'the /wake answer drops the alt'
+
+# ---- канал стопа и mute в wake(): разделы 8 и 9 ТЗ ----
 wake_src = src_stt.split('def wake(self, lang', 1)[1].split('def stop(self', 1)[0]
 assert 'if muted():' in wake_src, 'the wake must honor the mute (her own voice on the air)'
 assert 'stop_shout(words, spellings)' in wake_src, '«стоп» must cut through the mute'
