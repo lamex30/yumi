@@ -534,6 +534,14 @@ The waiting hears nothing else: everything is computed on the spot, offline.
   `~/.local/state/yumi/web-audit.log`.
 - Developer handoff: [docs/handoff-web-panel.md](docs/handoff-web-panel.md).
 
+## Web panel screenshots
+
+| Overview | Ears & voice | Settings |
+|----------|--------------|----------|
+| ![Overview](docs/webpanel-overview.png) | ![Ears & voice](docs/webpanel-voice.png) | ![Settings](docs/webpanel-settings.png) |
+
+Put your screenshots into `docs/webpanel-overview.png`, `docs/webpanel-voice.png` and `docs/webpanel-settings.png` (max ~1000 px wide).
+
 ## Troubleshooting
 
 - **`gtk4-layer-shell is not installed`**: install it (see the table above). If it lives
