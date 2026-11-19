@@ -245,7 +245,10 @@ export function render(view, ctx) {
 
   function drawLive() {
     const runtime = status.runtime || {};
-    const mics = runtime.mics || [];
+    const mics = (runtime.mics || [])
+      .map((mic) => (typeof mic === 'string' ? { name: mic, label: mic } : mic))
+      .filter((mic) => mic && mic.name);
+    const current = value('stt_mic');
     const unavailable = runtime.unavailable || [];
     const liveText = [];
     liveText.push(el('div', { class: 'row' },
@@ -261,27 +264,59 @@ export function render(view, ctx) {
     }
     live.replaceChildren(el('h3', { text: say('Прямо сейчас', 'Right now') }));
     live.append(el('div', { class: 'stack' }, ...liveText));
-    if (mics.length) {
-      live.append(el('div', { class: 'card-hint', style: { marginTop: '10px' }, text: `${say('микрофоны', 'microphones')}:` }));
-      const list = el('div', { class: 'stack', style: { marginTop: '4px' } });
-      for (const mic of mics) {
-        list.append(el('button', {
-          class: 'btn btn-small', type: 'button', text: mic,
-          title: say('выбрать этот микрофон', 'use this microphone'),
-          onclick: async () => {
-            await apply('stt_mic', mic);
-            drawAll(true);
-          },
-        }));
-      }
-      live.append(list);
+    live.append(el('div', { class: 'card-hint', style: { marginTop: '10px' },
+      text: say('микрофон, которым она слушает:', 'the microphone she hears with:') }));
+    const list = el('div', { class: 'stack', style: { marginTop: '4px' } });
+    const pick = (next) => async () => {
+      await apply('stt_mic', next);
+      await ctx.refreshStatus();
+      drawAll(true);
+    };
+    list.append(el('button', {
+      class: `btn btn-small${current ? '' : ' btn-primary'}`, type: 'button',
+      text: `${current ? '' : '✓ '}${say('авто (рабочий стол)', 'auto (the desktop)')}`,
+      title: say('пусть выбирает рабочий стол', 'leave the choice to the desktop'),
+      onclick: pick(null),
+    }));
+    for (const mic of mics) {
+      const chosen = current === mic.name;
+      list.append(el('button', {
+        class: `btn btn-small${chosen ? ' btn-primary' : ''}`, type: 'button',
+        text: `${chosen ? '✓ ' : ''}${mic.label || mic.name}`,
+        title: mic.name,
+        onclick: pick(mic.name),
+      }));
+    }
+    live.append(list);
+    if (!mics.length) {
+      live.append(el('div', { class: 'card-hint', style: { marginTop: '4px' },
+        text: say('микрофоны пока не найдены', 'no microphones found yet') }));
+    }
+    const find = el('button', {
+      class: 'btn btn-small', type: 'button', text: say('Найти микрофоны', 'Find microphones'),
+      onclick: async () => {
+        find.disabled = true;
+        find.textContent = say('ищу…', 'looking…');
+        await refreshMics({ quiet: false });
+      },
+    });
+    live.append(el('div', { class: 'row', style: { marginTop: '8px' } }, find));
+  }
+
+  async function refreshMics({ quiet = true } = {}) {
+    try {
+      return await ctx.refreshMics();
+    } catch (err) {
+      if (!quiet) errToast(err);
+      return [];
     }
   }
 
   function signature() {
     const parts = [];
     for (const key of ALL_KEYS) parts.push(value(key));
-    parts.push((status.runtime?.mics || []).join('|'));
+    parts.push((status.runtime?.mics || []).map((mic) => (
+      typeof mic === 'string' ? mic : `${mic.name}:${mic.label || ''}`)).join('|'));
     const voice = status.runtime?.voice || {};
     parts.push(voice.activation?.oww?.available, voice.activation?.vosk?.available,
       voice.judge?.nemotron?.available, voice.tts?.available);
@@ -306,6 +341,7 @@ export function render(view, ctx) {
   status = ctx.status || status;
   drawLive();
   drawAll(true);
+  if (!(status.runtime?.mics || []).length) refreshMics();
 
   return () => { offStatus(); };
 }

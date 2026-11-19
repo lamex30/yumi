@@ -8,6 +8,7 @@ export function render(view, ctx) {
   let status = ctx.status || {};
   let active = 'behavior';
   let query = '';
+  let micsAsked = false;
 
   view.append(
     el('h2', { class: 'pagehead', text: lang() === 'ru' ? 'Настройки' : 'Settings' }),
@@ -195,6 +196,13 @@ export function render(view, ctx) {
       const card = el('div', { class: 'card' });
       for (const entry of items) card.append(settingRow(entry));
       content.append(card);
+      if (section.id === 'ears' && !micsAsked && !(status.runtime?.mics || []).length) {
+        // the picker needs the live device list; ask once, then redraw with it
+        micsAsked = true;
+        ctx.refreshMics()
+          .then(() => { status = ctx.status || status; drawAll(); })
+          .catch(() => {});
+      }
     }
     if (!shown) {
       content.append(emptyBox(lang() === 'ru'

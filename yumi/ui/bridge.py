@@ -319,6 +319,13 @@ class WebBridge:
     def voice_engines(self):
         return engines.status(self.app.settings)
 
+    def voice_mics(self):
+        """the microphones the ears can hear right now, for the panel's picker;
+        the in-world settings row sees the same list"""
+        mics = ears.mics()
+        self._on(lambda: self.app.brain.mics_loaded(mics))
+        return {'mics': mics}
+
     def _ears_exclusive(self, fn):
         """run one microphone test with the background wake loop parked"""
         was_on = self._on(lambda: self.app.wake_pause())

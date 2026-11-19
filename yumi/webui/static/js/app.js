@@ -136,6 +136,22 @@ function applyLanguage(lang) {
   return true;
 }
 
+// The microphone list lives in the live status; feed it into the form map so
+// every page draws stt_mic as a select of the real devices, not a bare "auto".
+function syncMicChoices(mics, current) {
+  const entry = (state.schema?.settings || []).find((e) => e.key === 'stt_mic');
+  if (!entry) return;
+  const found = (Array.isArray(mics) ? mics : [])
+    .map((m) => (typeof m === 'string' ? { name: m, label: m } : m))
+    .filter((m) => m && m.name);
+  const names = [null, ...found.map((m) => m.name)];
+  if (current && !names.includes(current)) names.push(current);
+  entry.type = 'select';
+  entry.choices = names;
+  entry.choice_labels = Object.fromEntries(found.map((m) => [String(m.name), m.label || m.name]));
+  if (current) entry.choice_labels[String(current)] = entry.choice_labels[String(current)] || current;
+}
+
 function setStatus(next, { light = false } = {}) {
   if (!next) return;
   if (!state.status) {
@@ -147,6 +163,7 @@ function setStatus(next, { light = false } = {}) {
     }
   }
   // A light snapshot has no settings_full; the merge above keeps the old one.
+  syncMicChoices(state.status.runtime?.mics, state.status.settings?.stt_mic);
   applyLanguage(state.status.settings?.ui_lang);
   const tm = state.status.runtime?.timer;
   if (tm) {
@@ -167,6 +184,16 @@ async function refreshStatus() {
     if (err.status !== 401) console.warn('status:', err.message);
     return null;
   }
+}
+
+// Ask the app for a fresh look at the sound system and fold it into the status.
+async function refreshMics() {
+  const data = await api.get('/api/voice/mics');
+  state.status = state.status || {};
+  state.status.runtime = { ...(state.status.runtime || {}), mics: data.mics || [] };
+  syncMicChoices(data.mics || [], state.status.settings?.stt_mic);
+  notifyStatus();
+  return data.mics || [];
 }
 
 async function applySettings(patch, { quiet = true } = {}) {
@@ -212,6 +239,7 @@ const ctx = {
   get status() { return state.status; },
   get lang() { return state.lang; },
   refreshStatus,
+  refreshMics,
   applySettings,
   resetSetting,
   navigate,

@@ -72,7 +72,7 @@ WebBridge (yumi.ui.bridge)  ── GLib.idle_add ──▶  App / Brain / Memory
 | `chat` | Разговор | чат с умом, история, очистка, «сказать в мир», быстрый старт, живая реплика |
 | `files` | Файлы | очередь обработки, drag-and-drop загрузка, недавние, полка, открыть, конвертировать, сжать |
 | `music` | Музыка | текущий трек, play/pause/next/stop, громкость, поиск по Jellyfin/папкам |
-| `voice` | Ушки и голос | карточки «Активация», «Судья фраз», «Голос»: выбор движка, состояние «доступно/нет», проверка имени и фразы вживую, прослушивание TTS; ниже — «закрыть ушки», микрофоны, живые индикаторы и остальные настройки ушек/звука |
+| `voice` | Ушки и голос | карточки «Активация», «Судья фраз», «Голос»: выбор движка, состояние «доступно/нет», проверка имени и фразы вживую, прослушивание TTS; ниже — «закрыть ушки», выбор микрофона из списка звуковой системы, живые индикаторы и остальные настройки ушек/звука |
 | `buttons` | Кнопки | кольцо, порядок, выключенные кнопки, свои команды, добавление и редактирование |
 | `appearance` | Внешний вид | текущая палитра, пипетка, пересборка цветов, наряд, масштаб, другой экран, JSON палитры |
 | `settings` | Настройки | все ключи `settings.json`, сгруппированные по секциям, поиск, сброс, живое применение |
@@ -145,6 +145,7 @@ ctx.navigate(id)
 | GET | `/api/music/search` | `?kind=&q=` |
 | POST | `/api/music/play`, `/api/music/control` | play/pause/next/stop/volume |
 | GET | `/api/voice/engines` | наличие oww/vosk/whisper/nemotron/TTS, список голосов и моделей |
+| GET | `/api/voice/mics` | свежий список микрофонов звуковой системы (заодно обновляет меню ушек) |
 | POST | `/api/voice/listen` | `{seconds?, engine?}` — записать фразу выбранным судьёй |
 | POST | `/api/voice/test-wake` | `{seconds?, ear?}` — проверить имя выбранным ухом |
 | POST | `/api/voice/test` | `{text?, lang?}` — синхронизировать профиль и озвучить пробу текущим голосом |
@@ -166,7 +167,7 @@ apply_settings, state_action, files_recent, files_shelf, shelf_change, files_ope
 job_add, jobs_cancel, timer_get, timer, ask, chat, chat_history, chat_clear,
 memory_recent, memory_search, memory_clear, music_status, music_search, music_play,
 music_control, voice_listen(seconds, engine), voice_stop, voice_speak,
-voice_engines, voice_test_wake(seconds, ear), voice_test(text, lang),
+voice_engines, voice_mics, voice_test_wake(seconds, ear), voice_test(text, lang),
 tools_*, logs`.
 
 Проверки слуха и голоса (`voice_listen`, `voice_test_wake`) на время записи ставят

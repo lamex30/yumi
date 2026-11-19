@@ -105,6 +105,10 @@ class Bridge:
                 'judge': {'whisper': {'available': True}, 'nemotron': {'available': False}},
                 'tts': {'available': False}}
 
+    def voice_mics(self):
+        self.voice_calls.append(('mics',))
+        return {'mics': [{'name': 'plughw:1,0', 'label': 'Headset'}]}
+
     def voice_listen(self, seconds, engine=None):
         self.voice_calls.append(('listen', seconds, engine))
         return {'heard': 'фраза', 'engine': engine}
@@ -270,6 +274,8 @@ try:
     assert code == 200 and data['lang'] == 'ru'
     assert bridge.voice_calls[-3:] == [('wake', 5.0, 'vosk'), ('listen', 5.0, 'nemotron'),
                                       ('tts', 'Привет', 'ru')], bridge.voice_calls
+    code, data, _ = call('GET', '/api/voice/mics')
+    assert code == 200 and data['mics'] == [{'name': 'plughw:1,0', 'label': 'Headset'}], data
 
     code, data, _ = call('GET', '/api/security/link')
     assert code == 404, 'the link must only be handed out by an explicit POST'

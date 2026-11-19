@@ -399,6 +399,7 @@ def _make_handler(panel):
                 ('POST', '/api/voice/stop'): self._voice_stop,
                 ('POST', '/api/voice/speak'): self._voice_speak,
                 ('GET', '/api/voice/engines'): self._voice_engines,
+                ('GET', '/api/voice/mics'): self._voice_mics,
                 ('POST', '/api/voice/test-wake'): self._voice_test_wake,
                 ('POST', '/api/voice/test'): self._voice_test,
                 ('GET', '/api/security'): self._security,
@@ -752,6 +753,10 @@ def _make_handler(panel):
 
         def _voice_engines(self, _q):
             return self._json(200, {'ok': True, **panel.bridge.voice_engines()})
+
+        def _voice_mics(self, _q):
+            # a fresh look at the sound system, for the microphone picker
+            return self._json(200, {'ok': True, **panel.bridge.voice_mics()})
 
         def _voice_test_wake(self, _q):
             body = self._body()
