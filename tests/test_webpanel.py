@@ -289,6 +289,11 @@ try:
     assert code == 200 and b'export function render' in body
     code, body, _ = call('GET', '/static/css/app.css', raw=True)
     assert code == 200 and b'--accent' in body
+    code, body, headers = call('GET', '/art/icon', raw=True)
+    assert code == 200 and headers.get('Content-Type', '').startswith('image/'), (code, headers)
+    assert body.startswith(b'\x89PNG')
+    code, body, headers = call('GET', '/favicon.ico', raw=True)
+    assert code == 200 and headers.get('Content-Type', '').startswith('image/'), (code, headers)
     code, body, _ = call('GET', '/../moth_girl.py', raw=True)
     assert code == 404
 

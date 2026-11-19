@@ -31,6 +31,7 @@ yumi/
     index.html         оболочка SPA + оверлей входа
     static/
       css/app.css      вся пиксельная тема и компоненты
+      img/icon.png     иконка панели (фавикон, вход, бренд, герой обзора)
       js/app.js        сессия, навигация, hash-роутер, живой статус, топбар
       js/api.js        единственное место, где ходят HTTP и SSE
       js/ui.js         DOM-хелперы, иконки, тосты, модалки, контролы настроек
@@ -108,7 +109,8 @@ ctx.navigate(id)
 
 - `GET /` , `GET /index.html` — оболочка SPA
 - `GET /static/…` — CSS/JS
-- `GET /art/…`, `GET /favicon.ico` — спрайты и иконка
+- `GET /art/…`, `GET /favicon.ico` — спрайты и иконка; иконка берётся из
+  `webui/static/img/icon.png`, затем из `data/` или темы иконок установленной Юми
 - `GET /api/session` — `{authed, csrf?, panel, version, remote}`
 - `POST /api/login` — `{token}` или полная ссылка; ставит cookie
 

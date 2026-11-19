@@ -872,7 +872,9 @@ def _make_handler(panel):
 
         def _art(self, name):
             if name == 'icon':
-                target = Path(config.HERE) / 'data' / 'io.github.lamex30.Yumi.png'
+                target = next((p for p in _icon_candidates() if p.is_file()), None)
+                if target is None:
+                    return self._err(404, 'not found')
             else:
                 try:
                     target = _safe_join(SPRITES, name)
@@ -901,3 +903,13 @@ def _safe_join(root, rel):
     if target != root and root not in target.parents:
         raise ValueError('outside the root')
     return target
+
+
+def _icon_candidates():
+    """The panel icon: bundled webui asset first, then the source tree's data/,
+    then the icon theme of an installed Yumi."""
+    yield WEBUI / 'static' / 'img' / 'icon.png'
+    yield Path(config.HERE) / 'data' / 'io.github.lamex30.Yumi.png'
+    data_home = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share')
+    for base in (data_home, Path('/usr/local/share'), Path('/usr/share')):
+        yield base / 'icons' / 'hicolor' / '256x256' / 'apps' / 'io.github.lamex30.Yumi.png'
