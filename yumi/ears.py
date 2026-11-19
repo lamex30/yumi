@@ -237,11 +237,14 @@ def listen(lang='ru', secs=7, size='small', mic=None, engine=None):
 
 def wake(lang='ru', word='юми', secs=20, size='small', mic=None,
          sensitivity='normal', confirm=True, model_size=None, judge_log=False, engine=None,
-         oww_ear=None):
+         oww_ear=None, hints=None):
     """wait for the wake word (say «Юми» and she is all ears): a dict
     {'woke': bool, 'text': what came after the word, '' when it was said alone,
-     'alt': what the stop ear read around the name — the other reading},
-    or None when the ears cannot work at all. A manual listen takes the mic over."""
+     'alt': what the stop ear read around the name — the other reading,
+     'fallback': the name came from vosk rather than the trained ear},
+    or None when the ears cannot work at all. A manual listen takes the mic over.
+    hints are the user's own phrases/keywords from actions.json: the fallback
+    router uses them to know a custom button's wish."""
     info = _ensure()
     if not info:
         return None
@@ -256,6 +259,9 @@ def wake(lang='ru', word='юми', secs=20, size='small', mic=None,
         q['oww_ear'] = oww_ear
     if mic:
         q['mic'] = mic
+    if hints:
+        q['hints'] = json.dumps([str(h) for h in hints if str(h).strip()][:64],
+                                ensure_ascii=False)
     url = f"http://127.0.0.1:{info['port']}/wake?" + urllib.parse.urlencode(q)
     try:
         with urllib.request.urlopen(url, timeout=max(300, secs + 10)) as r:
@@ -264,6 +270,7 @@ def wake(lang='ru', word='юми', secs=20, size='small', mic=None,
         return None
     return {'woke': bool(data.get('woke')), 'text': str(data.get('text') or ''),
             'alt': str(data.get('alt') or ''),
+            'fallback': bool(data.get('fallback')),
             'stop': bool(data.get('stop'))}
 
 

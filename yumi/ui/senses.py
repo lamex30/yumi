@@ -5,7 +5,7 @@ import time
 
 from gi.repository import GLib
 
-from yumi import chat, config, ears, memory, music, notes, system, tts, voice
+from yumi import addressing, chat, config, ears, memory, music, notes, system, tts, voice
 
 
 class SensesMixin:
@@ -153,6 +153,12 @@ class SensesMixin:
             return
         threading.Thread(target=ears.mute, args=(secs,), daemon=True).start()
 
+    def wake_hints(self, b):
+        """the user's own phrases and keywords from actions.json: the ears run in
+        another process, so a custom button's wish is passed into the wake router
+        (yumi/addressing.py) or the fallback would not know it"""
+        return addressing.hints_from(getattr(b, 'custom', None))
+
     def wake_set(self, on):
         """the wake word: while it is on, a loop keeps the daemon listening for her name
         and, the moment it passes by, the phrase that follows goes straight to her mind"""
@@ -179,7 +185,8 @@ class SensesMixin:
                                 model_size=self.settings.get('wake_model_size', 'small'),
                                 judge_log=self.settings.get('wake_judge_log', True),
                                 engine=self.settings.get('stt_engine'),
-                                oww_ear=self.settings.get('wake_ear', 'auto'))
+                                oww_ear=self.settings.get('wake_ear', 'auto'),
+                                hints=self.wake_hints(b))
                 if not self.wake_on or not res:
                     continue            # called off or the ears are away
                 if res.get('stop'):
@@ -190,6 +197,7 @@ class SensesMixin:
                     continue            # quiet: nobody called her name
                 tail = res.get('text') or ''
                 alt = res.get('alt') or ''  # the stop ear's reading, the other ear
+                fb = bool(res.get('fallback'))   # the name from vosk, not from the trained ear
                 GLib.idle_add(self.duck_begin)   # her name passed: quiet now, whatever comes
                 if b.thinking or b.listening:
                     continue            # she got busy in those seconds: the word is spent
@@ -201,7 +209,8 @@ class SensesMixin:
                     self.hush()         # her own line was still sounding: it dies, your turn now
                 if tail:
                     # name + text already recognised: pass the whole phrase straight to the brain
-                    GLib.idle_add(lambda t=tail, a=alt: self.ev(lambda br: br.wake_up(t, a)) and False)
+                    GLib.idle_add(lambda t=tail, a=alt, f=fb:
+                                  self.ev(lambda br: br.wake_up(t, a, f)) and False)
                 else:
                     # «юми» без текста: ухо openWakeWord только имя ловит,
                     # команда за ней теряется — слушаем фразу, которая пошла после имени

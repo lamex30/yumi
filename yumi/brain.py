@@ -15,6 +15,7 @@ import urllib.parse
 from pathlib import Path
 
 from . import jobs as J
+from . import addressing
 from . import chat
 from . import nlu
 from . import notes
@@ -1228,16 +1229,18 @@ class Brain(Extras):
         elif self.mode == 'docked' and not self.out:
             self.pop(True)                  # the moth by the edge: she comes out
 
-    def wake_up(self, text, alt=None):
+    def wake_up(self, text, alt=None, fallback=False):
         """her name was heard («юми»): text is what was said after it, '' when it was said alone;
-        alt is what vosk read while whisper read the tape — two ears, one phrase"""
+        alt is what vosk read while whisper read the tape — two ears, one phrase;
+        fallback says the name came from vosk rather than the trained ear,
+        so a phrase that is not meant for her must stay out of the mind"""
         if self.listening:
             return                          # the mic is lent to a click-listen: not her name
         if self.thinking:
             return                          # an answer is in flight: the word is spent
         self.wake_form()                    # the moth becomes the girl: at once, the phrase waits
         if text:
-            self.heard_text(text, wake=True, alt=alt)   # recognized on the go: the question is whole
+            self.heard_text(text, wake=True, alt=alt, fallback=fallback)   # the question is whole
             return
         if self.say('woke_ask'):            # the name alone: she asks right away what you wanted
             self.listening = True
@@ -1258,10 +1261,12 @@ class Brain(Extras):
             _mind_log(f'music {music_cmd}')
             self.music_control(music_cmd)
 
-    def heard_text(self, text, wake=False, alt=None):
+    def heard_text(self, text, wake=False, alt=None, fallback=False):
         """into her mind, whatever the ears' way was; wake is True when the phrase
         came right after her name («юми ...») or after she asked what you wanted;
-        alt is the other reading (vosk's) when the first one was whisper's"""
+        alt is the other reading (vosk's) when the first one was whisper's;
+        fallback marks a phrase the trained ear did not hear the name of — such a
+        text is only answered when it is clearly meant for her (yumi/addressing.py)"""
         if text is None:                # the ears are not set up (tools/stt_setup.sh)
             self.note_pending = False
             self.say('ears_fail')
@@ -1272,7 +1277,7 @@ class Brain(Extras):
         # for «юми»): a first word that is her name goes, the rest is the question
         name = ' '.join(str(self.settings.get('wake_word') or 'юми').split()).lower()
         text, alt = drop_name(text, name), drop_name(alt, name)
-        _mind_log(f'heard {text!r} (vosk: {alt!r}, wake: {wake})')
+        _mind_log(f'heard {text!r} (vosk: {alt!r}, wake: {wake}, fallback: {fallback})')
         if not text:
             self.note_pending = False
             self.say('heard_nothing')
@@ -1287,7 +1292,8 @@ class Brain(Extras):
                 self.requests.append(('note_voice', {'action': 'add', 'text': text}))
                 return
         lang = self.settings.get('speech_lang', 'en')
-        self.say_text(text, voice=False)   # back to you, quietly: you just said it
+        if not fallback:
+            self.say_text(text, voice=False)   # back to you, quietly: you just said it
         # Music first: «включи музыку» is her own library, «пауза» quiets what
         # plays — the built-in skill owns the sayings before any custom button,
         # whose «playerctl play-pause» would only toggle a stranger's player
@@ -1347,6 +1353,16 @@ class Brain(Extras):
         if chat.params_question(text):     # «юми, твои параметры»: she names herself
             self.say_text(self.params_report(lang))
             return
+        if fallback:
+            # the name came from the small ear: a command above already ran, and a
+            # phrase that is not addressed to her must not wake the mind for nothing
+            kind = addressing.route(text, addressing.hints_from(self.custom))
+            if kind == 'ignore' and alt and alt != text:
+                kind = addressing.route(alt, addressing.hints_from(self.custom))
+            if kind == 'ignore':
+                _mind_log('fallback: not addressed, silent')
+                return
+            self.say_text(text, voice=False)   # it is for her: show it, then answer
         _mind_log('chat')
         # Fall through to normal text processing if music skill is disabled
         self.chat_history.append({'role': 'user', 'content': text})

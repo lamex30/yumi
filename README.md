@@ -488,6 +488,9 @@ eavesdrop: while she is in DND, talking an answer or listening on request, her n
 The name is not taken at the first word's say-so: when vosk's letters seem to spell it, the tape
 of the last seconds goes to whisper for a yes or a no — a name half-heard in a video's stream
 stays a dream (the confirmation costs a moment; vosk keeps listening while whisper reads).
+If the trained ear missed the name but vosk heard both the name and a tail, the tail is routed
+again: a command («play music», your own button, a note) runs, a question or a phrase addressed
+to her goes to her mind, and background talk stays unanswered — she simply keeps quiet.
 The waiting hears nothing else: everything is computed on the spot, offline.
 
 ## Files

@@ -48,10 +48,18 @@ assert not b.sleeping and not b.nap and b.out, 'the name must end the nap too'
 b = brain()
 b.set_sleep(True)
 seen = []
-b.heard_text = lambda text, wake=False, alt=None: seen.append((text, wake, alt))
+b.heard_text = lambda text, wake=False, alt=None, fallback=False: \
+    seen.append((text, wake, alt, fallback))
 b.wake_up('погода', alt='юми погода')
 assert not b.sleeping, 'the phrase must not be lost: she wakes first'
-assert seen == [('погода', True, 'юми погода')], seen
+assert seen == [('погода', True, 'юми погода', False)], seen
+
+# фолбэк: имя из vosk, флаг идёт дальше в heard_text
+b = brain()
+b.heard_text = lambda text, wake=False, alt=None, fallback=False: \
+    seen.append((text, wake, alt, fallback))
+b.wake_up('как дела', alt='как дела', fallback=True)
+assert seen[-1] == ('как дела', True, 'как дела', True), seen
 
 # задумалась: имя потрачено — ни наружу, ни в мозг
 b = brain()
@@ -65,4 +73,21 @@ b.set_sleep(True)
 b.wake_up('')
 assert not b.sleeping and b.out, 'the name alone still wakes her'
 assert b.listening and ('listen', 15) in b.requests, 'and she asks what you wanted'
+
+# фолбэк-текст: необращённая болтовня остаётся без ответа, вопрос уходит в мозг
+b = brain()
+b.custom = []
+b.requests.clear()
+b.thinking = False
+b.heard_text('просто болтовня ни о чем', fallback=True)
+assert not b.thinking, 'background talk must not wake the mind'
+assert not any(req[0] == 'chat_ask' for req in b.requests), b.requests
+
+b = brain()
+b.custom = []
+b.requests.clear()
+b.thinking = False
+b.heard_text('как дела', fallback=True)
+assert b.thinking and any(req[0] == 'chat_ask' for req in b.requests), b.requests
+
 print('ok')

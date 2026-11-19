@@ -57,6 +57,12 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+# the daemon runs in its own small venv and is started by its own path: the project
+# root goes on the path so the ears can read the same router the mind uses
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 HOME = Path(os.environ.get('YUMI_STT_HOME') or Path.home() / '.local/share/yumi/stt')
 STATE = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache') / 'yumi' / 'stt' / 'port.json'
 RATE = 16000                            # the small models want 16 kHz mono s16
@@ -68,7 +74,7 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 27                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 28                            # bumped when the protocol changes: stale twins are restarted
                                         # (22: the ear's veto softened into a rank: a deaf ear alone
                                         #     no longer silences a name-shaped word — the arbitrator
                                         #     weighs every ear, the judge reads a short fresh tape,
@@ -985,9 +991,23 @@ _NOTE_TAIL = re.compile(r'\bзамет(?:к|ок)\w*|\bnotes?\b', re.IGNORECASE)
 def note_command(text):
     """True when the phrase after the name clearly asks for the notes.  The
     trained ear misses «юми» now and then while the small one still hears both
-    the name and the wish; for a note this fallback may wake her, and for
-    nothing else (see the wake loop)"""
+    the name and the wish; the notes are one of the wishes that may wake her
+    from the fallback (fallback_route below)"""
     return bool(_NOTE_TAIL.search(str(text or '')))
+
+
+def fallback_route(text, hints=()):
+    """what the small ear's tail is worth when the trained ear missed the name:
+    'command', 'chat' or 'ignore' (yumi/addressing.py). The notes are always a
+    command, even when the router's own words missed them. A broken import must
+    never take the ears down: without the router only the notes pass."""
+    if note_command(text):
+        return 'command'
+    try:
+        from yumi.addressing import route
+    except Exception:                   # noqa: BLE001 - the ears keep working without it
+        return 'ignore'
+    return route(text, hints)
 
 
 def stop_mush(text, spellings=()):
@@ -1492,7 +1512,7 @@ class Ears:
 
     def wake(self, lang, word, secs, size='small', mic=None,
              sensitivity='normal', confirm=True, model_size=None, judge_log=False,
-             engine='whisper', oww_ear='auto', diag=False):
+             engine='whisper', oww_ear='auto', diag=False, hints=None):
         """wait for the wake word, keeping the microphone on:
         {'woke': True, 'text': the phrase after it} — the name was heard, the phrase came
         {'woke': True, 'text': ''} — the name alone, a phrase may still come
@@ -1502,7 +1522,11 @@ class Ears:
         Nemotron and Whisper stay out of the wake decision: vosk runs as the light
         independent «стоп» channel (it works in every state, раздел 9), and after the
         name the phrase is heard out by the VAD endpointing and read by the configured
-        STT (раздел 7), with the phrase's head restored from the ring buffer."""
+        STT (раздел 7), with the phrase's head restored from the ring buffer.
+        When the trained ear misses the name but vosk has both the name and a tail,
+        the tail is routed (yumi/addressing.py): a command or a phrase meant for her
+        may wake her, background talk stays a dream. `hints` are the user's own
+        phrases/keywords from actions.json, so a custom button is known here too."""
         import selectors
         from vosk import KaldiRecognizer
         echo = echo_ready(mic)
@@ -1514,6 +1538,7 @@ class Ears:
         word = ' '.join(str(word).split()).lower() or 'юми'
         diag = Diag(diag or judge_log)      # the book of doubts: diag=1 or the diary switch
         spellings = variants(word) | hearsay_load(word)    # the stop's glued heads («юмистоп»)
+        hints = [str(h) for h in (hints or ()) if str(h).strip()][:64]   # actions.json's voice
         if self.busy:                       # a wake or a listen already owns the mic:
             return {'woke': False, 'text': None}   # answer at once, before anything runs
 
@@ -1564,7 +1589,8 @@ class Ears:
             # the stop ear read the air while the big ear read the tape: its
             # reading travels with the phrase as alt, just like on the listen
             # path — «heard … (vosk: …)» in the mind's diary must not be empty
-            return {'woke': True, 'text': text, 'alt': vosk_fallback()}
+            return {'woke': True, 'text': text, 'alt': vosk_fallback(),
+                    'fallback': bool(fallback_wake)}
 
         def vosk_fallback(until=None, slack=0.0):
             """vosk's finals around the wake, while they are fresh (fresh_vosk):
@@ -1637,6 +1663,7 @@ class Ears:
                 respawns = 0                # how many times the recorder restarted
                 was_muted = False           # her voice was on the air when the last chunk came
                 woken = False               # the name has passed by: LISTENING now
+                fallback_wake = False       # the name came from vosk, not the trained ear
                 wake_t = 0.0                # when the name was believed
                 wake_score = 0.0            # the ear's best score of the wake
                 voice_t0 = 0.0              # when a voice first came: the wake latency
@@ -1655,14 +1682,17 @@ class Ears:
                 cool_note = [False]         # the cooldown logged once a window, not a storm
                 judge_note(f'WAKE open {secs:.0f} s (OpenWakeWord only)')
 
-                def wake_from_vosk(words):
+                def wake_from_vosk(words, fallback=False):
                     """the small ear's own reading of the name and the phrase: its
-                    head comes off the ring, the rest is read by the phrase ear"""
-                    nonlocal woken, wake_t, wake_score, heard_after, utt, det, phrase_ms
+                    head comes off the ring, the rest is read by the phrase ear;
+                    fallback says the trained ear missed the name (not the
+                    wake_ear: vosk mode, where vosk is the only ear)"""
+                    nonlocal woken, fallback_wake, wake_t, wake_score, heard_after, utt, det, phrase_ms
                     tail, said = wake_at(words, spellings, 1)
                     if tail is None:
                         return False
                     woken = True
+                    fallback_wake = bool(fallback)
                     wake_t = time.monotonic()
                     wake_score = 0.0
                     _last_wake[0] = wake_t
@@ -1828,6 +1858,7 @@ class Ears:
                             elif oww_wake_decision(stat):
                                 # the name is believed: OpenWakeWord alone decided
                                 woken = True
+                                fallback_wake = False
                                 wake_t = time.monotonic()
                                 wake_score = stat['hi']
                                 _last_wake[0] = wake_t
@@ -1850,12 +1881,12 @@ class Ears:
                                 phrase_ms = 0.0
                     if ear_oww is not None and not woken and words:
                         # the trained ear missed the name, but the small one
-                        # heard both it and a note command: that one wish may
-                        # wake her (and nothing else, so the trained ear stays
-                        # the judge of every other phrase)
+                        # heard both it and a tail: a command, a phrase meant
+                        # for her or a note may wake her; background talk is
+                        # not addressed and stays a dream (yumi/addressing.py)
                         tail, said = wake_at(words, spellings, 1)
-                        if tail is not None and note_command(tail):
-                            wake_from_vosk(words)
+                        if tail is not None and fallback_route(tail, hints) != 'ignore':
+                            wake_from_vosk(words, fallback=True)
                     elif ear_oww is None and not woken and words:
                         # no trained ear (wake_ear: vosk, or auto without the
                         # model): the name from vosk's own words, the way the ears
@@ -2209,15 +2240,24 @@ class Handler(BaseHTTPRequestHandler):
             diag = q.get('diag') and q['diag'][0] not in ('', '0', 'false', 'no')
             oww_ear = (q.get('oww_ear') or ['auto'])[0]
             try:
+                hints = json.loads((q.get('hints') or ['[]'])[0])
+            except (TypeError, ValueError):
+                hints = []
+            if not isinstance(hints, list):
+                hints = []
+            hints = [str(h) for h in hints if str(h).strip()][:64]
+            try:
                 res = self.ears.wake(lang, word, secs, size=size, mic=mic,
                                      sensitivity=sensitivity, confirm=confirm,
                                      model_size=model_size, judge_log=judge_log,
-                                     engine=engine, oww_ear=oww_ear, diag=diag)
+                                     engine=engine, oww_ear=oww_ear, diag=diag,
+                                     hints=hints)
             except Exception as e:          # noqa: BLE001 - any failure is reported over HTTP
                 self.ears.error = str(e)
                 return self._json({'error': str(e)}, 500)
             return self._json({'ok': True, 'woke': res['woke'], 'text': res.get('text'),
                                'alt': res.get('alt'),
+                               'fallback': bool(res.get('fallback')),
                                'stop': bool(res.get('stop'))})
         if u.path != '/listen':
             return self._json({'error': 'no such path'}, 404)

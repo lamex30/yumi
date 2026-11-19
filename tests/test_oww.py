@@ -160,6 +160,10 @@ else:
 src = (_root / 'yumi' / 'ui' / 'senses.py').read_text(encoding='utf-8')
 assert 'ears.listen' in src, 'senses.py lost the ears.listen call after wake'
 assert 'wake_up(t' in src, 'senses.py lost the wake_up call'
+# the fallback flag and the user's own action words travel into the wake and back
+assert 'hints=self.wake_hints(b)' in src, 'senses.py lost the actions.json hints'
+assert "res.get('fallback')" in src, 'senses.py lost the fallback flag'
+assert 'wake_up(t, a, f)' in src, 'senses.py lost the fallback flag on the way to the brain'
 # «юми» услышана: мотылек становится девочкой сразу, ещё до фразы
 assert 'wake_form' in src, 'senses.py lost the wake_form call on the wake'
 # stop branch present and calls brain
@@ -169,12 +173,16 @@ assert 'b.stop_all' in m.group(1), 'stop must reach the brain'
 
 # ---- alt (чтение стоп-ухи) доходит с пробуждением до мозгов ----
 src_brain = (_root / 'yumi' / 'brain.py').read_text(encoding='utf-8')
-assert 'def wake_up(self, text, alt=None)' in src_brain, 'brain.wake_up lost the alt'
-assert 'alt=alt' in src_brain, 'wake_up does not pass alt into heard_text'
+assert 'def wake_up(self, text, alt=None, fallback=False)' in src_brain, \
+    'brain.wake_up lost the alt or the fallback flag'
+assert 'alt=alt' in src_brain and 'fallback=fallback' in src_brain, \
+    'wake_up does not pass alt/fallback into heard_text'
 src_ears = (_root / 'yumi' / 'ears.py').read_text(encoding='utf-8')
 assert "'alt': str(data.get('alt') or '')" in src_ears, 'ears.wake drops the alt'
+assert 'q[\'hints\'] = json.dumps' in src_ears, 'ears.wake drops the actions.json hints'
 src_stt = (_root / 'yumi' / 'stt_daemon.py').read_text(encoding='utf-8')
 assert "'alt': res.get('alt')" in src_stt, 'the /wake answer drops the alt'
+assert "'fallback': bool(res.get('fallback'))" in src_stt, 'the /wake answer drops the fallback flag'
 
 # ---- канал стопа и mute в wake(): разделы 8 и 9 ТЗ ----
 wake_src = src_stt.split('def wake(self, lang', 1)[1].split('def stop(self', 1)[0]
@@ -184,9 +192,19 @@ assert 'transcribe_said' in wake_src, 'the phrase after the name must go to STT'
 assert 'bytearray(ring[-lead:])' in wake_src, 'the phrase head must come off the ring'
 assert 'elif ear_oww is None' in wake_src, 'vosk fallback: wake_ear vosk must not be deaf'
 assert 'wake_from_vosk' in wake_src, 'the vosk wake lost its shared body'
-assert 'note_command(tail)' in wake_src, \
-    'the trained ear must let a note command through when it misses the name'
-# only a note command is let through: the trained ear stays the judge otherwise
+assert 'fallback_route(tail' in wake_src, \
+    'the trained ear must let a routed command through when it misses the name'
+assert 'fallback_route(tail, hints)' in wake_src, 'the wake lost the actions.json hints'
+# the fallback is not notes-only: commands and phrases meant for her pass,
+# background talk does not
+assert stt.fallback_route('последняя заметка') == 'command'
+assert stt.fallback_route('запиши заметку купить молоко') == 'command'
+assert stt.fallback_route('включи музыку') == 'command'
+assert stt.fallback_route('как дела?') == 'chat'
+assert stt.fallback_route('терминал') == 'ignore'
+assert stt.fallback_route('терминал', hints=['терминал']) == 'command'
+assert stt.fallback_route('привет как дела') == 'chat'
+assert stt.fallback_route('просто болтовня ни о чем') == 'ignore'
 assert stt.note_command('последняя заметка')
 assert stt.note_command('последний заметка')
 assert stt.note_command('запиши заметку купить молоко')

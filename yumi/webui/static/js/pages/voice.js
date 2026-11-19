@@ -162,8 +162,8 @@ export function render(view, ctx) {
     const seconds = el('input', { type: 'number', min: 3, max: 30, value: 8, style: { maxWidth: '80px' } });
     fill(activationBox, CARD_KEYS.activation,
       say('1. Активация: кто слышит имя', '1. Activation: who hears the name'),
-      say('openWakeWord — обученное ухо «Юми»; vosk — прежнее угадывание по словам.',
-          'openWakeWord is the trained «Yumi» ear; vosk is the old word guessing.'));
+      say('openWakeWord — обученное ухо «Юми»; vosk — прежнее угадывание по словам. Если имя прозевали, vosk-фолбэк разбирает хвост: команда выполняется, вопрос уходит в мозг, чужая болтовня молчит.',
+          'openWakeWord is the trained «Yumi» ear; vosk is the old word guessing. If the name was missed, the vosk fallback routes the tail: a command runs, a question goes to her mind, background talk stays silent.'));
     activationBox.append(engineLine('openWakeWord', act.oww,
       act.oww?.model_ok ? `${Math.round((act.oww.model_bytes || 0) / 1024)} KB` : ''));
     activationBox.append(engineLine('vosk', act.vosk));
