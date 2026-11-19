@@ -1,7 +1,8 @@
 """Yumi's behaviour as a pure state machine (no GTK): input events in, a list of draw ops out.
 
-The GTK window (moth_girl.py) forwards pointer/drag events and the clock, draws the ops with
-cairo and carries out `requests` (open a file, run a job, toggle Do Not Disturb...). The same
+The GTK window (yumi/ui/overlay.py and yumi/ui/app.py) forwards pointer/drag events and the
+clock, draws the ops with cairo and carries out `requests` (open a file, run a job, toggle
+Do Not Disturb...). The same
 ops can be drawn with PIL, which is how this file is tested without a desktop.
 
 Screen coordinates are pixels of the fullscreen overlay. Sprites are drawn at integer `scale`.

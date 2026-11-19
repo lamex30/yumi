@@ -26,7 +26,7 @@ def free_port():
 
 
 class Bridge:
-    """The smallest stand-in for moth_girl.WebBridge."""
+    """The smallest stand-in for yumi.ui.bridge.WebBridge."""
 
     def __init__(self, settings=None):
         self.settings = settings if settings is not None else dict(config.DEFAULT_SETTINGS)

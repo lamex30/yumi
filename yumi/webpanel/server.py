@@ -1,7 +1,7 @@
 """The HTTP server and its tiny API.
 
 Only the standard library is used.  The live Yumi passes a bridge object (see
-``moth_girl.py``) whose methods run on the GTK thread; this module never imports GTK.
+``yumi/ui/bridge.py``) whose methods run on the GTK thread; this module never imports GTK.
 Every mutating call is written to a local audit log, and every response carries a
 strict Content-Security-Policy so a stray string can never load a remote script.
 """

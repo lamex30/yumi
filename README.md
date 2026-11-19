@@ -510,7 +510,10 @@ The waiting hears nothing else: everything is computed on the spot, offline.
 Python, GTK 4 and gtk4-layer-shell. One transparent overlay per screen; only what she draws
 catches the pointer.
 
-- `moth_girl.py`: the overlay window; draws, forwards input, runs her requests
+- `moth_girl.py`: the launcher (GTK flags and D-Bus actions)
+- `yumi/ui/`: the overlay window; draws, forwards input, runs her requests
+  (`app.py` is the application, `overlay.py` the window, `painter.py` cairo,
+  `senses.py` her ears and voice, `webpanel.py`/`bridge.py` the browser panel)
 - `yumi/brain.py`: all of her behaviour, pure Python (draw ops out, no GTK)
 - `yumi/extras.py`: gaze, petting, napping, health breaks, tour, outfits, custom buttons
 - `yumi/phrases.py`: her lines in English and Russian

@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-src = (Path(__file__).resolve().parent.parent / 'moth_girl.py').read_text(encoding='utf-8')
+src = (Path(__file__).resolve().parent.parent / 'yumi' / 'ui' / 'senses.py').read_text(encoding='utf-8')
 
 m = re.search(r"if res\.get\('stop'\):\n(.*?)\n(\s*)continue", src, re.S)
 assert m, "the wake loop lost its stop branch"

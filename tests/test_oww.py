@@ -4,7 +4,7 @@
 Проверяются, apart from the microphone:
 - загрузка модели yumi.onnx через openWakeWord (если есть библиотека и модель),
 - пороги OWW (threshold / sure) и решение wake(),
-- что команда после имени не теряется (интеграция с moth_girl.py wake loop),
+- что команда после имени не теряется (интеграция с yumi/ui/senses.py wake loop),
 - останов «стоп» во время пробуждения.
 
 Тесты, для которых нет модели или библиотеки, пропускаются (не падают).
@@ -156,12 +156,12 @@ if _has_oww and _has_model:
 else:
     print(f'skip: oww lib={_has_oww} model={_has_model} ({_model})')
 
-# ---- moth_girl.py wake loop: после wake_up(tail) вызывается ears.listen при пустом tail ----
-src = (_root / 'moth_girl.py').read_text(encoding='utf-8')
-assert 'ears.listen' in src, 'moth_girl lost the ears.listen call after wake'
-assert 'wake_up(t' in src, 'moth_girl lost the wake_up call'
+# ---- yumi/ui/senses.py wake loop: после wake_up(tail) вызывается ears.listen при пустом tail ----
+src = (_root / 'yumi' / 'ui' / 'senses.py').read_text(encoding='utf-8')
+assert 'ears.listen' in src, 'senses.py lost the ears.listen call after wake'
+assert 'wake_up(t' in src, 'senses.py lost the wake_up call'
 # «юми» услышана: мотылек становится девочкой сразу, ещё до фразы
-assert 'wake_form' in src, 'moth_girl lost the wake_form call on the wake'
+assert 'wake_form' in src, 'senses.py lost the wake_form call on the wake'
 # stop branch present and calls brain
 m = re.search(r"if res\.get\('stop'\):\n(.*?)\n(\s*)continue", src, re.S)
 assert m, 'the wake loop lost its stop branch'

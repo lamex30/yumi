@@ -79,7 +79,7 @@ try:
     assert book.con.execute(
         "SELECT COUNT(*) FROM messages WHERE tag=?", (memory.TAG_JOKE,)).fetchone()[0] == 1
 
-    # ---- the module-level face of the diary works (moth_girl calls it this way)
+    # ---- the module-level face of the diary works (the shell calls it this way)
     for name in ('remember', 'recall', 'joke_streak', 'clear_tag'):
         assert callable(getattr(memory, name)), name
     memory._BOOK = book
