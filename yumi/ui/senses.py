@@ -5,7 +5,7 @@ import time
 
 from gi.repository import GLib
 
-from yumi import chat, config, ears, memory, music, system, tts, voice
+from yumi import chat, config, ears, memory, music, notes, system, tts, voice
 
 
 class SensesMixin:
@@ -360,6 +360,32 @@ class SensesMixin:
                     memory.remember('assistant', reply, s, tag=tag)
             except Exception:
                 pass
+        threading.Thread(target=work, daemon=True).start()
+
+    def note_voice(self, wish):
+        """the notes' answer to a spoken phrase: a new note goes into the book, a
+        search reads the closest ones back; both away from the GTK thread (the
+        embedder may be slow or missing)"""
+        action = str((wish or {}).get('action') or '')
+        text = str((wish or {}).get('text') or '')
+        query = str((wish or {}).get('query') or '')
+
+        def work():
+            try:
+                if action == 'add':
+                    note = notes.add(text, self.settings, source='voice')
+                    if self.web:
+                        self.web.publish('notes', {'action': 'add', 'note': note})
+                    GLib.idle_add(lambda: self.ev(lambda b: b.note_saved(note)) and False)
+                    return
+                if action == 'list':
+                    items = notes.recent(5)
+                else:
+                    items = notes.search(query, self.settings, limit=5)
+                payload = {'action': action, 'items': items, 'query': query}
+                GLib.idle_add(lambda: self.ev(lambda b: b.note_found(payload)) and False)
+            except Exception:
+                GLib.idle_add(lambda: self.ev(lambda b: b.note_failed()) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def fetch_chat_models(self):

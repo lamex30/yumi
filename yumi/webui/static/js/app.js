@@ -7,6 +7,7 @@ import {
 const PAGES = {
   dashboard: './pages/dashboard.js',
   chat: './pages/chat.js',
+  notes: './pages/notes.js',
   files: './pages/files.js',
   music: './pages/music.js',
   voice: './pages/voice.js',

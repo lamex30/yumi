@@ -448,6 +448,17 @@ the polite ones and the «Sassy 18+» ones apart. And «кто играет» (�
 answers by herself too:
 the artist and the track of whatever is sounding right now.
 
+**Notes.** Say «Юми, запиши заметку купить молоко» and she writes it down. Ask
+«найди заметку про молоко» («find a note about milk») or «покажи заметки» («show my
+notes») and she reads the closest note aloud, naming the count when there are several.
+Notes can also be typed on the **Notes** page of the browser panel, which has search,
+editing, deletion and a **Record by voice** button. Spoken and typed notes live in the
+same sqlite book, `~/.local/state/yumi/yumi.db` (table `notes`), and each carries two
+vectors like the talk diary: Ollama embeddings when they answer, a light hashed
+bag-of-words when they do not. The search finds a note by meaning as well as by its own
+words, fully offline. The voice-notes switch is **Settings → Her mind → Notes by voice**
+(`notes_voice`).
+
 **Music from the library.** Say «Юми, включи песню город золотой» and she finds the song
 and plays it; «включи что-нибудь» plays a random one; «включи исполнителя аквариум» queues
 several tracks by that singer; «включи альбом золото» plays the whole album. And plain
@@ -498,9 +509,9 @@ The waiting hears nothing else: everything is computed on the spot, offline.
 - **Signing in:** Yumi prints a link with a one-time token (`http://127.0.0.1:8765/?t=…`).
   It is exchanged for an HttpOnly session. You can rotate the token on the Security page
   without signing out the tabs that are already open.
-- **What is inside:** overview, talk, files, music, ears and voice, buttons, look, every
-  setting, memory, config files, security and logs. Changes apply live and are saved to
-  the same files the desktop Yumi uses.
+- **What is inside:** overview, talk, notes, files, music, ears and voice, buttons, look,
+  every setting, memory, config files, security and logs. Changes apply live and are
+  saved to the same files the desktop Yumi uses.
 - **Network:** it listens on `127.0.0.1` only by default. `0.0.0.0` exposes it to the LAN;
   do that only with a strong token and a firewall. There is no HTTPS yet.
 - **Data:** the token and signing secret live in `~/.config/yumi/webpanel.json` (mode

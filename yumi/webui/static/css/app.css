@@ -363,6 +363,10 @@ input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
 .memory-item.user { border-left-color: var(--accent-2); }
 .memory-item.assistant { border-left-color: var(--accent); }
 .memory-item .meta { display: flex; gap: 8px; color: var(--dim); font-size: 9px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .08em; }
+.note-item { border-left: 3px solid var(--accent-2); padding: 10px 13px; background: var(--panel-2); font-size: 12px; }
+.note-item .meta { display: flex; gap: 8px; align-items: center; color: var(--dim); font-size: 9px; margin: 3px 0 7px; text-transform: uppercase; letter-spacing: .08em; }
+.note-title { font-size: 14px; font-weight: 600; }
+.note-text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
 .editor { width: 100%; min-height: 440px; font-size: 12px; tab-size: 2; white-space: pre; }
 .config-card { display: flex; flex-direction: column; gap: 6px; }
 .config-card b { font-size: 13px; }

@@ -89,6 +89,12 @@ export const api = {
   status: () => api.get('/api/status'),
   schema: () => api.get('/api/schema'),
 
+  notesList: (params = '') => api.get(`/api/notes${params ? `?${params}` : ''}`),
+  noteAdd: (text, title) => api.post('/api/notes', { text, title }),
+  noteUpdate: (id, text, title) => api.patch(`/api/notes/${id}`, { text, title }),
+  noteDelete: (id) => api.del(`/api/notes/${id}`),
+  notesClear: () => api.post('/api/notes/clear', { all: true }),
+
   async patchSettings(patch) {
     return api.patch('/api/settings', { patch });
   },
@@ -114,7 +120,7 @@ export const api = {
   },
 };
 
-export const EVENTS = ['hello', 'status', 'bubble', 'settings', 'files', 'jobs', 'actions', 'chat', 'server'];
+export const EVENTS = ['hello', 'status', 'bubble', 'settings', 'files', 'jobs', 'actions', 'chat', 'notes', 'server'];
 
 export function connectEvents(onEvent, onState) {
   let source = null;

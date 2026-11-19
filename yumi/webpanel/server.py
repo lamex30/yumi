@@ -391,6 +391,9 @@ def _make_handler(panel):
                 ('DELETE', '/api/chat/history'): self._chat_clear,
                 ('GET', '/api/memory'): self._memory,
                 ('POST', '/api/memory/clear'): self._memory_clear,
+                ('GET', '/api/notes'): self._notes,
+                ('POST', '/api/notes'): self._note_add,
+                ('POST', '/api/notes/clear'): self._notes_clear,
                 ('GET', '/api/music'): self._music_status,
                 ('GET', '/api/music/search'): self._music_search,
                 ('POST', '/api/music/play'): self._music_play,
@@ -438,6 +441,13 @@ def _make_handler(panel):
                 m = re.fullmatch(r'/api/actions/(\d+)/run', path)
                 if m and method == 'POST':
                     return self._action_run(int(m.group(1)))
+                m = re.fullmatch(r'/api/notes/(\d+)', path)
+                if m and method == 'GET':
+                    return self._note_get(int(m.group(1)))
+                if m and method in ('PATCH', 'PUT'):
+                    return self._note_update(int(m.group(1)))
+                if m and method == 'DELETE':
+                    return self._note_delete(int(m.group(1)))
                 if path == '/api/upload' and method == 'POST':
                     return self._upload(query)
                 if path == '/api/file/preview' and method == 'GET':
@@ -705,6 +715,60 @@ def _make_handler(panel):
             tag = str(body.get('tag') or '')
             result = panel.bridge.memory_clear(tag)
             panel.audit(self._ip(), 'memory-clear', tag or 'all web lines')
+            return self._json(200, {'ok': True, **result})
+
+        # ---------------------------------------------------------------- notes
+        def _notes(self, query):
+            q = str((query.get('q') or [''])[0]).strip()
+            try:
+                limit = min(500, max(1, int((query.get('limit') or ['50'])[0])))
+            except ValueError:
+                limit = 50
+            items = (panel.bridge.notes_search(q, limit) if q
+                     else panel.bridge.notes_list(limit))
+            return self._json(200, {'ok': True, 'query': q, 'items': items})
+
+        def _note_get(self, note_id):
+            note = panel.bridge.notes_get(note_id)
+            if not note:
+                raise ValueError('there is no such note')
+            return self._json(200, {'ok': True, 'note': note})
+
+        def _note_add(self, _q):
+            body = self._body()
+            text = str(body.get('text') or '').strip()
+            if not text:
+                raise ValueError('a note needs some text')
+            note = panel.bridge.notes_add(text, str(body.get('title') or '') or None)
+            panel.audit(self._ip(), 'note-add', f"#{note.get('id')} {text[:100]}")
+            panel.publish('notes', {'changed': note.get('id'), 'action': 'add', 'note': note})
+            return self._json(200, {'ok': True, 'note': note})
+
+        def _note_update(self, note_id):
+            body = self._body()
+            text = str(body.get('text') or '').strip()
+            if not text:
+                raise ValueError('a note needs some text')
+            note = panel.bridge.notes_update(note_id, text, str(body.get('title') or '') or None)
+            if not note:
+                raise ValueError('there is no such note')
+            panel.audit(self._ip(), 'note-update', f'#{note_id} {text[:100]}')
+            panel.publish('notes', {'changed': note_id, 'action': 'update', 'note': note})
+            return self._json(200, {'ok': True, 'note': note})
+
+        def _note_delete(self, note_id):
+            result = panel.bridge.notes_delete(note_id)
+            panel.audit(self._ip(), 'note-delete', f'#{note_id}')
+            panel.publish('notes', {'changed': note_id, 'action': 'delete'})
+            return self._json(200, {'ok': True, **result})
+
+        def _notes_clear(self, _q):
+            body = self._body()
+            if body.get('all') is not True:
+                raise ValueError('refusing to clear the notes without "all": true')
+            result = panel.bridge.notes_clear()
+            panel.audit(self._ip(), 'notes-clear', str(result.get('deleted', '')))
+            panel.publish('notes', {'action': 'clear', **result})
             return self._json(200, {'ok': True, **result})
 
         # ---------------------------------------------------------------- music

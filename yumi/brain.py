@@ -17,6 +17,7 @@ from pathlib import Path
 from . import jobs as J
 from . import chat
 from . import nlu
+from . import notes
 from .config import RING_SLOTS, UI, tr
 from .extras import Extras
 from .sprites import ARCHIVES, DOCS, KIND_COLOR, SWATCHES, swatch_hex
@@ -268,6 +269,7 @@ class Brain(Extras):
         self.chat_history = []          # what you asked and what she answered, the last few turns
         self.listening = False          # the mic button was pressed: she is waiting for a phrase
         self.thinking = False           # the question is away at Ollama
+        self.note_pending = False       # she asked «what should I write down?»: the next phrase is a note
         self.chat_models = []           # installed Ollama models, for the settings row
         self.mics = []                  # microphones her ears can hear, for the settings row
         self.radial = False             # the ring of round buttons around her
@@ -1261,6 +1263,7 @@ class Brain(Extras):
         came right after her name («юми ...») or after she asked what you wanted;
         alt is the other reading (vosk's) when the first one was whisper's"""
         if text is None:                # the ears are not set up (tools/stt_setup.sh)
+            self.note_pending = False
             self.say('ears_fail')
             return
         text = ' '.join(str(text or '').split())
@@ -1271,11 +1274,18 @@ class Brain(Extras):
         text, alt = drop_name(text, name), drop_name(alt, name)
         _mind_log(f'heard {text!r} (vosk: {alt!r}, wake: {wake})')
         if not text:
+            self.note_pending = False
             self.say('heard_nothing')
             return
         if stop_command(text):             # «стоп» overrides everything, even her own voice
             self.stop_all()
             return
+        if self.note_pending:              # she just asked what to write down
+            self.note_pending = False
+            if self.settings.get('notes_voice', True):
+                self.thinking = True
+                self.requests.append(('note_voice', {'action': 'add', 'text': text}))
+                return
         lang = self.settings.get('speech_lang', 'en')
         self.say_text(text, voice=False)   # back to you, quietly: you just said it
         # Music first: «включи музыку» is her own library, «пауза» quiets what
@@ -1304,6 +1314,20 @@ class Brain(Extras):
                 pair = music_control_text(alt, lang, guess=True)
             if pair:
                 self.music_send(pair, lang)
+                return
+        if self.settings.get('notes_voice', True):
+            wish = notes.voice_intent(text)
+            if not wish and alt and alt != text:
+                wish = notes.voice_intent(alt)
+            if wish:
+                if wish.get('action') == 'add' and not wish.get('text'):
+                    self.note_pending = True
+                    self.say('note_what')
+                    self.listening = True
+                    self.requests.append(('listen', 15))
+                    return
+                self.thinking = True
+                self.requests.append(('note_voice', wish))
                 return
         if chat.time_question(text):       # the clock she reads herself, no mind needed
             self.say('chat_time', time=chat.the_time(lang))
@@ -1453,6 +1477,43 @@ class Brain(Extras):
                 and str(self.settings.get('music_jellyfin') or '').strip():
             self.say('music_local')
 
+    def note_saved(self, report):
+        """her ears or the panel wrote a note: she names what went into the book"""
+        self.thinking = False
+        self.set_face('happy', 1.5)
+        self.say('note_saved', title=str((report or {}).get('title') or ''))
+
+    def note_found(self, payload):
+        """the notes answered a spoken search: the closest one is read back,
+        with how many more there are; an empty book says so gently"""
+        self.thinking = False
+        action = str((payload or {}).get('action') or 'search')
+        items = list((payload or {}).get('items') or [])
+        if action == 'list':
+            if not items:
+                self.say('notes_empty')
+            else:
+                self.say('note_list', n=len(items),
+                         title=str(items[0].get('title') or ''))
+            return
+        if not items:
+            self.say('note_not_found')
+            return
+        first = items[0]
+        text = ' '.join(str(first.get('text') or '').split())
+        if len(text) > 180:
+            text = text[:177].rstrip() + '…'
+        if len(items) == 1:
+            self.say('note_found_one', title=str(first.get('title') or ''), text=text)
+        else:
+            self.say('note_found_many', n=len(items),
+                     title=str(first.get('title') or ''), text=text)
+
+    def note_failed(self, reason=''):
+        """the note could not be written (the book or the disk let her down)"""
+        self.thinking = False
+        self.say('job_fail')
+
     def said_weather(self, report):
         """the clouds answered through wttr.in / Open-Meteo (report is '' when the net was away);
         the bubble keeps «+5°C», the ears hear «плюс 5 градусов»"""
@@ -1554,6 +1615,7 @@ class Brain(Extras):
         self.talk_until = self.now
         self.thinking = False
         self.listening = False
+        self.note_pending = False
         self.timer = None
         self.kb_hover = False
         self.requests.clear()              # nothing queued may keep running past the stop

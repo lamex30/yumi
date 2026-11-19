@@ -9,7 +9,7 @@ from pathlib import Path
 
 from gi.repository import Gdk, GLib
 
-from yumi import chat, config, engines, memory, music, pixui, system, tts, webpanel
+from yumi import chat, config, engines, memory, music, notes, pixui, system, tts, webpanel
 from yumi.sprites import ui_colors
 from yumi.webpanel import catalog as webcatalog
 
@@ -257,6 +257,7 @@ class PanelMixin:
                 'outfit': getattr(self.meta, 'outfit', None),
                 'shelf_count': len([p for p in (st.get('shelf') or []) if Path(p).exists()]),
                 'recent_count': len(getattr(self.recent, 'items', {}) or {}),
+                'notes_count': notes.count(),
             },
             'jobs': jobs,
             'panel': self.web.info() if self.web else {'running': False},

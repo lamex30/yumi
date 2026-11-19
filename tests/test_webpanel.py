@@ -36,6 +36,8 @@ class Bridge:
         self.allowed = set()
         self.actions = [{'label': 'Term', 'label_ru': 'Терм', 'icon': 'terminal',
                          'command': 'foot', 'phrases': []}]
+        self.note_items = []
+        self.note_id = 0
 
     def file_allowed(self, path):
         try:
@@ -94,6 +96,44 @@ class Bridge:
     def actions_save(self, actions):
         self.actions = actions
         return {'saved': len(actions), 'backup': ''}
+
+    def notes_list(self, limit=50):
+        return list(reversed(self.note_items))[:limit]
+
+    def notes_search(self, query, limit=50):
+        q = str(query or '').lower()
+        return [n for n in self.notes_list(limit) if q in n['text'].lower()]
+
+    def notes_get(self, note_id):
+        return next((n for n in self.note_items if n['id'] == int(note_id)), None)
+
+    def notes_add(self, text, title=None, source='web'):
+        self.note_id += 1
+        note = {'id': self.note_id, 'title': title or str(text)[:80],
+                'text': str(text), 'source': source, 'ts': 1.0, 'updated': 1.0}
+        self.note_items.append(note)
+        return note
+
+    def notes_update(self, note_id, text, title=None):
+        note = self.notes_get(note_id)
+        if not note:
+            return None
+        note['text'] = str(text)
+        if title:
+            note['title'] = title
+        return note
+
+    def notes_delete(self, note_id):
+        note = self.notes_get(note_id)
+        if not note:
+            raise ValueError('there is no such note')
+        self.note_items.remove(note)
+        return {'deleted': True, 'id': int(note_id)}
+
+    def notes_clear(self):
+        gone = len(self.note_items)
+        self.note_items = []
+        return {'deleted': gone}
 
     def logs(self, name, lines):
         if name not in ('yumi', 'judge', 'ears', 'web'):
@@ -176,9 +216,9 @@ try:
     assert set(config.DEFAULT_SETTINGS) <= keys, set(config.DEFAULT_SETTINGS) - keys
     assert {'web_panel', 'web_panel_host', 'web_panel_port', 'web_panel_open',
             'web_panel_session_hours'} <= keys
-    assert len(schema['pages']) == 12
+    assert len(schema['pages']) == 13
     assert {page['id'] for page in schema['pages']} == {
-        'dashboard', 'chat', 'files', 'music', 'voice', 'buttons', 'appearance',
+        'dashboard', 'chat', 'notes', 'files', 'music', 'voice', 'buttons', 'appearance',
         'settings', 'memory', 'configs', 'security', 'logs'}
     entries = {entry['key']: entry for entry in schema['settings']}
     assert entries['wake_sensitivity']['type'] == 'select'
@@ -277,6 +317,33 @@ try:
     code, data, _ = call('GET', '/api/voice/mics')
     assert code == 200 and data['mics'] == [{'name': 'plughw:1,0', 'label': 'Headset'}], data
 
+    # notes: list, add (CSRF), search, edit, delete, clear
+    code, data, _ = call('GET', '/api/notes')
+    assert code == 200 and data['items'] == []
+    code, data, _ = call('POST', '/api/notes', {'text': 'купить молоко'})
+    assert code == 403, 'a note without CSRF must fail'
+    code, data, _ = call('POST', '/api/notes',
+                         {'text': 'Купить молоко и хлеб', 'title': 'Покупки'}, csrf=csrf)
+    assert code == 200 and data['note']['id'] == 1, (code, data)
+    note_id = data['note']['id']
+    code, data, _ = call('POST', '/api/notes', {'text': 'Созвон с врачом'}, csrf=csrf)
+    assert code == 200 and data['note']['id'] == 2
+    code, data, _ = call('GET', '/api/notes?q=' + urllib.parse.quote('молоко'))
+    assert code == 200 and [n['id'] for n in data['items']] == [note_id], data
+    code, data, _ = call('GET', f'/api/notes/{note_id}')
+    assert code == 200 and data['note']['title'] == 'Покупки'
+    code, data, _ = call('PATCH', f'/api/notes/{note_id}',
+                         {'text': 'Купить молоко, хлеб и сыр', 'title': 'Список'}, csrf=csrf)
+    assert code == 200 and data['note']['text'].endswith('сыр')
+    code, data, _ = call('POST', '/api/notes/clear', {}, csrf=csrf)
+    assert code == 400, 'clearing needs "all": true'
+    code, data, _ = call('DELETE', f'/api/notes/{note_id}', csrf=csrf)
+    assert code == 200 and data['deleted'] is True
+    code, data, _ = call('DELETE', f'/api/notes/{note_id}', csrf=csrf)
+    assert code == 400, (code, data)
+    code, data, _ = call('POST', '/api/notes/clear', {'all': True}, csrf=csrf)
+    assert code == 200 and data['deleted'] == 1, (code, data)
+
     code, data, _ = call('GET', '/api/security/link')
     assert code == 404, 'the link must only be handed out by an explicit POST'
     code, data, _ = call('POST', '/api/security/link', csrf=csrf)
@@ -292,6 +359,8 @@ try:
     code, body, _ = call('GET', '/static/js/app.js', raw=True)
     assert code == 200 and b'PAGES' in body
     code, body, _ = call('GET', '/static/js/pages/dashboard.js', raw=True)
+    assert code == 200 and b'export function render' in body
+    code, body, _ = call('GET', '/static/js/pages/notes.js', raw=True)
     assert code == 200 and b'export function render' in body
     code, body, _ = call('GET', '/static/css/app.css', raw=True)
     assert code == 200 and b'--accent' in body

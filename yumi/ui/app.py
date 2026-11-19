@@ -389,6 +389,8 @@ class App(PanelMixin, SensesMixin, Gtk.Application):
                 self.hourly_ask(r[1])
             elif kind == 'joke_ask':
                 self.joke_ask(r[1])
+            elif kind == 'note_voice':
+                self.note_voice(r[1])
             elif kind == 'chat_models':
                 self.fetch_chat_models()
             elif kind == 'mics':

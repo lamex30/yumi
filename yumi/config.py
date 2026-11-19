@@ -55,6 +55,8 @@ DEFAULT_SETTINGS = {
     'embed_model': 'nomic-embed-text',   # the Ollama mind's embeddings for the
                               # recall; without it a light hashed bag-of-words
                               # stands in, so the diary works offline all the same
+    'notes_voice': True,      # her notes by voice: «запиши заметку …» writes one,
+                              # «найди заметку про …» searches them (yumi/notes.py)
     'wake_ears': True,        # she starts listening the moment you say the wake word
     'music_skill': True,      # music control via voice commands
     'nlu': True,              # her own voice commands: the phrases in actions.json

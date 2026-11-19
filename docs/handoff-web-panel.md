@@ -35,14 +35,16 @@ yumi/
       js/app.js        сессия, навигация, hash-роутер, живой статус, топбар
       js/api.js        единственное место, где ходят HTTP и SSE
       js/ui.js         DOM-хелперы, иконки, тосты, модалки, контролы настроек
-      js/pages/*.js    12 страниц
+      js/pages/*.js    13 страниц
 bin/yumi               флаг --web
 yumi/ui/app.py         жизненный цикл панели
 yumi/ui/bridge.py      WebBridge — контракт HTTP ↔ приложение
 yumi/config.py         настройки web_panel_* и строки интерфейса
 yumi/brain.py          пункты меню и действия в мире
 yumi/memory.py         хелперы дневника для страницы «Память»
+yumi/notes.py          заметки: sqlite + векторы, голосовые команды, страница «Заметки»
 tests/test_webpanel.py интеграционный тест API и безопасности
+tests/test_notes.py    тест книжки заметок и разбора голосовых фраз
 ```
 
 Ключевое правило: `yumi/webpanel/*` **не импортирует GTK**. HTTP-потоки не трогают
@@ -70,6 +72,7 @@ WebBridge (yumi.ui.bridge)  ── GLib.idle_add ──▶  App / Brain / Memory
 |----|-------------------|------------|
 | `dashboard` | Обзор | портрет, реплика, режим, аптайм, таймер, музыка, очередь файлов, быстрые действия |
 | `chat` | Разговор | чат с умом, история, очистка, «сказать в мир», быстрый старт, живая реплика |
+| `notes` | Заметки | поиск по заметкам, создание и правка, удаление, очистка, запись голосом через `/api/voice/listen` |
 | `files` | Файлы | очередь обработки, drag-and-drop загрузка, недавние, полка, открыть, конвертировать, сжать |
 | `music` | Музыка | текущий трек, play/pause/next/stop, громкость, поиск по Jellyfin/папкам |
 | `voice` | Ушки и голос | карточки «Активация», «Судья фраз», «Голос»: выбор движка, состояние «доступно/нет», проверка имени и фразы вживую, прослушивание TTS; ниже — «закрыть ушки», выбор микрофона из списка звуковой системы, живые индикаторы и остальные настройки ушек/звука |
@@ -141,6 +144,10 @@ ctx.navigate(id)
 | GET/POST/DELETE | `/api/chat/history`, `/api/chat` | история, сообщение, очистка |
 | GET | `/api/memory` | `?q=&limit=` |
 | POST | `/api/memory/clear` | `{tag}` (`all`, `sassy`) |
+| GET | `/api/notes` | `?q=&limit=` — список или поиск по заметкам |
+| POST | `/api/notes` | `{text, title?}` — новая заметка |
+| GET/PATCH/DELETE | `/api/notes/<id>` | одна заметка, правка, удаление |
+| POST | `/api/notes/clear` | `{all:true}` — стереть всю книжку |
 | GET | `/api/music` | текущий трек и громкость |
 | GET | `/api/music/search` | `?kind=&q=` |
 | POST | `/api/music/play`, `/api/music/control` | play/pause/next/stop/volume |
@@ -155,7 +162,7 @@ ctx.navigate(id)
 | POST | `/api/security/link` | показать ссылку с токеном (только POST + CSRF) |
 | GET | `/api/audit` | хвост журнала панели |
 | GET | `/api/logs?source=&lines=` | логи |
-| GET | `/api/events` | SSE: hello/status/bubble/settings/files/jobs/actions/chat/server |
+| GET | `/api/events` | SSE: hello/status/bubble/settings/files/jobs/actions/chat/notes/server |
 | GET | `/api/tools/time|weather|joke|params` | мелкие инструменты |
 
 Важно: `/api/security/link` намеренно **не** отдаёт токен по GET, чтобы он не попал в
@@ -165,8 +172,9 @@ ctx.navigate(id)
 `snapshot, configs, config_get, config_save, actions_get, actions_save, action_run,
 apply_settings, state_action, files_recent, files_shelf, shelf_change, files_open,
 job_add, jobs_cancel, timer_get, timer, ask, chat, chat_history, chat_clear,
-memory_recent, memory_search, memory_clear, music_status, music_search, music_play,
-music_control, voice_listen(seconds, engine), voice_stop, voice_speak,
+memory_recent, memory_search, memory_clear, notes_list, notes_search, notes_get,
+notes_add, notes_update, notes_delete, notes_clear, music_status, music_search,
+music_play, music_control, voice_listen(seconds, engine), voice_stop, voice_speak,
 voice_engines, voice_mics, voice_test_wake(seconds, ear), voice_test(text, lang),
 tools_*, logs`.
 
@@ -270,7 +278,7 @@ python3 tests/test_nlu.py
 python3 tests/test_arbiter.py
 python3 tests/test_tts.py
 
-python3 -m py_compile yumi/webpanel/*.py yumi/ui/*.py yumi/config.py yumi/brain.py yumi/memory.py
+python3 -m py_compile yumi/webpanel/*.py yumi/ui/*.py yumi/config.py yumi/brain.py yumi/memory.py yumi/notes.py
 for f in yumi/webui/static/js/*.js yumi/webui/static/js/pages/*.js; do
   node --input-type=module --check < "$f" || echo "FAIL $f"
 done
@@ -306,7 +314,8 @@ bash -n bin/yumi
 
 ## 10. Статус
 
-Готово и проверено: сервер, авторизация, CSRF, схема настроек, все 12 страниц,
+Готово и проверено: сервер, авторизация, CSRF, схема настроек, все 13 страниц
+(включая «Заметки» с поиском и записью голосом),
 пиксельная тема с двумя breakpoint'ами, живые события, бэкапы, аудит, флаг `--web`,
 интеграционные тесты. Дополнительно проверено в headless-Chromium: все страницы
 отрисовываются без исключений и неудачных запросов, переключение языка перестраивает

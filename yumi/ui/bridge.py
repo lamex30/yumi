@@ -3,7 +3,7 @@ import threading
 import time
 from pathlib import Path
 
-from yumi import chat, config, ears, engines, files, jobs, memory, music, system, tts
+from yumi import chat, config, ears, engines, files, jobs, memory, music, notes, system, tts
 
 
 class WebBridge:
@@ -207,6 +207,30 @@ class WebBridge:
         if tag == 'all':
             return {'deleted': memory.clear_all()}
         return {'deleted': memory.clear_tag(tag)}
+
+    # ---- notes: the same book her ears write into (yumi/notes.py)
+    def notes_list(self, limit=50):
+        return notes.recent(limit)
+
+    def notes_search(self, query, limit=50):
+        return notes.search(query, self.app.settings, limit=limit)
+
+    def notes_get(self, note_id):
+        return notes.get(note_id)
+
+    def notes_add(self, text, title=None, source='web'):
+        return notes.add(text, self.app.settings, title=title, source=source)
+
+    def notes_update(self, note_id, text, title=None):
+        return notes.update(note_id, text, self.app.settings, title=title)
+
+    def notes_delete(self, note_id):
+        if not notes.delete(note_id):
+            raise ValueError('there is no such note')
+        return {'deleted': True, 'id': int(note_id)}
+
+    def notes_clear(self):
+        return {'deleted': notes.clear()}
 
     def music_status(self):
         playing = music.now_playing()
