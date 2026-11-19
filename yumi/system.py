@@ -317,7 +317,7 @@ class Notifier:
 
 
 def copy_text(text):
-    if shutil.which('wl-copy'):
+    if shutil.which('wl-copy') and os.environ.get('WAYLAND_DISPLAY'):   # X11: GTK's clipboard (moth_girl.py)
         try:
             p = subprocess.Popen(['wl-copy', text], stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL, env=ENV, start_new_session=True)
@@ -329,12 +329,17 @@ def copy_text(text):
 
 def can_pick():
     return bool(shutil.which('hyprpicker') or (shutil.which('slurp') and shutil.which('grim'))
-                or os.environ.get('XDG_CURRENT_DESKTOP'))
+                or not os.environ.get('WAYLAND_DISPLAY') or os.environ.get('XDG_CURRENT_DESKTOP'))
 
 
 def pick_color(done, accent=None):
     """let the user click a point on the screen; done('#rrggbb' or None) on the main loop.
-    hyprpicker, then slurp + grim (wlroots), then the desktop portal (KDE, COSMIC...)"""
+    hyprpicker, then slurp + grim (wlroots), then the desktop portal (KDE, COSMIC...); X11 by hand"""
+    if not os.environ.get('WAYLAND_DISPLAY'):
+        from . import x11                    # portals on Xfce, MATE, i3... have no PickColor
+        x11.pick(done)
+        return
+
     def work():
         hexc = None
         desk = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()

@@ -66,11 +66,11 @@
 
 ## Где она работает
 
-Нужен Wayland-композитор с **wlr-layer-shell**:
+Нужен Wayland-композитор с **wlr-layer-shell** или сессия X11 с композитором:
 
 | Работает | Пока нет |
 | --- | --- |
-| sway, Hyprland, niri, river, Wayfire, labwc, KDE Plasma 6, COSMIC и другие на wlroots | GNOME (в Mutter нет layer-shell), сессии X11, Windows, macOS |
+| sway, Hyprland, niri, river, Wayfire, labwc, KDE Plasma 6, COSMIC и другие на wlroots; X11 с включённым композитингом (Xfce, Cinnamon, MATE, i3 / bspwm / Openbox + picom) | GNOME (в Mutter нет layer-shell), Windows, macOS |
 
 Всё, кроме самого окна, необязательно: если какой-то программы нет, она просто не делает эту
 одну вещь, а в настройках, где это важно, будет написано «пока недоступно».
@@ -113,8 +113,16 @@ cd yumi
 yumi
 ```
 
-Можно запускать и прямо из папки: `./bin/yumi`. Удалить: `./install.sh --uninstall`.
+Можно запускать и прямо из папки: `./bin/yumi`.
 Для сборщиков пакетов в [`packaging/`](packaging) лежат `PKGBUILD` и `template` для Void.
+
+### Удалить полностью
+
+```sh
+yumi --quit                                      # остановить, если она запущена
+./install.sh --uninstall                         # программа (тот же PREFIX, что при установке; sudo для /usr/local)
+rm -rf ~/.config/yumi ~/.local/state/yumi        # настройки, кнопки, сохранённое состояние, лог
+```
 
 **NixOS:** `nix run github:lamex30/yumi` — попробовать; чтобы установить, добавь flake во входы и
 положи `inputs.yumi.packages.${system}.default` в `environment.systemPackages` (или возьми
@@ -400,7 +408,9 @@ openWakeWord (обученная модель `yumi.onnx`) или vosk, — а *
 
 - **`gtk4-layer-shell is not installed`**: поставьте его (см. таблицу выше) или укажите путь:
   `YUMI_LAYER_SHELL_LIB=/путь/к/libgtk4-layer-shell.so.0 yumi`.
-- **«this desktop has no wlr-layer-shell»**: у вас GNOME или X11, они пока не поддерживаются.
+- **«this desktop has no wlr-layer-shell»**: у вас GNOME, он пока не поддерживается.
+- **«X11 without a compositor»**: включите композитинг в настройках рабочего стола или запустите
+  `picom`. На X11 gtk4-layer-shell не нужен.
 - **«Цвета от обоев: пока недоступно»**: она не знает вашу программу для обоев. Запишите оттенок в
   `~/.config/yumi/palette.json` или откройте issue и напишите, чем вы ставите обои.
 - **Она не появляется**: запустите `yumi --foreground` и посмотрите, что она пишет, или загляните
