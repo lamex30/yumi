@@ -30,6 +30,12 @@ assert notes.voice_intent('покажи последнюю заметку') == {
 assert notes.voice_intent('что в последней заметке') == {'action': 'last'}
 assert notes.voice_intent('what is my last note') == {'action': 'last'}
 assert notes.voice_intent('last note') == {'action': 'last'}
+# the ears bend the endings and sometimes keep her name at the head
+assert notes.voice_intent('последний заметка') == {'action': 'last'}
+assert notes.voice_intent('юми последний заметка') == {'action': 'last'}
+assert notes.voice_intent('юлии последняя заметка') == {'action': 'last'}
+assert notes.voice_intent('последние заметки') == {'action': 'last'}
+assert notes.voice_intent('last notes') == {'action': 'last'}
 assert notes.voice_intent('как дела') is None
 assert notes.voice_intent('это интересная заметка') is None, 'a mention is not a wish'
 

@@ -979,6 +979,17 @@ def stop_shout(text, names=()):
         for t in toks)
 
 
+_NOTE_TAIL = re.compile(r'\bзамет(?:к|ок)\w*|\bnotes?\b', re.IGNORECASE)
+
+
+def note_command(text):
+    """True when the phrase after the name clearly asks for the notes.  The
+    trained ear misses «юми» now and then while the small one still hears both
+    the name and the wish; for a note this fallback may wake her, and for
+    nothing else (see the wake loop)"""
+    return bool(_NOTE_TAIL.search(str(text or '')))
+
+
 def stop_mush(text, spellings=()):
     """the stop may arrive glued to her name («юмистоп» for «юми стоп», the pause
     drowns in the music and the ear writes one word): a word counts when it ends
@@ -1643,6 +1654,32 @@ class Ears:
                 ear_note = [0.0]            # when the ear's last loud frame was noted
                 cool_note = [False]         # the cooldown logged once a window, not a storm
                 judge_note(f'WAKE open {secs:.0f} s (OpenWakeWord only)')
+
+                def wake_from_vosk(words):
+                    """the small ear's own reading of the name and the phrase: its
+                    head comes off the ring, the rest is read by the phrase ear"""
+                    nonlocal woken, wake_t, wake_score, heard_after, utt, det, phrase_ms
+                    tail, said = wake_at(words, spellings, 1)
+                    if tail is None:
+                        return False
+                    woken = True
+                    wake_t = time.monotonic()
+                    wake_score = 0.0
+                    _last_wake[0] = wake_t
+                    heard_after = tail or ''
+                    judge_note(f'WAKE vosk ({words!r})')
+                    diag.event(arbitration='CANDIDATE', reason='vosk_name',
+                               vosk_text=words, wake_candidate=True,
+                               judge_called=False, final_wake=False,
+                               **diag_base('LISTENING', voiced))
+                    lead = int(TUNE['wake_lead_ms'] * RATE * 2 / 1000.0)
+                    utt = Utterance()
+                    utt.lead = bytearray(ring[-lead:]) if lead else bytearray()
+                    utt.lead_max = max(utt.LEAD, len(utt.lead))
+                    det = Detector()
+                    phrase_ms = 0.0
+                    return True
+
                 while time.monotonic() - t0 < secs:
                     if self.abort:
                         break               # /stop, or a listen that needs the microphone
@@ -1811,27 +1848,19 @@ class Ears:
                                 ear_stat.reset()    # the window starts over with her listening
                                 det = Detector()    # the phrase's own count of speech and quiet
                                 phrase_ms = 0.0
+                    if ear_oww is not None and not woken and words:
+                        # the trained ear missed the name, but the small one
+                        # heard both it and a note command: that one wish may
+                        # wake her (and nothing else, so the trained ear stays
+                        # the judge of every other phrase)
+                        tail, said = wake_at(words, spellings, 1)
+                        if tail is not None and note_command(tail):
+                            wake_from_vosk(words)
                     elif ear_oww is None and not woken and words:
                         # no trained ear (wake_ear: vosk, or auto without the
                         # model): the name from vosk's own words, the way the ears
                         # worked before the trained one arrived — not deaf, as before
-                        tail, said = wake_at(words, spellings, 1)
-                        if tail is not None:
-                            woken = True
-                            wake_t = time.monotonic()
-                            _last_wake[0] = wake_t
-                            heard_after = tail or ''
-                            judge_note(f'WAKE vosk ({words!r})')
-                            diag.event(arbitration='CANDIDATE', reason='vosk_name',
-                                       vosk_text=words, wake_candidate=True,
-                                       judge_called=False, final_wake=False,
-                                       **diag_base('LISTENING', voiced))
-                            lead = int(TUNE['wake_lead_ms'] * RATE * 2 / 1000.0)
-                            utt = Utterance()
-                            utt.lead = bytearray(ring[-lead:]) if lead else bytearray()
-                            utt.lead_max = max(utt.LEAD, len(utt.lead))
-                            det = Detector()
-                            phrase_ms = 0.0
+                        wake_from_vosk(words)
                     if woken:
                         # LISTENING: the phrase after the name gathers on the tape,
                         # its end comes from the same VAD endpointing as ever — and

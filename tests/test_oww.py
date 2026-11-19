@@ -183,6 +183,16 @@ assert 'stop_shout(words, spellings)' in wake_src, '«стоп» must cut throug
 assert 'transcribe_said' in wake_src, 'the phrase after the name must go to STT'
 assert 'bytearray(ring[-lead:])' in wake_src, 'the phrase head must come off the ring'
 assert 'elif ear_oww is None' in wake_src, 'vosk fallback: wake_ear vosk must not be deaf'
+assert 'wake_from_vosk' in wake_src, 'the vosk wake lost its shared body'
+assert 'note_command(tail)' in wake_src, \
+    'the trained ear must let a note command through when it misses the name'
+# only a note command is let through: the trained ear stays the judge otherwise
+assert stt.note_command('последняя заметка')
+assert stt.note_command('последний заметка')
+assert stt.note_command('запиши заметку купить молоко')
+assert stt.note_command('find my last note')
+assert not stt.note_command('включи музыку')
+assert not stt.note_command('как дела')
 assert "if not woken or stop_shout(words, spellings)" in wake_src, \
     'already listening, «останови музыку» is a command, not a stop'
 # ---- быстрый путь STT: свежее чтение стоп-ухи идёт первым, умный ум запасной ----

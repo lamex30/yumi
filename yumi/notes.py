@@ -13,6 +13,7 @@ embedder never freezes the moth.
 """
 import json
 import math
+import re
 import sqlite3
 import struct
 import threading
@@ -71,6 +72,13 @@ _LAST_TRIGGERS = (
     'read my last note', 'read the last note', 'read the latest note',
     'my last note', 'the last note', 'latest note', 'last note',
 )
+# the ears bend the endings («последний заметка», «последние заметки») and may
+# keep her name at the head («юлии последняя заметка»): the stems still say it
+_LAST_RE = re.compile(
+    r'\bпоследн\w*\s+заметк\w*'
+    r'|\bсвеж\w*\s+заметк\w*'
+    r'|\b(?:last|latest)\s+notes?\b',
+    re.IGNORECASE)
 # a wish may come with a polite word before it («пожалуйста, запиши заметку…»):
 # only the verbs take part, so a sentence that merely mentions a «заметка» is
 # not turned into a note
@@ -325,6 +333,8 @@ def voice_intent(text, lang='ru'):
                     return {'action': action}
                 return {'action': action, 'text': body} if action == 'add' \
                     else {'action': action, 'query': body}
+    if _LAST_RE.search(raw):           # «последний заметка», «юлии последняя заметка»
+        return {'action': 'last'}
     # «запиши заметку …» said with a word before it («пожалуйста, запиши…»)
     for trigger in sorted(_MID_ADD_TRIGGERS, key=len, reverse=True):
         at = low.find(' ' + trigger)
