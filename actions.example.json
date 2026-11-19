@@ -1,5 +1,13 @@
 [
-  {"label": "Terminal", "label_ru": "Терминал", "icon": "gear", "command": "foot"},
+  {"label": "Terminal", "label_ru": "Терминал", "icon": "gear", "command": "foot",
+   "phrases": ["открой терминал", "запусти консоль", "open terminal", "launch terminal"],
+   "keywords": ["терминал", "консоль", "terminal"],
+   "speak": "Открываю терминал"},
+  {"label": "Search", "label_ru": "Поиск", "icon": "search",
+   "command": "xdg-open https://yandex.ru", "url": "https://yandex.ru/search/?text={query}",
+   "phrases": ["найди в интернете", "поищи в интернете", "поищи в сети", "search the web", "google"],
+   "keywords": ["погугли", "погуглить", "интернет", "internet"],
+   "speak": "Ищу {query}"},
   {"label": "Notes", "label_ru": "Заметки", "icon": "doc", "command": "gnome-text-editor"},
   {"label": "Play / pause", "label_ru": "Пауза", "icon": "play", "command": "playerctl play-pause"}
 ]

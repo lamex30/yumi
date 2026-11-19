@@ -43,10 +43,10 @@ def settle(b):
 assert all(len(row) == 7 for g in pixui.ICONS.values() for row in g) and all(len(g) == 7 for g in pixui.ICONS.values())
 
 b = brain()
-DEFAULT = ['recent', 'shelf', 'pipette', 'timer', 'sleep', 'settings']
+DEFAULT = ['recent', 'shelf', 'pipette', 'timer', 'clock', 'listen', 'joke', 'sleep', 'settings']
 assert ids(b) == DEFAULT
 b.settings['ring'] = ['settings', 'gone-button', 'shelf']     # a stale id is dropped, new ones come after
-assert ids(b) == ['settings', 'shelf', 'recent', 'pipette', 'timer', 'sleep']
+assert ids(b) == ['settings', 'shelf', 'recent', 'pipette', 'timer', 'clock', 'listen', 'joke', 'sleep']
 b.settings['ring'] = []
 
 # the switches; a sleeping Yumi keeps the way to wake her; settings and your own buttons do not switch off
@@ -58,7 +58,7 @@ b.settings['ring_off'] = ['settings', 'cmd:foot', 'sleep']
 b.custom = [{'label': 'f', 'label_ru': 'f', 'icon': 'star', 'command': 'foot'}]
 assert 'settings' in ids(b) and 'cmd:foot' in ids(b) and 'sleep' not in ids(b)
 b.set_sleep(True)
-assert 'sleep' in ids(b) and b.radial_items()[4][0] == 'wake'
+assert 'sleep' in ids(b) and b.radial_items()[7][0] == 'wake'
 b = brain()
 
 # settings opens the editor at once; a switched-off button stays in it, nothing closes it but Done
@@ -91,12 +91,12 @@ r = rect_of(b, 'ring_tile', 'recent')
 b.press_at(1, *center(r))
 assert b.ring_drag == 'recent'
 b.motion(*b.ring_slots[3])
-assert ids(b) == ['shelf', 'pipette', 'timer', 'recent', 'sleep', 'settings']
+assert ids(b) == ['shelf', 'pipette', 'timer', 'recent', 'clock', 'listen', 'joke', 'sleep', 'settings']
 b.scene()
-b.motion(*b.ring_slots[8])
+b.motion(*b.ring_slots[9])
 assert ids(b)[-1] == 'recent'
 b.requests.clear()
-b.release_at(1, *b.ring_slots[8])
+b.release_at(1, *b.ring_slots[9])
 assert b.ring_drag is None and ('save_settings',) in b.requests and b.ring_edit
 
 # a click on a built-in button does nothing, on yours it edits it, a jitter is still a click
@@ -189,7 +189,7 @@ b.release_at(1, x, y)
 assert not b.custom and 'cmd:foot' not in ids(b) and b.ring_edit
 
 # a full ring has no plus
-b.custom = [{'label': str(i), 'label_ru': str(i), 'icon': 'star', 'command': str(i)} for i in range(4)]
+b.custom = [{'label': str(i), 'label_ru': str(i), 'icon': 'star', 'command': str(i)} for i in range(config.RING_SLOTS - len(DEFAULT))]
 b.scene()
 assert len(b.ring_slots) == config.RING_SLOTS and not any(a == 'ring_add' for _r, a, _g in b.buttons)
 

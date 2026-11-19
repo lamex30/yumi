@@ -1,6 +1,6 @@
 #!/bin/sh
-# Yumi, a sleepy pixel-art moth girl for Wayland and X11 desktops.
-#   yumi [--toggle|--pipette|--home|--recent|--sleep|--monitor|--quit|--version|--help]
+# Yumi, a sleepy pixel-art moth girl for Wayland desktops.
+#   yumi [--toggle|--pipette|--home|--recent|--sleep|--monitor|--web|--quit|--ask "фраза"|--version|--help]
 # Flags go straight to the running Yumi over D-Bus (fast) and start her if she is not running.
 # She runs on her own (closing the terminal does not close her); --foreground keeps her attached.
 DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"   # @DIR@ (make install puts the real path here)
@@ -9,10 +9,20 @@ OBJ=/io/github/lamex30/Yumi
 unset WAYLAND_SOCKET
 
 case "$1" in
-    --toggle|--pipette|--home|--recent|--sleep|--monitor|--quit)
+    --toggle|--pipette|--home|--recent|--sleep|--monitor|--web|--quit)
         gdbus call --session --dest "$APP" --object-path "$OBJ" \
             --method org.gtk.Actions.Activate "${1#--}" "[]" "{}" >/dev/null 2>&1 && exit 0
         [ "$1" = --quit ] && exit 0
+        ;;
+    --ask)
+        if [ -z "${2-}" ]; then
+            echo "yumi: --ask needs a phrase: yumi --ask \"какая погода\"" >&2
+            exit 2
+        fi
+        # one phrase as a GVariant string: a quote in the words must be escaped for gdbus
+        PHRASE=$(printf '%s' "$2" | sed "s/'/\\\\'/g")
+        gdbus call --session --dest "$APP" --object-path "$OBJ" \
+            --method org.gtk.Actions.Activate ask "['$PHRASE']" "{}" >/dev/null 2>&1 && exit 0
         ;;
     --version|-v)
         exec python3 -c "import sys; sys.path.insert(0, '$DIR'); import yumi; print('yumi', yumi.__version__)"
@@ -40,14 +50,13 @@ if [ -z "$LIB" ]; then
         [ -e "$f" ] && LIB="$f" && break
     done
 fi
-if [ -z "$LIB" ] && [ -n "$WAYLAND_DISPLAY" ]; then
+if [ -z "$LIB" ]; then
     echo "yumi: gtk4-layer-shell is not installed (see the README for your distro)." >&2
     exit 1
 fi
 
 # Only python gets it: other tools may be built against an older glibc than the library (Nix).
-# X11 sessions do without it.
-PRELOAD="$LIB${LD_PRELOAD:+${LIB:+:}$LD_PRELOAD}"
+PRELOAD="$LIB${LD_PRELOAD:+:$LD_PRELOAD}"
 if [ -n "$FG" ]; then
     exec env LD_PRELOAD="$PRELOAD" python3 "$DIR/moth_girl.py" "$@"
 fi

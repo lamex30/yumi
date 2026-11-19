@@ -1,7 +1,8 @@
 """Yumi's behaviour as a pure state machine (no GTK): input events in, a list of draw ops out.
 
-The GTK window (moth_girl.py) forwards pointer/drag events and the clock, draws the ops with
-cairo and carries out `requests` (open a file, run a job, toggle Do Not Disturb...). The same
+The GTK window (yumi/ui/overlay.py and yumi/ui/app.py) forwards pointer/drag events and the
+clock, draws the ops with cairo and carries out `requests` (open a file, run a job, toggle
+Do Not Disturb...). The same
 ops can be drawn with PIL, which is how this file is tested without a desktop.
 
 Screen coordinates are pixels of the fullscreen overlay. Sprites are drawn at integer `scale`.
@@ -9,9 +10,15 @@ Her position is her "foot": bottom-centre of the current frame image.
 """
 import math
 import random
+import time
+import urllib.parse
 from pathlib import Path
 
 from . import jobs as J
+from . import addressing
+from . import chat
+from . import nlu
+from . import notes
 from .config import RING_SLOTS, UI, tr
 from .extras import Extras
 from .sprites import ARCHIVES, DOCS, KIND_COLOR, SWATCHES, swatch_hex
@@ -258,7 +265,14 @@ class Brain(Extras):
         self.last_ptr = None
         self.drops = []
         self.next_chatter_check = now + 30
+        self.last_hour = int(time.localtime().tm_hour)  # the hour she last chimed, so she does not repeat
         self.moth = Moth(self)
+        self.chat_history = []          # what you asked and what she answered, the last few turns
+        self.listening = False          # the mic button was pressed: she is waiting for a phrase
+        self.thinking = False           # the question is away at Ollama
+        self.note_pending = False       # she asked «what should I write down?»: the next phrase is a note
+        self.chat_models = []           # installed Ollama models, for the settings row
+        self.mics = []                  # microphones her ears can hear, for the settings row
         self.radial = False             # the ring of round buttons around her
         self.radial_t = Spring(0)
         self.timer = None               # see timer_* below
@@ -373,12 +387,19 @@ class Brain(Extras):
         return self.mode != 'docked' or self.out or self.yoff.x < self.hidden_off() - 2
 
     # ------------------------------------------------------------------ speech & faces
-    def say(self, event, **fmt):
-        line = self.speech.say(event, out=self.visible(), asleep=self.sleeping, **fmt)
+    def say(self, event, force=False, **fmt):
+        line = self.speech.say(event, out=self.visible(), asleep=self.sleeping, force=force, **fmt)
         if not line:
             return False
-        text, face = line
-        text = ' '.join(text.split())
+        return self.say_text(line[0], face=line[1])
+
+    def say_text(self, text, face=None, voice=True, spoken=None):
+        """her own words (a chat reply too) in the usual bubble, typed out and voiced;
+        `spoken` is what the real voice says when the written words are too compact
+        (the weather signs, «+5°C», that a voice reads poorly)"""
+        text = ' '.join(str(text).split())
+        if not text:
+            return False
         times, typed = reveal_times(text)
         dur = typed + 2.2 + 0.04 * len(text)
         self.bubble_n += 1
@@ -386,10 +407,11 @@ class Brain(Extras):
                        'id': self.bubble_n}
         self.talk_until = self.now + typed
         vol = self.settings.get('voice_vol', 50)
-        if vol and not self.sleeping:
+        if voice and vol and not self.sleeping:
             blips = [t for t, ch in zip(times, text) if ch.isalnum()]
             self.requests.append(('voice', blips, self.bubble_n,
-                                  1 if text.rstrip().endswith('?') else 0, vol / 100.0))
+                                  1 if text.rstrip().endswith('?') else 0, vol / 100.0,
+                                  spoken if spoken is not None else text))
         if face:
             self.set_face(face, dur)
         if self.mode == 'docked' and not self.out and not self.sleeping:
@@ -480,7 +502,24 @@ class Brain(Extras):
         """settings that step through a short list when clicked"""
         return {'ui_lang': ['en', 'ru'], 'speech_lang': ['en', 'ru'],
                 'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names,
-                'voice_vol': [0, 25, 50, 75, 100]}
+                'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts'],
+                'tts_ru_speaker': ['kseniya', 'baya', 'xenia', 'aidar', 'eugene'],
+                'tts_en_speaker': ['en_0', 'en_10', 'en_21', 'en_50', 'en_99', 'en_117'],
+                'tts_ru_model': ['v5_6_ru', 'v4_ru'],
+                'tts_pitch': [1.0, 1.12, 1.25, 1.4],
+                'stt_engine': ['whisper', 'nemotron'],
+                'stt_size': ['small', 'big'],
+                'stt_mic': [None] + [m['name'] for m in self.mics],
+                'stt_echo': [True, False],
+                'wake_sensitivity': ['normal', 'strict'],
+                'wake_confirm': [True, False],
+                'wake_model_size': ['small', 'big'],
+                'wake_ear': ['auto', 'oww', 'vosk'],
+                'wake_judge_log': [True, False],
+                'chat_provider': ['ollama', 'polza.ai'],
+                'chat_model': self.chat_models or [self.settings.get('chat_model')],
+                'chat_history_n': [2, 4, 6, 10, 16, 24],
+                'music_source': ['auto', 'jellyfin', 'local']}
 
     outfit_names = []                 # outfit folders found in sprites/outfits (set by the app)
 
@@ -492,8 +531,44 @@ class Brain(Extras):
             return t('off') if not val else f'{val} {t("min")}'
         if arg == 'voice_vol':
             return t('off') if not val else f'{val}%'
+        if arg == 'voice_kind':
+            return t('v_' + str(val)) if f'v_{val}' in UI['en'] else str(val)
+        if arg == 'tts_pitch':
+            return f'{float(val):.2f}×' if val is not None else t('n_a')
+        if arg in ('tts_ru_speaker', 'tts_en_speaker', 'tts_ru_model'):
+            return str(val)
+        if arg == 'stt_size':
+            return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
+        if arg == 'stt_engine':
+            return t('eng_' + str(val)) if f'eng_{val}' in UI['en'] else str(val)
+        if arg == 'stt_echo':
+            return t('on') if val else t('off')
+        if arg == 'wake_sensitivity':
+            return t('wake_sensitivity_' + str(val)) if f'wake_sensitivity_{val}' in UI['en'] else str(val)
+        if arg == 'wake_confirm':
+            return t('on') if val else t('off')
+        if arg == 'wake_model_size':
+            return t('w_' + str(val)) if f'w_{val}' in UI['en'] else str(val)
+        if arg == 'wake_ear':
+            return t('we_' + str(val)) if f'we_{val}' in UI['en'] else str(val)
+        if arg == 'wake_judge_log':
+            return t('on') if val else t('off')
+        if arg == 'music_source':
+            return t('m_' + str(val)) if f'm_{val}' in UI['en'] else str(val)
+        if arg == 'stt_mic':
+            if not val:
+                return t('mic_auto')
+            for m in self.mics:
+                if m.get('name') == val:
+                    return m.get('label') or val
+            return str(val)
         if arg == 'outfit':
             return t('o_' + str(val)) if f'o_{val}' in UI['en'] else str(val).title()
+        if arg == 'chat_model':
+            name = str(val or '').split('/')[-1].split(':')[0]   # the short, human part
+            return name or t('n_a')
+        if arg == 'chat_provider':
+            return 'Ollama' if str(val) == 'ollama' else 'Polza.ai'
         return str(val)
 
     def toggle_pin(self):
@@ -813,7 +888,10 @@ class Brain(Extras):
         elif kind == 'settings':
             # the settings come in a few small groups
             rows = [('menu', 'set_her', t('cat_her')), ('menu', 'set_sound', t('cat_sound')),
-                    ('menu', 'set_look', t('cat_look')), ('menu', 'set_lang', t('cat_lang')),
+                    ('menu', 'set_music', t('cat_music')),
+                    ('menu', 'set_ears', t('cat_ears')), ('menu', 'set_look', t('cat_look')),
+                    ('menu', 'set_lang', t('cat_lang')), ('menu', 'set_chat', t('cat_chat')),
+                    ('menu', 'set_web', t('cat_web')),
                     ('ring_edit', None, t('cat_ring')),
                     ('tour_again', None, t('tour_again')), ('restart', None, t('restart'))]
             home_x = self.clamp_x(self.W - EDGE_MARGIN * self.S - self.meta.bw * self.S / 2)
@@ -823,14 +901,45 @@ class Brain(Extras):
             rows.append(('menu', 'main', t('back')))
         elif kind == 'set_her':
             rows = [('set', 'pinned', t('pinned')), ('set', 'reactions', t('reactions')),
-                    ('set', 'chatter', t('chatter')), ('set', 'idle_nap', t('idle_nap')),
-                    ('set', 'breaks', t('breaks')), ('menu', 'settings', t('back'))]
+                    ('set', 'chatter', t('chatter')), ('set', 'hourly_chimes', t('hourly_chimes')),
+                    ('set', 'idle_nap', t('idle_nap')), ('set', 'breaks', t('breaks')),
+                    ('menu', 'settings', t('back'))]
         elif kind == 'set_sound':
             s = self.settings
-            rows = [('set', 'voice_vol', t('voice')), ('sound_pick', None, t('timer_sound'))]
+            rows = [('set', 'voice_kind', t('voice_kind')), ('set', 'voice_vol', t('voice'))]
+            if (s.get('voice_kind') or 'blips') == 'tts':
+                rows += [('set', 'tts_ru_speaker', t('tts_ru_speaker')),
+                         ('set', 'tts_en_speaker', t('tts_en_speaker')),
+                         ('set', 'tts_pitch', t('tts_pitch')),
+                         ('set', 'tts_ru_model', t('tts_ru_model'))]
+            rows.append(('sound_pick', None, t('timer_sound')))
             if s.get('timer_sound'):
                 rows.append(('sound_reset', None, t('sound_reset')))
             rows += [('sound_test', None, t('sound_test')), ('menu', 'settings', t('back'))]
+        elif kind == 'set_music':
+            # the addresses and passwords live in ~/.config/yumi/settings.json
+            # (music_jellyfin, music_jellyfin_user, music_jellyfin_password,
+            # music_jellyfin_key, music_dirs, music_server) — like weather_city
+            rows = [('set', 'music_source', t('music_source')),
+                    ('set', 'music_skill', t('music_skill')),
+                    ('menu', 'settings', t('back'))]
+        elif kind == 'set_ears':
+            # the mic list is fetched once: «Find the microphone» looks again after it changed
+            if not self.mics and 'stt_mic' not in self.unavailable:
+                self.requests.append(('mics',))
+            rows = [('set', 'wake_ears', t('wake_ears')), ('set', 'name_duck', t('name_duck')),
+                    ('set', 'stt_engine', t('stt_engine'))]
+            if (self.settings.get('stt_engine') or 'whisper') == 'whisper':
+                # the whisper ear's size: with the nemotron ear named, this row does nothing
+                rows.append(('set', 'stt_size', t('stt_size')))
+            rows += [('set', 'stt_mic', t('stt_mic')), ('set', 'stt_echo', t('stt_echo')),
+                    ('set', 'tap_ears', t('tap_ears')), ('set', 'wake_sensitivity', t('wake_sensitivity')),
+                    ('set', 'wake_confirm', t('wake_confirm')), ('set', 'wake_ear', t('wake_ear')),
+                    ('set', 'wake_model_size', t('wake_model_size')),
+                    ('set', 'wake_judge_log', t('wake_judge_log'))]
+            if self.mics:
+                rows.append(('mic_refresh', None, t('mic_refresh')))
+            rows.append(('menu', 'settings', t('back')))
         elif kind == 'set_look':
             s = self.settings
             rows = [('set', 'recolor', t('follow'))]
@@ -843,6 +952,24 @@ class Brain(Extras):
         elif kind == 'set_lang':
             rows = [('set', 'ui_lang', t('ui_lang')), ('set', 'speech_lang', t('speech_lang')),
                     ('menu', 'settings', t('back'))]
+        elif kind == 'set_chat':
+            if not self.chat_models and 'chat_model' not in self.unavailable:
+                self.requests.append(('chat_models',))
+            rows = [('set', 'chat_provider', t('chat_provider')), ('set', 'chat_model', t('chat_model')),
+                    ('set', 'sassy', t('sassy')),
+                    ('set', 'chat_think', t('chat_think')), ('set', 'chat_history_n', t('chat_history_n')),
+                    ('set', 'chat_memory', t('chat_memory')), ('set', 'nlu', t('nlu')),
+                    ('set', 'intents', t('intents'))]
+            if self.chat_models:        # the list may have grown stale: a way to look again
+                rows.append(('chat_refresh', None, t('chat_refresh')))
+            rows.append(('menu', 'settings', t('back')))
+        elif kind == 'set_web':
+            rows = [('set', 'web_panel', t('web_panel'))]
+            if self.settings.get('web_panel'):
+                rows.append(('web_open', None, t('web_open')))
+                rows.append(('web_copy', None, t('web_copy')))
+                rows.append(('web_rotate', None, t('web_rotate')))
+            rows.append(('menu', 'settings', t('back')))
         elif kind == 'files':
             paths = data['paths']
             kinds = {J.kind_of(p) for p in paths}
@@ -905,6 +1032,20 @@ class Brain(Extras):
             self.menu = None
             self.close_radial()
             self.start_pipette()
+        elif action == 'clock':
+            self.close_radial()
+            self.menu = None
+            if self.visible() and not self.sleeping and not self.bubble:
+                self.hourly()
+        elif action == 'joke':
+            self.close_radial()
+            self.menu = None
+            if self.visible() and not self.sleeping and not self.bubble and not self.thinking:
+                lang = self.settings.get('speech_lang', 'en')
+                self.thinking = True
+                self.requests.append(('joke_ask',
+                                      {'lang': lang,
+                                       'text': 'анекдот' if str(lang) == 'ru' else 'a joke'}))
         elif action == 'timer':
             self.close_radial()
             self.timer_new()
@@ -922,6 +1063,19 @@ class Brain(Extras):
         elif action == 'chip':
             self.requests.append(('copy', arg))
             self.say('copied', hex=arg)
+        elif action == 'listen':
+            self.menu = None
+            self.close_radial()
+            if self.listening:          # one more click: she stops waiting for the phrase
+                self.listening = False
+                self.requests.append(('listen_stop',))
+            elif self.say('listening'):
+                self.listening = True
+                self.requests.append(('listen', 15))
+        elif action == 'music_control':
+            self.music_control(arg)
+            self.menu = None
+            self.close_radial()
         elif action == 'sleep':
             self.menu = None
             self.close_radial()
@@ -951,10 +1105,26 @@ class Brain(Extras):
                 if arg == 'pinned' and s[arg]:
                     self.pop(True)
             self.requests.append(('save_settings',))
+            if arg == 'sassy':
+                self.say('sassy_on' if s[arg] else 'sassy_off')
+                if not s[arg]:
+                    # the mode is off: its talks and jokes leave the diary together,
+                    # and the mind stops carrying the brat's last turns
+                    self.chat_history = []
+                    self.requests.append(('memory_clear_sassy',))
             if arg == 'recolor':
                 self.requests.append(('recolor',))
-            if arg == 'voice_vol' and s[arg]:
+            if arg == 'wake_ears':
+                self.requests.append(('wake_set', s[arg]))
+            if arg == 'tap_ears':
+                self.requests.append(('tap_set', s[arg]))
+            if arg in ('voice_vol', 'voice_kind') and s[arg]:
                 self.say_sample()
+            if arg.startswith('tts_') and (s.get('voice_kind') or 'blips') == 'tts':
+                self.say_sample()
+            if arg == 'chat_provider':
+                self.chat_models = []       # refetch for the new provider
+                self.requests.append(('chat_models',))
             self.open_menu(self.menu['kind'] if self.menu else 'settings', data)
         elif action == 'monitor':
             self.requests.append(('monitor_next',))
@@ -967,6 +1137,18 @@ class Brain(Extras):
             self.open_menu('set_sound', data)
         elif action == 'sound_test':
             self.requests.append(('sound', 'timer'))
+        elif action == 'chat_refresh':
+            self.requests.append(('chat_models',))
+        elif action == 'web_open':
+            self.menu = None
+            self.requests.append(('web_open',))
+        elif action == 'web_copy':
+            self.requests.append(('web_copy',))
+        elif action == 'web_rotate':
+            self.requests.append(('web_rotate',))
+        elif action == 'mic_refresh':
+            self.unavailable.discard('stt_mic')     # a new look, whatever the last one found
+            self.requests.append(('mics',))
         elif action == 'hue':
             self.settings['hue'] = arg
             self.requests.append(('save_settings',))
@@ -1026,6 +1208,427 @@ class Brain(Extras):
         self.say('pipette_start')
         self.requests.append(('pipette',))
 
+    # ------------------------------------------------------------------ her ears and her chat
+    def heard(self, text, alt=None):
+        """the microphone gave its best: text is the phrase, '' for silence, None for no
+        ears; alt is what vosk read while whisper read the tape — two ears, one phrase"""
+        if not self.listening:
+            return
+        self.listening = False
+        self.heard_text(text, wake=True, alt=alt)
+
+    def wake_form(self):
+        """her name passed by («юми»): the moth that marks where she hides becomes
+        the girl — asleep she rises from the blanket, hidden she comes out of the
+        edge, right now: the transformation is the first thing the name does"""
+        if self.sleeping:
+            nap = self.nap
+            self.nap = False                # she was woken: the stale-DND guard
+                                             # must not swallow it (moth_girl:768)
+            self.set_sleep(False, nap=nap)  # yoff springs her up: the moth is the girl
+        elif self.mode == 'docked' and not self.out:
+            self.pop(True)                  # the moth by the edge: she comes out
+
+    def wake_up(self, text, alt=None, fallback=False):
+        """her name was heard («юми»): text is what was said after it, '' when it was said alone;
+        alt is what vosk read while whisper read the tape — two ears, one phrase;
+        fallback says the name came from vosk rather than the trained ear,
+        so a phrase that is not meant for her must stay out of the mind"""
+        if self.listening:
+            return                          # the mic is lent to a click-listen: not her name
+        if self.thinking:
+            return                          # an answer is in flight: the word is spent
+        self.wake_form()                    # the moth becomes the girl: at once, the phrase waits
+        if text:
+            self.heard_text(text, wake=True, alt=alt, fallback=fallback)   # the question is whole
+            return
+        if self.say('woke_ask'):            # the name alone: she asks right away what you wanted
+            self.listening = True
+            self.requests.append(('listen', 15))
+
+    def music_send(self, music_cmd, lang='en'):
+        """the music wish leaves this thread: the libraries' pair goes to the
+        search away from her main thread (a search walks the network and her
+        folders), the plain words to her own player at once"""
+        if isinstance(music_cmd, tuple):   # the libraries: a song to find
+            kind, query = music_cmd
+            _mind_log(f'music {kind} {query!r}')
+            self.thinking = True
+            self.requests.append(('music_search',
+                                  {'kind': kind, 'query': query,
+                                   'lang': lang}))
+        else:
+            _mind_log(f'music {music_cmd}')
+            self.music_control(music_cmd)
+
+    def heard_text(self, text, wake=False, alt=None, fallback=False):
+        """into her mind, whatever the ears' way was; wake is True when the phrase
+        came right after her name («юми ...») or after she asked what you wanted;
+        alt is the other reading (vosk's) when the first one was whisper's;
+        fallback marks a phrase the trained ear did not hear the name of — such a
+        text is only answered when it is clearly meant for her (yumi/addressing.py)"""
+        if text is None:                # the ears are not set up (tools/stt_setup.sh)
+            self.note_pending = False
+            self.say('ears_fail')
+            return
+        text = ' '.join(str(text or '').split())
+        alt = ' '.join(str(alt or '').split()) if alt else ''
+        # the ears sometimes keep her name in the phrase («Юми, время!», «юмию»
+        # for «юми»): a first word that is her name goes, the rest is the question
+        name = ' '.join(str(self.settings.get('wake_word') or 'юми').split()).lower()
+        text, alt = drop_name(text, name), drop_name(alt, name)
+        _mind_log(f'heard {text!r} (vosk: {alt!r}, wake: {wake}, fallback: {fallback})')
+        if not text:
+            self.note_pending = False
+            self.say('heard_nothing')
+            return
+        if stop_command(text):             # «стоп» overrides everything, even her own voice
+            self.stop_all()
+            return
+        if self.note_pending:              # she just asked what to write down
+            self.note_pending = False
+            if self.settings.get('notes_voice', True):
+                self.thinking = True
+                self.requests.append(('note_voice', {'action': 'add', 'text': text}))
+                return
+        lang = self.settings.get('speech_lang', 'en')
+        if not fallback:
+            self.say_text(text, voice=False)   # back to you, quietly: you just said it
+        # Music first: «включи музыку» is her own library, «пауза» quiets what
+        # plays — the built-in skill owns the sayings before any custom button,
+        # whose «playerctl play-pause» would only toggle a stranger's player
+        # (and that is a lie in a quiet room: nothing to pause, nothing to resume)
+        if self.settings.get('music_skill', True):
+            music_cmd = music_control_text(text, lang)
+            if not music_cmd and alt and alt != text:
+                music_cmd = music_control_text(alt, lang)   # the other ear's reading
+            if not music_cmd and wake:      # only the number made it through the ears:
+                n = bare_volume(text) or (bare_volume(alt) if alt else None)
+                music_cmd = f'volume {n}' if n else None
+            if music_cmd:
+                self.music_send(music_cmd, lang)
+                return
+        if self.voice_intent(text, alt):   # the user's own commands, no mind needed
+            return
+        if self.settings.get('music_skill', True):
+            # neither a music word in the phrase nor a custom command on it:
+            # «включи рамштайн» — a bare name beside her verb, she looks for it
+            # in the library. A phrase the buttons claim never comes here
+            # («включи свет» is theirs), so a guess is free of their cares
+            pair = music_control_text(text, lang, guess=True)
+            if not pair and alt and alt != text:
+                pair = music_control_text(alt, lang, guess=True)
+            if pair:
+                self.music_send(pair, lang)
+                return
+        if self.settings.get('notes_voice', True):
+            wish = notes.voice_intent(text)
+            if not wish and alt and alt != text:
+                wish = notes.voice_intent(alt)
+            if wish:
+                if wish.get('action') == 'add' and not wish.get('text'):
+                    self.note_pending = True
+                    self.say('note_what')
+                    self.listening = True
+                    self.requests.append(('listen', 15))
+                    return
+                self.thinking = True
+                self.requests.append(('note_voice', wish))
+                return
+        if chat.time_question(text):       # the clock she reads herself, no mind needed
+            self.say('chat_time', time=chat.the_time(lang))
+            return
+        where = chat.weather_question(text)
+        if where is not None:              # the weather is worth one little peek outside
+            if not where:                  # no place named: her city from the settings,
+                where = str(self.settings.get('weather_city') or '').strip()   # or her own window
+            self.thinking = True
+            self.requests.append(('weather_ask',
+                                  {'where': where, 'when': chat.weather_when(text)}))
+            return
+        if chat.joke_question(text):       # a joke: her mind makes one up fresh, not from the chat
+            self.thinking = True
+            self.requests.append(('joke_ask', {'lang': lang, 'text': text}))
+            return
+        if chat.params_question(text):     # «юми, твои параметры»: she names herself
+            self.say_text(self.params_report(lang))
+            return
+        if fallback:
+            # the name came from the small ear: a command above already ran, and a
+            # phrase that is not addressed to her must not wake the mind for nothing
+            kind = addressing.route(text, addressing.hints_from(self.custom))
+            if kind == 'ignore' and alt and alt != text:
+                kind = addressing.route(alt, addressing.hints_from(self.custom))
+            if kind == 'ignore':
+                _mind_log('fallback: not addressed, silent')
+                return
+            self.say_text(text, voice=False)   # it is for her: show it, then answer
+        _mind_log('chat')
+        # Fall through to normal text processing if music skill is disabled
+        self.chat_history.append({'role': 'user', 'content': text})
+        n = max(2, int(self.settings.get('chat_history_n', 10)))
+        del self.chat_history[:-n]     # the recent turn goes along (Settings → Her mind);
+                                       # the older lines come back through the diary,
+                                       # only those about the same thing (yumi/memory.py)
+        self.thinking = True
+        self.requests.append(('chat_ask', list(self.chat_history)))
+
+    def params_report(self, lang='en'):
+        """what she is made of right now, in one breath: her ears, her name ear,
+        her voice and her mind — the answer to «юми, твои параметры»; speech words,
+        not menu words (a «45 МБ» label reads badly, so sizes live in words here)"""
+        s = self.settings
+        ru = str(lang) == 'ru'
+        model = str(s.get('chat_model') or (chat.POLZA_MODEL if s.get('chat_provider') == 'polza.ai'
+                                            else chat.DEFAULT_MODEL))
+        intents = s.get('intents', True) and s.get('nlu', True)
+        if ru:
+            ear = 'точная' if s.get('stt_size') == 'big' else 'лёгкая'
+            reader = ('немотрон 0.6b' if s.get('stt_engine') == 'nemotron'
+                      else 'whisper ' + ear)
+            wsize = 'точная' if s.get('wake_model_size') == 'big' else 'лёгкая'
+            mic = ('микрофон ' + (s.get('stt_mic') or 'авто')) if s.get('stt_mic') else 'микрофон авто'
+            wake = ('Имя «Юми» слушаю' if s.get('wake_ears', True) else 'имя «Юми» не слушаю')
+            judge = ('пробуждения перепроверяю whisper-ом, модель ' + wsize
+                     if s.get('wake_confirm', True) else 'пробуждения не перепроверяю')
+            mind = ('мозги: полза-точка-ай, модель ' + model if s.get('chat_provider') == 'polza.ai'
+                    else 'мозги: локальный оллама, модель ' + model)
+            voice = 'говорю своим голосом' if s.get('voice_kind') != 'blips' else 'говорю звуками'
+            return (f'Мои ушки: {reader} читает фразы, vosk {wsize} слушает имя, '
+                    f'{mic}. {wake}, {judge}. '
+                    f'{mind}. Команды по переформулировкам '
+                    f'{"понимаю" if intents else "выключены"}. {voice}.')
+        ear = 'sharp' if s.get('stt_size') == 'big' else 'lite'
+        reader = ('nemotron 0.6b' if s.get('stt_engine') == 'nemotron' else 'whisper ' + ear)
+        wsize = 'sharp' if s.get('wake_model_size') == 'big' else 'lite'
+        mic = 'mic auto' if not s.get('stt_mic') else 'mic ' + (s.get('stt_mic') or '')
+        wake = ('I listen for the name Yumi' if s.get('wake_ears', True) else 'I do not listen for my name')
+        judge = ('wakes are double-checked with whisper, the ' + wsize + ' model'
+                 if s.get('wake_confirm', True) else 'wakes are not double-checked')
+        mind = ('mind: polza.ai, model ' + model if s.get('chat_provider') == 'polza.ai'
+                else 'mind: local ollama, model ' + model)
+        voice = 'I speak with my voice' if s.get('voice_kind') != 'blips' else 'I speak in sounds'
+        return (f'My ears: {reader} reads the phrases, vosk {wsize} listens for the name, '
+                f'{mic}. {wake}, {judge}. '
+                f'{mind}. Rephrased voice commands '
+                f'{"are on" if intents else "are off"}. {voice}.')
+
+    def voice_intent(self, text, alt=''):
+        """the user's own voice commands: the «phrases» and «keywords» written
+        into actions.json (see nlu.py), matched on the words alone, no mind
+        needed — a button's command runs (or its url opens in the browser, the
+        {query} filled with the words said beside the trigger) and, when
+        «speak» is written, she says so; True when one fired. `alt` is the
+        other ear's reading of the phrase"""
+        if not self.settings.get('nlu', True):
+            return False
+        self.actions_check()            # actions.json edited by hand: no restart needed
+        if not self.custom:
+            return False
+        hit = nlu.match(text, self.custom,
+                        use_intents=self.settings.get('intents', True))
+        if not hit and alt and alt != text:
+            hit = nlu.match(alt, self.custom,
+                            use_intents=self.settings.get('intents', True))
+        if not hit:
+            return False
+        action, score, slots = hit
+        _mind_log(f'intent {action.get("url") or action["command"]!r} (score {score:.2f})')
+        self.set_face('happy', 1.5)
+        speak = str(action.get('speak') or '')
+        query = slots.get('query') or ''
+        if '{query}' in speak:
+            speak = speak.replace('{query}', query)
+        if action.get('url'):
+            url = str(action['url']).replace('{query}', urllib.parse.quote(query, safe=''))
+            self.requests.append(('url', url))
+        else:
+            self.requests.append(('run', action['command']))
+        if speak:
+            self.say_text(speak)
+        return True
+
+    def said_now_playing(self, playing):
+        """the player answered the «кто играет» question: she names the artist and
+        the track (playing is (artist, title), or None when the room is quiet);
+        what the ears hear matches what the bubble shows"""
+        self.thinking = False
+        if not playing:
+            self.say('music_who_none')
+            return
+        artist, title = playing
+        if artist and title:
+            self.say('music_who', artist=artist, title=title)
+        elif title:
+            self.say('music_who_title', title=title)
+        else:
+            self.say('music_who_artist', artist=artist)
+
+    def said_music_found(self, report):
+        """the library answered the search: she names what she found and plays,
+        or misses the name kindly (report is the dict play_query came back with)
+        """
+        self.thinking = False
+        if not report.get('ok'):
+            self.say('music_no_way')
+            return
+        track = report.get('track') or ('', '')
+        artist, title = track
+        if report.get('kind') in ('artist', 'album') and report.get('count', 0) > 1:
+            self.say('music_found_many', artist=artist)
+            return
+        if artist and title:
+            self.say('music_found', artist=artist, title=title)
+        elif title:
+            self.say('music_found_title', title=title)
+        elif artist:
+            self.say('music_found_artist', artist=artist)
+        elif not report.get('query'):
+            self.say('music_play')
+            return
+        else:
+            self.say('music_not_found', query=report.get('query') or '')
+            return
+        if report.get('source') == 'local' \
+                and str(self.settings.get('music_jellyfin') or '').strip():
+            self.say('music_local')
+
+    def note_saved(self, report):
+        """her ears or the panel wrote a note: she names what went into the book"""
+        self.thinking = False
+        self.set_face('happy', 1.5)
+        self.say('note_saved', title=str((report or {}).get('title') or ''))
+
+    def note_found(self, payload):
+        """the notes answered a spoken search: the closest one is read back,
+        with how many more there are; an empty book says so gently"""
+        self.thinking = False
+        action = str((payload or {}).get('action') or 'search')
+        items = list((payload or {}).get('items') or [])
+        if action == 'last':
+            if not items:
+                self.say('notes_empty')
+                return
+            first = items[0]
+            title = str(first.get('title') or '').strip()
+            text = ' '.join(str(first.get('summary') or first.get('text') or '').split())
+            if not text:
+                self.say('notes_empty')
+                return
+            if len(text) > 360:
+                text = text[:357].rstrip() + '…'
+            raw = ' '.join(str(first.get('text') or '').split())
+            if title and not raw.startswith(title):
+                self.say('note_last', title=title, text=text)
+            else:
+                self.say('note_last_plain', text=text)
+            return
+        if action == 'list':
+            if not items:
+                self.say('notes_empty')
+            else:
+                self.say('note_list', n=len(items),
+                         title=str(items[0].get('title') or ''))
+            return
+        if not items:
+            self.say('note_not_found')
+            return
+        first = items[0]
+        text = ' '.join(str(first.get('text') or '').split())
+        if len(text) > 180:
+            text = text[:177].rstrip() + '…'
+        if len(items) == 1:
+            self.say('note_found_one', title=str(first.get('title') or ''), text=text)
+        else:
+            self.say('note_found_many', n=len(items),
+                     title=str(first.get('title') or ''), text=text)
+
+    def note_failed(self, reason=''):
+        """the note could not be written (the book or the disk let her down)"""
+        self.thinking = False
+        self.say('job_fail')
+
+    def said_weather(self, report):
+        """the clouds answered through wttr.in / Open-Meteo (report is '' when the net was away);
+        the bubble keeps «+5°C», the ears hear «плюс 5 градусов»"""
+        self.thinking = False
+        if report:
+            spoken = chat.weather_speak(report, self.settings.get('speech_lang', 'en'))
+            self.say_text(report, spoken=spoken)
+        else:
+            self.say('weather_fail')
+
+    def hourly(self):
+        """each hour: she says the time, with a funny line from her mind when it is reachable"""
+        lang = self.settings.get('speech_lang', 'en')
+        now = time.localtime()
+        t = time.strftime('%H:%M', now) if str(lang) == 'ru' else time.strftime('%I:%M %p', now).lstrip('0').lower()
+        hour = now.tm_hour
+        self.thinking = True
+        self.requests.append(('hourly_ask', {'hour': hour, 'lang': lang, 'time': t}))
+
+    def joked(self, reply, tired=False):
+        """the mind answered with a joke (reply is '' when it did not work out);
+        tired is the «Дерзкая 18+» brush-off after too many jokes in a row"""
+        self.thinking = False
+        reply = ' '.join(str(reply or '').split())
+        if reply:
+            self.say_text(reply)
+        elif tired:
+            self.say('joke_tired')
+        else:
+            self.say('joke_fail')
+
+    def replied(self, reply):
+        """Ollama answered (reply is '' when it did not work out)"""
+        self.thinking = False
+        reply = ' '.join(str(reply or '').split())
+        if not reply:
+            self.chat_history.pop()     # the question got no answer: do not confuse her later
+            self.say('chat_fail')
+            return
+        self.chat_history.append({'role': 'assistant', 'content': reply})
+        self.say_text(reply)
+
+    def hour_joked(self, payload):
+        """the mind answered with a joke for the hour; she speaks the time + the joke"""
+        self.thinking = False
+        lang = self.settings.get('speech_lang', 'en')
+        t = time.strftime('%H:%M', time.localtime()) if str(lang) == 'ru' else time.strftime('%I:%M %p', time.localtime()).lstrip('0').lower()
+        joke = ' '.join(str(payload.get('joke') or '').split())
+        if joke:
+            self.say_text('{time} — {joke}'.format(time=t, joke=joke))
+        else:
+            self.say('hourly', time=t)
+
+    def chat_models_loaded(self, names):
+        """the installed Ollama models, for the settings row; empty when Ollama is away"""
+        self.chat_models = [n for n in names or [] if n]
+        if self.chat_models:
+            self.unavailable.discard('chat_model')
+        else:
+            self.unavailable.add('chat_model')
+        if (self.menu or {}).get('kind') == 'set_chat':
+            self.open_menu('set_chat', self.menu.get('data'))
+
+    def mics_loaded(self, mics):
+        """the microphones her ears can hear, for the settings row; empty when there is none"""
+        self.mics = [m for m in mics or [] if isinstance(m, dict) and m.get('name')]
+        if self.mics:
+            self.unavailable.discard('stt_mic')
+        else:
+            self.unavailable.add('stt_mic')
+            if self.settings.get('stt_mic'):    # the chosen one is gone: back to auto
+                self.settings['stt_mic'] = None
+                self.requests.append(('save_settings',))
+        if (self.menu or {}).get('kind') == 'set_ears':
+            self.open_menu('set_ears', self.menu.get('data'))
+
+    def start_pipette(self):
+        self.pipette = True
+        self.say('pipette_start')
+        self.requests.append(('pipette',))
+
     def pipette_done(self, hexc):
         self.pipette = False
         if not hexc:
@@ -1038,6 +1641,52 @@ class Brain(Extras):
         self.requests.append(('copy', hexc))
         self.requests.append(('save',))
         self.say('pipette_done', hex=hexc)
+
+    def stop_all(self):
+        """«стоп»: everything she was busy with stops now — her line mid-word, her
+        waiting for a phrase, her thinking, the music and the timer's chime"""
+        self.bubble = None
+        self.talk_until = self.now
+        self.thinking = False
+        self.listening = False
+        self.note_pending = False
+        self.timer = None
+        self.kb_hover = False
+        self.requests.clear()              # nothing queued may keep running past the stop
+        self.requests.append(('stop_all',))
+        self.say('stop_all')
+
+    def music_control(self, cmd):
+        """Handle music and system-volume commands.
+
+        Args:
+            cmd: One of 'play', 'pause', 'play_pause', 'next', 'previous',
+                 'stop', 'who' (кто играет: she names the artist and the track),
+                 'volume_up', 'volume_down', 'volume N' (10..100)
+        """
+        if cmd == 'who':               # the player is asked away from her main thread
+            self.thinking = True
+            self.requests.append(('music_who',))
+            return
+        if cmd == 'play':              # «включи музыку»: the library that is awake —
+            self.thinking = True       # Jellyfin when home, her folders away from it
+            self.requests.append(('music_search', {'kind': 'play', 'query': ''}))
+            return
+
+        phrases = {'play_pause': 'music_toggle',
+                   'pause': 'music_pause', 'next': 'music_next',
+                   'previous': 'music_previous', 'stop': 'music_stop',
+                   'volume_up': 'volume_up', 'volume_down': 'volume_down'}
+        if cmd in phrases:
+            self.say(phrases[cmd])
+            self.requests.append(('music_control', cmd))
+        elif cmd.startswith('volume '):    # «громкость 50»: she names the level
+            try:
+                pct = int(cmd.split()[1])
+            except (ValueError, IndexError):
+                return
+            self.say('volume_set', pct=pct)
+            self.requests.append(('music_control', cmd))
 
     def dnd_motion(self, x, y):
         """an outside drag hovers: True when she would take it"""
@@ -1153,6 +1802,12 @@ class Brain(Extras):
             self.next_chatter_check = now + 30
             if self.visible() and not self.sleeping and not self.bubble:
                 self.say('chatter')
+        # the hour strikes: she speaks the time with a joke
+        hour = int(time.localtime().tm_hour)
+        if self.settings.get('hourly_chimes', True) and self.last_hour != hour:
+            self.last_hour = hour
+            if self.visible() and not self.sleeping and not self.bubble:
+                self.hourly()
         for k, target in self.pull.items():
             v = self.pull_v.get(k, 0.0)
             self.pull_v[k] = v + (target - v) * min(1.0, dt * 18)
@@ -1242,8 +1897,8 @@ class Brain(Extras):
                 head = 'oh'
             elif face in ('blink', 'sleeping', 'happy', 'wink'):
                 head = 'closed'
-            elif int(t / 9) % 5 == 4 and (t % 9) < 1.4:
-                head = 'yawn'
+            elif int(t / 17) % 3 == 2 and (t % 17) < 1.4:
+                head = 'yawn'              # a yawn once in a while, not every other breath
             if head:
                 ops.append(('spr', f'sit:head:{head}', 0, ix, iy, 1.0, 0.0, 0, 0))
         if self.pipette and pose in ('stand', 'hover'):
@@ -1386,7 +2041,7 @@ class Brain(Extras):
         if action == 'menu':
             return {'settings': 'gear', 'convert': 'convert', 'compress': 'compress',
                     'set_her': 'heart', 'set_sound': 'note', 'set_look': 'image',
-                    'set_lang': 'doc'}.get(arg, 'back')
+                    'set_ears': 'mic', 'set_lang': 'doc'}.get(arg, 'back')
         if action == 'job':
             return 'next'
         return self.ICON_FOR.get(action)
@@ -2077,3 +2732,277 @@ class Brain(Extras):
             if c['path'] and inside(c['rect'], x, y):
                 return c['path']
         return None
+
+
+# «стоп» is heard by two ears: the wake word wait (stt_daemon's own process) and the
+# click-listen (here, a different process). One shared stop_at, so both are as kind.
+from .stt_daemon import stop_at as stop_command
+
+
+MUSIC_WORDS = frozenset((
+    'музыка', 'музыку', 'музыки', 'музыке', 'музыкой', 'песня', 'песню', 'песни',
+    'трек', 'трека', 'треки', 'плейлист', 'плейлиста', 'рок', 'рока',
+    'music', 'songs', 'song', 'track', 'tracks', 'playlist', 'rock'))
+MUSIC_FILLERS = frozenset(('юми', 'yumi', 'а', 'и', 'ну', 'давай', 'пожалуйста',
+                           'please', 'the', 'a', 'an', 'my', 'some'))
+MUSIC_PLAY = frozenset((
+    'включи', 'включить', 'включай', 'включать', 'запусти', 'запустить',
+    'запускай', 'запускать', 'поставь', 'поставить', 'играй', 'играть',
+    'продолжай', 'продолжить', 'play', 'resume', 'start'))
+MUSIC_PAUSE = frozenset(('пауза', 'паузу', 'приостанови', 'приостановить', 'pause'))
+MUSIC_STOP_ANY = frozenset(('стоп', 'стопи', 'останови', 'остановить', 'stop'))
+MUSIC_STOP_MUSIC = frozenset(('выключи', 'выключить', 'выключать', 'выруби', 'выруб'))
+MUSIC_NEXT = ('переключи', 'переключить', 'next', 'skip')
+MUSIC_WHO_ASK = frozenset(('кто', 'что', 'какая', 'какой', 'чей',
+                           'what', "what's", 'whats', 'who', 'which'))
+MUSIC_WHO_PLAY = ('играет', 'играют', 'играла', 'играет', 'звучит', 'звучат',
+                  'поёт', 'поет', 'playing', 'plays')
+# «включи что-нибудь / любую / случайную»: a surprise, not a name
+MUSIC_ANY = frozenset(('что-нибудь', 'нибудь', 'какую-нибудь', 'какая-нибудь',
+                       'любую', 'любой', 'любая', 'любое', 'случайную', 'случайная',
+                       'случайный', 'случайное', 'рандом', 'сюрприз',
+                       'something', 'anything', 'whatever', 'random'))
+# «включи исполнителя ... / группу ...»: the whole singer, not one song
+MUSIC_ARTIST_W = ('исполнителя', 'исполнитель', 'исполнителя', 'артиста',
+                  'группу', 'группы', 'artist', 'band', 'singer')
+MUSIC_ALBUM_W = frozenset(('альбом', 'альбома', 'album'))
+VOLUME_UP = frozenset(('громче', 'повысь', 'повысить', 'louder', 'up'))
+VOLUME_DOWN = frozenset(('тише', 'тихо', 'quieter', 'softer', 'lower'))
+VOLUME_WORD = frozenset(('громкость', 'звук', 'volume', 'sound'))
+VOLUME_NUMBERS = {'десять': 10, 'двадцать': 20, 'тридцать': 30, 'сорок': 40,
+                  'пятьдесят': 50, 'шестьдесят': 60, 'семьдесят': 70,
+                  'восемьдесят': 80, 'девяносто': 90, 'сто': 100,
+                  'ten': 10, 'twenty': 20, 'thirty': 30, 'forty': 40,
+                  'fifty': 50, 'sixty': 60, 'seventy': 70, 'eighty': 80,
+                  'ninety': 90}
+VOLUME_ONES = {'один': 10, 'одна': 10, 'два': 20, 'две': 20, 'три': 30,
+               'четыре': 40, 'пять': 50, 'шесть': 60, 'семь': 70,
+               'восемь': 80, 'девять': 90, 'one': 10, 'two': 20, 'three': 30,
+               'four': 40, 'five': 50, 'six': 60, 'seven': 70, 'eight': 80,
+               'nine': 90}   # «громкость пять» means fifty: only the tens she obeys
+MUSIC_KNOWN = (MUSIC_WORDS | MUSIC_FILLERS | MUSIC_PLAY | MUSIC_PAUSE
+               | MUSIC_STOP_ANY | MUSIC_STOP_MUSIC | set(MUSIC_NEXT)
+               | VOLUME_UP | VOLUME_DOWN | VOLUME_WORD | set(VOLUME_NUMBERS)
+               | {'следующ', 'предыдущ', 'дальше', 'назад', 'turn', 'off', 'on'})
+VERB_ALL = (MUSIC_PLAY | MUSIC_PAUSE | MUSIC_STOP_MUSIC
+            | {'переключи', 'переключить'})
+
+# the words of a phrase the way the skills read them: lower case, punctuation gone,
+# ё folded into е — one normalization for everything (nlu.py keeps it)
+volume_tokens = nlu.normalize
+
+
+def drop_name(text, word='юми'):
+    """the phrase without her name at the head: the ears' readings sometimes keep
+    it («Юми, время!», «юмию время», «юмит») — whisper leans on the name so hard
+    it will not let go. Only the first word is judged: a name deep in the phrase
+    is somebody's talking, not her cue"""
+    toks = volume_tokens(text)
+    w = volume_tokens(word)
+    if toks and _near1(toks[0], w[0] if w else 'юми'):
+        toks = toks[1:]
+    return ' '.join(toks)
+
+
+def _near1(a, b):
+    """True when the two words are one bent letter apart, and the bend is at the tail
+    or a letter swapped: «сключи» and «включим» are «включи» through the ears' fingers,
+    but «выключи» is the opposite verb — its extra «вы» stands at the head, never a pass"""
+    if a == b:
+        return True
+    if len(a) == len(b):
+        return sum(ca != cb for ca, cb in zip(a, b)) <= 1
+    if abs(len(a) - len(b)) != 1:
+        return False
+    if len(a) > len(b):
+        a, b = b, a                # b is one letter longer now
+    return b[:-1] == a             # only a tail letter may appear or vanish
+
+
+def _verbs(toks, verbs):
+    """a token is one of the verbs, whole word or one bent letter away (four letters
+    and up, so «да» never leans into anything)"""
+    return any(t in verbs or (len(t) >= 4 and any(_near1(t, v) for v in verbs))
+               for t in toks)
+
+
+def _next_track_words(toks):
+    """the words that name the next track: «следующий», «next», «skip» — they ask
+    for it even with a whole play verb around («включи следующий трек»). Over the
+    playing music the ears soften the sounds («следуший» for «следующий»), so any
+    bent «следу…» counts too — but the chatting words that begin the same way
+    («следует», «следуй за мной») are not her next track"""
+    return any(t in MUSIC_NEXT[2:]
+               or (t.startswith('следу') and len(t) >= 7
+                   and not t.startswith(('следует', 'следуйте', 'следуй',
+                                         'следуя', 'следова')))
+               or (len(t) >= 5 and _near1(t, 'следующий')) for t in toks)
+
+
+def _next_words(toks):
+    """the words that ask to move on: the track words above, plus «дальше» — but a
+    play verb nearby turns «дальше» into a resume («продолжай дальше»), not a skip"""
+    return (_next_track_words(toks)
+            or (any(t.startswith(('дальш', 'далш'))
+                    or (len(t) >= 5 and _near1(t, 'дальше')) for t in toks)
+                and not _verbs(toks, MUSIC_PLAY)))
+
+
+def _prev_words(toks):
+    """the words that ask for the track before: «предыдущий», «назад», «previous»,
+    with the same ears' slips over the music forgiven"""
+    return any(t.startswith(('предыдущ', 'предидущ', 'предъидущ'))
+               or t in ('previous', 'rewind', 'назад')
+               or (len(t) >= 5 and _near1(t, 'предыдущий')) for t in toks)
+
+
+def _mind_log(what):
+    """one line in the mind's diary (/tmp/yumi/mind.log): what she heard and what
+    she made of it — without it a silence is a guess"""
+    try:
+        with open('/tmp/yumi/mind.log', 'a', encoding='utf-8') as f:
+            f.write(f'{time.strftime("%H:%M:%S")} {what}\n')
+    except OSError:
+        pass
+
+
+def spoken_number(t):
+    """the level a word or a digit stands for: «50», «50%», «пятьдесят», «fifty»;
+    a lone one («пять», «5») is read as a ten, the tens are all she obeys"""
+    if t.rstrip('%').isdigit():
+        n = int(t.rstrip('%'))
+    else:
+        n = VOLUME_NUMBERS.get(t) or VOLUME_ONES.get(t)
+    if n is not None and 0 < n < 10:
+        n *= 10
+    return n
+
+
+def bare_volume(text):
+    """one lone number said to her (the ears kept «30» and dropped the rest):
+    the volume level that most likely was meant (10..100), or None"""
+    toks = volume_tokens(text)
+    if len(toks) != 1:
+        return None
+    n = spoken_number(toks[0])
+    if n is None or n <= 0:
+        return None
+    return min(100, max(10, n))
+
+
+def _music_query(toks):
+    """the name of the song out of the phrase: the words the music skill knows
+    nothing about, in the order they were said («включи песню иван дорн» →
+    «иван дорн») — her verbs and politeness are no part of a name, and the
+    ears' bent verbs («включить» heard as «включитьь») go too"""
+    skip = (MUSIC_KNOWN | MUSIC_ANY | MUSIC_ALBUM_W | set(MUSIC_ARTIST_W)
+            | MUSIC_WHO_ASK)
+    out = [t for t in toks
+           if t not in skip
+           and not t.startswith('исполнител')
+           and not t.startswith(('следующ', 'предыдущ', 'дальш', 'далш'))
+           and not (len(t) >= 4 and any(_near1(t, v) for v in VERB_ALL))]
+    return ' '.join(out).strip(' -')
+
+
+def music_control_text(text, lang='en', guess=False):
+    """Convert voice text to a music command.
+
+    Returns 'play' (her own library), 'pause', 'stop', 'next', 'previous',
+    'who' (just the question «кто играет»: she names the artist and the track),
+    'volume_up', 'volume_down', 'volume N' (the system volume, 10..100),
+    or None if not a music command. The libraries answer with a pair instead:
+    ('random', ''), ('song', name), ('artist', name), ('album', name) — she
+    finds the song in Jellyfin (home) or her folders (away) and plays it.
+    Whole words only: «включи музыку» plays, «выключи музыку» stops, and
+    «включи свет» or the telly in the background is not hers to mind. The bare
+    toggle 'play_pause' is for the hotkey only.
+
+    guess=True: the phrase carried no music word and no custom command claimed
+    it (Brain.heard_text asks only after voice_intent said no) — a bare name
+    beside her verb («включи рамштайн») becomes a song to look for, the light
+    words having gone to the buttons already.
+    """
+    toks = volume_tokens(text)
+    if not toks:
+        return None
+    has_music = any(t in MUSIC_WORDS for t in toks)
+    if 'не' in toks or 'not' in toks or "don't" in toks:
+        return None                    # «не включай музыку» is not a wish, it is the opposite
+
+    # «кто играет», «что за трек»: a question, not a wish — she names the song.
+    # A command verb nearby («что включи музыку») is a wish, so the question yields.
+    if (any(t in MUSIC_WHO_ASK for t in toks)
+            and not (_verbs(toks, MUSIC_PLAY) or _verbs(toks, MUSIC_PAUSE)
+                     or any(t in MUSIC_STOP_ANY or t in MUSIC_STOP_MUSIC
+                            for t in toks))
+            and not (_next_track_words(toks) or _prev_words(toks))
+            and (_verbs(toks, MUSIC_WHO_PLAY) or has_music)):
+        return 'who'
+
+    def strangers():                   # words this skill knows nothing about
+        return {t for t in toks
+                if t not in MUSIC_KNOWN
+                and not t.startswith(('следующ', 'предыдущ', 'дальш', 'далш'))
+                and not (len(t) >= 4 and any(_near1(t, v) for v in VERB_ALL))}
+
+    if any(t in MUSIC_STOP_ANY for t in toks):
+        return 'stop'
+    if has_music and not strangers() and (
+            _verbs(toks, MUSIC_STOP_MUSIC)
+            or ('turn' in toks and 'off' in toks and 'on' not in toks)):
+        return 'stop'                  # «выключи музыку», but «выключи свет» is not hers
+
+    # the system volume: «тише», «громче», «громкость 50» (a digit or a word)
+    if any(t in VOLUME_DOWN or t.startswith(('тише', 'тихо', 'потише'))
+           for t in toks) and not any(t in VOLUME_UP for t in toks):
+        return 'volume_down'
+    if any(t in VOLUME_UP or t.startswith(('громче', 'погромче', 'повыс'))
+           for t in toks):
+        return 'volume_up'
+
+    # «громкости 30» counts too: the ears' падежи and whisper's чуткие уши
+    if any(t in VOLUME_WORD or t.startswith('громкост') for t in toks):
+        for t in toks:
+            n = spoken_number(t)
+            if n is not None:
+                return f'volume {n}'
+    if _verbs(toks, MUSIC_PAUSE):
+        return 'pause'
+    if _next_track_words(toks):
+        return 'next'
+    if _next_words(toks):              # «дальше», when it is not «продолжай дальше»
+        return 'next'
+    if _prev_words(toks):
+        return 'previous'
+    if _verbs(toks, MUSIC_NEXT[:2]):               # «переключи музыку»: the next one
+        return 'next' if has_music else None
+
+    # the libraries: «включи песню крылья», «включи что-нибудь», «включи
+    # исполнителя аквариум» — a name is everything she does not know here
+    if _verbs(toks, MUSIC_PLAY) and strangers():
+        strng = strangers()
+        if strng <= MUSIC_ANY or strng == {'что', 'нибудь'}:
+            return ('random', '')                  # «включи что-нибудь»: a surprise
+        if any(t.startswith('исполнител') or t in MUSIC_ARTIST_W for t in toks):
+            q = _music_query(toks)
+            return ('artist', q) if q else None
+        if any(t in MUSIC_ALBUM_W for t in toks):
+            q = _music_query(toks)
+            return ('album', q) if q else None
+        if has_music or guess:
+            q = _music_query(toks)
+            if q:
+                return ('song', q)                 # «включи песню крылья»
+            if strng <= MUSIC_WHO_ASK:             # «что включи музыку»: the ears
+                pass                               # garbled it, but the wish is hers
+            else:
+                return None
+
+    if _verbs(toks, MUSIC_PLAY):
+        if has_music or not strangers():
+            return 'play'
+        return None                    # «включи свет» is not hers to do
+    if has_music and not strangers():  # just «музыку»: her library, please
+        return 'play'
+    return None

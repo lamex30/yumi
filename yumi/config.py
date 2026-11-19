@@ -12,6 +12,7 @@ _cfg = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
 _state = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local' / 'state')
 _cache = Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
 CONFIG_DIR = _cfg / 'yumi'
+ACTIONS_FILE = CONFIG_DIR / 'actions.json'
 STATE_DIR = _state / 'yumi'
 CACHE_DIR = _cache / 'yumi'
 
@@ -21,9 +22,15 @@ DEFAULT_SETTINGS = {
     'reactions': True,        # reactions to the system (charger, Wi-Fi, downloads...)
     'pinned': False,          # she stays out and does not hide at the bottom edge
     'chatter': True,          # idle small talk (at most every 10 minutes, only while she is out)
-    'voice_vol': 50,          # her 8-bit voice while her words type out, % (0 = silent)
+    'voice_vol': 50,          # her voice while her words type out, % (0 = silent)
+    'voice_kind': 'blips',    # her voice: blips (8-bit) / tts (a real one, tools/tts_setup.sh)
+    'tts_ru_speaker': 'kseniya',  # her Russian Silero voice: kseniya/baya/xenia/aidar/eugene
+    'tts_en_speaker': 'en_10',    # her English Silero voice: en_0 … en_117
+    'tts_ru_model': 'v5_6_ru',    # v5_6_ru (questions) / v4_ru (the older one)
+    'tts_pitch': 1.12,        # 1.0 = as recorded, 1.2 = a proper squeak
     'scale': 1,               # integer pixel scale of the sprites
     'recolor': True,          # follow the wallpaper palette
+    'gaze': True,             # her eyes follow the pointer
     'hue': None,              # manual color when not following: None = her own colors, else 0..1
     'timer_sound': None,      # None = her 8-bit chime (sounds/timer.wav), else a path
     'breaks': 0,              # health reminders every N minutes (0 = off)
@@ -31,7 +38,95 @@ DEFAULT_SETTINGS = {
     'outfit': 'auto',         # auto (by date) / off / a folder name in sprites/outfits
     'ring': [],               # order of her round buttons ([] = the default order)
     'ring_off': [],           # the buttons switched off
+    'chat_provider': 'ollama',   # ollama or polza.ai: who answers when she listens
+    'chat_think': False,      # her mind thinks out loud before answering (deepseek-r1,
+                              # qwen3 and friends); off = the answer comes right away
+    'sassy': False,           # «Дерзкая 18+»: she talks like a street-smart brat —
+                              # swears, mocks, no sweet moth-girl manners (off by default)
+    'chat_model': 'lakomoor/vikhr-llama-3.2-1b-instruct:1b',   # who answers when she listens
+    'ollama_url': 'http://127.0.0.1:11434',   # where her local Ollama lives
+    'polza_url': 'https://polza.ai/api/v1',   # Polza.ai OpenAI-compatible endpoint
+    'polza_api_key': '',   # Polza.ai API key (get it at polza.ai)
+    'chat_history_n': 10,     # how many of her last messages go along with every
+                              # new question, so the answer knows the whole turn
+    'chat_memory': True,      # she keeps the talks in a sqlite diary and recalls
+                              # the older lines about the same thing into the
+                              # context (yumi/memory.py)
+    'embed_model': 'nomic-embed-text',   # the Ollama mind's embeddings for the
+                              # recall; without it a light hashed bag-of-words
+                              # stands in, so the diary works offline all the same
+    'notes_voice': True,      # her notes by voice: «запиши заметку …» writes one,
+                              # «найди заметку про …» searches them (yumi/notes.py)
+    'wake_ears': True,        # she starts listening the moment you say the wake word
+    'music_skill': True,      # music control via voice commands
+    'nlu': True,              # her own voice commands: the phrases in actions.json
+    'intents': True,          # the tiny trained mind (yumi/intents.py) hears the
+                              # phrases the sayings miss; tools/intents_setup.sh
+    'wake_word': 'юми',       # the wake word itself (say it, then the question);
+                              # the ears learn its hear-says into
+                              # ~/.local/share/yumi/stt/hearsay.json, edit freely
+    'wake_sensitivity': 'normal',   # normal / strict: how sharply the wake word must match
+    'wake_confirm': True,   # let whisper double-check every vosk guess before waking
+    'wake_model_size': 'small',   # small / big: the model the wake ear listens with
+    'wake_ear': 'auto',     # the ear that catches her name: auto (the trained
+                            # openWakeWord ear when its model is here, vosk
+                            # otherwise) / oww / vosk; vosk guessed the name by
+                            # ear, the trained one learned it
+    'wake_judge_log': True,    # write what the judge hears into /tmp/yumi/judge.log
+    'name_duck': False,        # when her name is heard, the sounds duck so she can
+                               # hear the phrase; the old loudness returns after it,
+                               # a volume command she keeps
+    'stt_size': 'small',      # her hearing: small (45 MB) / big (a sharper ~1.8 GB model)
+    'stt_engine': 'whisper',  # who reads the phrases: whisper / nemotron (a streaming
+                              # 0.6b ear, ~650 MB, tools/nemotron_setup.sh; faster)
+    'stt_mic': None,          # which microphone the ears hear with: None = auto (the desktop's pick)
+    'stt_echo': True,         # the webrtc echo canceller around the mic; false = plain mic only
+    'stt_selfmute': True,     # the ears close while she speaks, so she never hears
+                              # herself; works with the plain mic too (no canceller)
+    'phrase_tail_ms': 1200,   # ms of quiet that ends a phrase: raise it when she cuts you
+                              # off during your pauses, lower it when answers come too slow
+    'wake_after': 1.5,        # s of quiet after the name before the half-heard words count
+    'tap_ears': False,        # a diary of everything the ears hear: /tmp/yumi (sound + words)
+    'hourly_chimes': True,    # she speaks the time with a joke every hour
+    'weather_city': 'Анапа',  # the city she peeks the weather at ('' = wherever she is);
+                              # say it in the phrase («юми погода в ялте») or edit
+                              # ~/.config/yumi/settings.json → "weather_city": "Ялта"
+    'music_source': 'auto',   # where the songs come from: auto (Jellyfin when home,
+                              # folders when away) / jellyfin / local
+    'music_jellyfin': '',     # the Jellyfin server's address (http://192.168.0.189:8096);
+                              # when it answers, the songs come from its library
+    'music_jellyfin_user': '',      # the Jellyfin login (and the password below);
+                              # or put a "music_jellyfin_key" api key instead —
+                              # both live in ~/.config/yumi/settings.json
+    'music_jellyfin_password': '',
+    'music_dirs': '',         # extra local folders, comma-separated
+                              # ("~/Музыка, /mnt/nas/музыка"); the xdg music folder
+                              # is always read
+    'music_server': '',       # a remote mpd to play on, 'password@host:port'
+                              # — the middle of the chain: when Jellyfin sleeps,
+                              # its library answers, the songs play there and
+                              # come home through the httpd stream below
+                              # (empty = no server step, her folders instead)
+    'music_stream': '',       # the server mpd's httpd stream to pull the sound
+                              # home by (http://192.168.0.189:8123); without it
+                              # the server's songs sound on the server
+    'web_panel': False,       # the browser panel (off by default: no port is opened)
+    'web_panel_host': '127.0.0.1',   # 127.0.0.1 only this machine sees it; 0.0.0.0 = LAN
+    'web_panel_port': 8765,   # where the browser panel listens
+    'web_panel_open': False,  # open the browser when the panel is switched on
+    'web_panel_session_hours': 168,  # how long a browser session stays signed in
 }
+
+# the Silero profile lives in ~/.config/yumi/tts.json (the daemon's own file);
+# these settings are its copy, so the panel and the in-world menu can edit it
+TTS_PROFILE_KEYS = {
+    'tts_ru_speaker': 'ru_speaker',
+    'tts_en_speaker': 'en_speaker',
+    'tts_ru_model': 'ru_model',
+    'tts_pitch': 'pitch',
+}
+TTS_PROFILE_DEFAULTS = {key: DEFAULT_SETTINGS[key] for key in TTS_PROFILE_KEYS}
+
 DEFAULT_STATE = {
     'mode': 'docked',         # docked / air
     'dock_x': None,           # foot x when docked (None = bottom-right corner)
@@ -76,11 +171,26 @@ class Store(dict):
             pass
 
 
+def _adopt_tts_profile(st):
+    """tts.json stays editable by hand: its profile wins when Yumi starts, so a
+    manual tweak is never overwritten by the defaults in settings.json"""
+    try:
+        data = json.loads((CONFIG_DIR / 'tts.json').read_text())
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    for key, name in TTS_PROFILE_KEYS.items():
+        if name in data and data[name] is not None:
+            st[key] = data[name]
+
+
 def load_settings():
     st = Store(CONFIG_DIR / 'settings.json', DEFAULT_SETTINGS)
     if st.fresh:                                  # first run: speak the system language
         st['ui_lang'] = st['speech_lang'] = detect_lang()
         st.save()
+    _adopt_tts_profile(st)
     return st
 
 
@@ -90,7 +200,7 @@ RING_SLOTS = 10            # places on her ring in the button editor
 def load_actions(path=None):
     """her own round buttons from ~/.config/yumi/actions.json:
     [{"label": "Terminal", "label_ru": "Терминал", "icon": "gear", "command": "foot"}]"""
-    path = Path(path) if path else CONFIG_DIR / 'actions.json'
+    path = Path(path) if path else ACTIONS_FILE
     try:
         data = json.loads(path.read_text())
         if not isinstance(data, list):
@@ -108,12 +218,18 @@ def load_actions(path=None):
         if isinstance(a, dict) and a.get('command'):
             out.append({'label': str(a.get('label') or a['command'])[:18],
                         'label_ru': str(a.get('label_ru') or a.get('label') or a['command'])[:18],
-                        'icon': str(a.get('icon') or 'star'), 'command': str(a['command'])})
+                        'icon': str(a.get('icon') or 'star'), 'command': str(a['command']),
+                        # the voice side (nlu.py): the sayings that run this button
+                        'phrases': [str(p) for p in (a.get('phrases') or []) if str(p).strip()],
+                        'keywords': [str(k) for k in (a.get('keywords') or []) if str(k).strip()],
+                        'speak': str(a.get('speak') or '').strip(),
+                        # a web address instead of a command ({query} = the words said beside the trigger)
+                        'url': str(a.get('url') or '').strip()})
     return out
 
 
 def save_actions(actions, path=None):
-    path = Path(path) if path else CONFIG_DIR / 'actions.json'
+    path = Path(path) if path else ACTIONS_FILE
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix('.tmp')
@@ -163,8 +279,8 @@ def load_state():
 # ---- interface strings ----
 UI = {
     'en': {
-        'recent': 'Recent', 'shelf': 'Shelf', 'pipette': 'Pipette', 'sleep': 'DND',
-        'wake': 'Wake up', 'settings': 'Settings', 'home': 'Go home', 'quit': 'Quit',
+        'recent': 'Recent', 'shelf': 'Shelf', 'pipette': 'Pipette', 'clock': 'Time',
+        'sleep': 'DND', 'wake': 'Wake up', 'settings': 'Settings', 'home': 'Go home', 'quit': 'Quit',
         'convert': 'Convert', 'compress': 'Compress', 'keep': 'Keep on shelf',
         'unkeep': 'Off the shelf', 'back': 'Back', 'empty_recent': 'Nothing new yet',
         'empty_shelf': 'Drop files on me to keep them here', 'ui_lang': 'Interface',
@@ -181,23 +297,56 @@ UI = {
         'sound_test': 'Listen', 'audio_files': 'Sounds',
         'hint': 'Drag a file onto me to convert, compress or keep it',
         'breaks': 'Health breaks', 'idle_nap': 'Nap when idle', 'outfit': 'Outfit',
-        'voice': 'Voice', 'cat_her': 'Her', 'cat_sound': 'Sound', 'cat_look': 'Look', 'cat_lang': 'Language', 'n_a': 'not available yet', 'o_auto': 'auto', 'o_off': 'none', 'o_halloween': 'Halloween', 'o_newyear': 'New Year',
+        'voice': 'Voice', 'voice_kind': 'Voice type', 'v_blips': '8-bit', 'v_tts': 'Real voice',
+        'tts_ru_speaker': 'Russian voice', 'tts_en_speaker': 'English voice',
+        'tts_ru_model': 'Russian voice model', 'tts_pitch': 'Voice pitch',
+        'cat_her': 'Her', 'cat_sound': 'Sound', 'cat_look': 'Look', 'cat_lang': 'Language', 'n_a': 'not available yet', 'o_auto': 'auto', 'o_off': 'none', 'o_halloween': 'Halloween', 'o_newyear': 'New Year',
         'o_valentine': 'Valentine', 'o_spring': 'March 8', 'min': 'min', 'monitor': 'Screen',
         'cat_ring': 'Buttons', 'ring_done': 'Done', 'ring_new': 'New button', 'ring_change': 'Edit button', 'ring_save': 'Save',
         'ring_cmd': 'Command', 'ring_name': 'Button name', 'ring_icon': 'Icon', 'ring_file': 'Your own picture...',
         'ring_add': 'Add', 'images': 'Pictures',
         'restart': 'Restart', 'tour_again': 'Show the tour', 'tour_next': 'Next', 'tour_skip': 'Skip', 'tour_done': 'Got it!',
         'tour_title': 'Hello!',
+        'listen': 'Listen', 'cat_chat': 'Her mind', 'chat_model': 'Answer model',
+        'nlu': 'Voice commands',
+        'intents': 'Intents mind',
+        'joke': 'Joke',
+        'chat_refresh': 'Find the model',
+        'chat_think': 'Let her think first',
+        'sassy': 'Sassy 18+',
+        'chat_history_n': 'Messages in mind', 'chat_memory': 'Recall older talks',
+        'wake_ears': 'Wake when you say «Yumi»', 'stt_engine': 'Ear for phrases',
+        'eng_whisper': 'Whisper', 'eng_nemotron': 'Nemotron 0.6b (fast)',
+        'stt_size': 'Whisper ear size', 'e_small': 'Lite (~460 MB)',
+        'name_duck': 'Duck sounds when she hears «Yumi»', 'e_big': 'Sharp (~1.5 GB)', 'cat_ears': 'Her ears', 'stt_mic': 'Microphone',
+        'wake_sensitivity': 'How strictly to listen for «Yumi»', 'wake_sensitivity_normal': 'Normal',
+        'wake_sensitivity_strict': 'Strict', 'wake_confirm': 'Double-check the name with whisper',
+        'wake_model_size': 'Ear for the name «Yumi» (vosk)', 'w_small': 'Lite (45 MB)', 'w_big': 'Sharp (~1.8 GB)',
+        'wake_ear': 'The ear that hears «Yumi»', 'we_auto': 'auto (the trained ear when it is here)',
+        'we_oww': 'the trained ear (openWakeWord)', 'we_vosk': 'vosk, as before', 'wake_judge_log': 'Write the whisper judge to /tmp/yumi/judge.log',
+        'mic_refresh': 'Find the microphone', 'mic_auto': 'auto', 'chat_provider': 'Mind provider',
+        'polza_url': 'Polza.ai address', 'polza_api_key': 'Polza.ai API key',
+        'tap_ears': 'Write everything it hears (/tmp/yumi)',
+        'stt_echo': 'Echo canceller (she never hears herself)',
+        'hourly_chimes': 'She says the time every hour',
         'tour1': "Hi! I'm Yumi. I live at the bottom edge of your screen. Let me show you around.",
         'tour2': 'Click me and round buttons appear: files, shelf, pipette, timer, Do Not Disturb and settings.',
         'tour3': 'Scroll the wheel over me for a timer. Click its digits to type a time.',
         'tour4': 'Drop files on me to convert or compress them. Hold me by the scruff to move me anywhere.',
         'tour5': 'Middle-click pins me so I stop hiding. The rest is in the gear: language, colors, outfits.',
         'B': 'B', 'KB': 'KB', 'MB': 'MB', 'GB': 'GB',
+        'cat_music': 'Music', 'music_source': 'Where the songs come from',
+        'm_auto': 'auto (Jellyfin at home)', 'm_jellyfin': 'Jellyfin',
+        'm_local': 'my folders', 'music_skill': 'Music control by voice',
+        'cat_web': 'Browser panel', 'web_panel': 'Browser panel',
+        'web_open': 'Open in the browser', 'web_copy': 'Copy the link',
+        'web_rotate': 'New link', 'web_on': 'The panel is at {url}',
+        'web_fail': 'The panel did not start: {err}',
+        'web_off': 'The browser panel is off (it opens no port)',
     },
     'ru': {
-        'recent': 'Недавние', 'shelf': 'Полка', 'pipette': 'Пипетка', 'sleep': 'Не мешать',
-        'wake': 'Разбудить', 'settings': 'Настройки', 'home': 'Домой', 'quit': 'Выйти',
+        'recent': 'Недавние', 'shelf': 'Полка', 'pipette': 'Пипетка', 'clock': 'Время',
+        'sleep': 'Не мешать', 'wake': 'Разбудить', 'settings': 'Настройки', 'home': 'Домой', 'quit': 'Выйти',
         'convert': 'Конвертировать', 'compress': 'Сжать', 'keep': 'На полку',
         'unkeep': 'Убрать с полки', 'back': 'Назад', 'empty_recent': 'Пока ничего нового',
         'empty_shelf': 'Кидай на меня файлы, я их тут сохраню', 'ui_lang': 'Интерфейс',
@@ -214,19 +363,55 @@ UI = {
         'sound_test': 'Прослушать', 'audio_files': 'Звуки',
         'hint': 'Перетащи файл на меня: сконвертирую, сожму или сохраню',
         'breaks': 'Перерывы', 'idle_nap': 'Дремать без тебя', 'outfit': 'Наряд',
-        'voice': 'Голосок', 'cat_her': 'Поведение', 'cat_sound': 'Звук', 'cat_look': 'Внешний вид', 'cat_lang': 'Язык', 'n_a': 'пока недоступно', 'o_auto': 'авто', 'o_off': 'нет', 'o_halloween': 'Хэллоуин', 'o_newyear': 'Новый год',
+        'voice': 'Голосок', 'voice_kind': 'Тип голоска', 'v_blips': 'Пищалка', 'v_tts': 'Настоящий',
+        'tts_ru_speaker': 'Русский голос', 'tts_en_speaker': 'Английский голос',
+        'tts_ru_model': 'Модель русского голоса', 'tts_pitch': 'Высота голоса',
+        'cat_her': 'Поведение', 'cat_sound': 'Звук', 'cat_look': 'Внешний вид', 'cat_lang': 'Язык', 'n_a': 'пока недоступно', 'o_auto': 'авто', 'o_off': 'нет', 'o_halloween': 'Хэллоуин', 'o_newyear': 'Новый год',
+        'hourly_chimes': 'Каждый час она говорит время',
         'o_valentine': 'Валентинка', 'o_spring': '8 Марта', 'min': 'мин', 'monitor': 'Экран',
         'cat_ring': 'Кнопки', 'ring_done': 'Готово', 'ring_new': 'Новая кнопка', 'ring_change': 'Изменить кнопку', 'ring_save': 'Сохранить',
         'ring_cmd': 'Команда', 'ring_name': 'Название кнопки', 'ring_icon': 'Иконка', 'ring_file': 'Своя картинка...',
         'ring_add': 'Добавить', 'images': 'Картинки',
         'restart': 'Перезапустить', 'tour_again': 'Показать знакомство', 'tour_next': 'Дальше', 'tour_skip': 'Пропустить', 'tour_done': 'Поняла!',
         'tour_title': 'Привет!',
+        'listen': 'Послушать', 'cat_chat': 'Её мозги', 'chat_model': 'Модель ответов',
+        'nlu': 'Голосовые команды',
+        'intents': 'Распознавание фраз',
+        'joke': 'Анекдот',
+        'chat_refresh': 'Найти модель',
+        'chat_think': 'Дать ей подумать',
+        'sassy': 'Дерзкая 18+',
+        'chat_history_n': 'Сообщений в памяти', 'chat_memory': 'Помнить разговоры',
+        'wake_ears': 'Будить, когда скажешь «Юми»', 'stt_engine': 'Ухо для фраз',
+        'eng_whisper': 'Whisper', 'eng_nemotron': 'Nemotron 0.6b (быстрое)',
+        'stt_size': 'Размер whisper-уха', 'e_small': 'Лёгкая (~460 МБ)',
+    'music_skill': 'Умение управлять музыкой',
+        'name_duck': 'Приглушать звуки при имени',
+        'e_big': 'Точная (~1.5 ГБ)', 'cat_ears': 'Её ушки', 'stt_mic': 'Микрофон',
+        'wake_sensitivity': 'Как строго слушать «Юми»', 'wake_sensitivity_normal': 'Обычная',
+        'wake_sensitivity_strict': 'Строгая', 'wake_confirm': 'Перепроверять имя whisper-ом',
+        'wake_model_size': 'Ухо для имени «Юми» (vosk)', 'w_small': 'Лёгкая (45 МБ)', 'w_big': 'Точная (~1.8 ГБ)', 'wake_judge_log': 'Записывать судью-whisper в /tmp/yumi/judge.log',
+        'wake_ear': 'Кто слушает имя «Юми»', 'we_auto': 'авто (обученное ухо, когда оно тут)',
+        'we_oww': 'обученное ухо (openWakeWord)', 'we_vosk': 'vosk, как раньше',
+        'mic_refresh': 'Найти микрофон', 'mic_auto': 'авто',
+        'chat_provider': 'Провайдер мозгов', 'polza_url': 'Адрес Polza.ai', 'polza_api_key': 'Ключ Polza.ai',
+        'tap_ears': 'Записывать всё услышанное (/tmp/yumi)',
+        'stt_echo': 'Подавление эха (не слышит себя)',
+        'hourly_chimes': 'Каждый час она говорит время',
         'tour1': 'Привет! Я Юми. Я живу у нижнего края твоего экрана. Давай я всё покажу.',
         'tour2': 'Нажми на меня, и вокруг появятся кружочки: файлы, полка, пипетка, таймер, «Не мешать» и настройки.',
         'tour3': 'Покрути колёсико над мной, и появится таймер. Кликни по цифрам, чтобы вписать время.',
         'tour4': 'Кидай на меня файлы, и я их сконвертирую или сожму. Возьми меня за шкирку, чтобы поставить где угодно.',
         'tour5': 'Средний клик закрепляет меня, чтобы я не пряталась. Остальное в шестерёнке: язык, цвета, наряды.',
         'B': 'Б', 'KB': 'КБ', 'MB': 'МБ', 'GB': 'ГБ',
+        'cat_music': 'Музыка', 'music_source': 'Откуда брать песни',
+        'm_auto': 'авто (Джеллифин дома)', 'm_jellyfin': 'Jellyfin',
+        'm_local': 'мои папки', 'music_skill': 'Управление музыкой голосом',
+        'cat_web': 'Веб-панель', 'web_panel': 'Панель в браузере',
+        'web_open': 'Открыть в браузере', 'web_copy': 'Скопировать ссылку',
+        'web_rotate': 'Новая ссылка', 'web_on': 'Панель тут: {url}',
+        'web_fail': 'Панель не запустилась: {err}',
+        'web_off': 'Веб-панель выключена (порт не открывается)',
     },
 }
 

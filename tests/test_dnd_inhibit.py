@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Do Not Disturb through org.freedesktop.Notifications inhibitions (KDE Plasma), against a fake daemon.
-Run: dbus-run-session -- python3 tests/test_dnd_inhibit.py"""
+Run: python3 tests/test_dnd_inhibit.py — she calls dbus-run-session on herself."""
 import os
 import subprocess
 import sys
@@ -51,6 +51,12 @@ def wait(check):
 
 
 def main():
+    if not os.environ.get('YUMI_TEST_OWN_BUS'):
+        # her own bus: the test always calls dbus-run-session on itself — the
+        # shell's real bus may already hold a daemon owning the name
+        os.execvpe('dbus-run-session',
+                   ['dbus-run-session', '--', sys.executable, __file__],
+                   dict(os.environ, YUMI_TEST_OWN_BUS='1'))
     os.environ['PATH'] = ''            # no real swaync-client, it could grab the daemon's name
     from yumi.system import Notifier
     seen = []
