@@ -60,6 +60,7 @@ English · [Русский](README.ru.md)
   Say «включи песню …», «включи что-нибудь» or «включи исполнителя …» and she finds it and plays it:
   from Jellyfin when you are home, from her own folders when you are not.
 - English and Russian, picked from your system language.
+- **Browser panel** — open Yumi in your browser and manage her from any tab on your computer: settings, buttons, music, memory, notes, files, voice and more. See “The browser panel” below. <kbd>yumi --web</kbd>
 
 <img src="docs/colors.png" alt="Yumi on teal, rose, amber and blue wallpapers, recolored to each" width="100%">
 
@@ -515,6 +516,8 @@ The waiting hears nothing else: everything is computed on the spot, offline.
 `YUMI_SCALE=2 yumi` draws her twice as big (integer pixel scale).
 
 ## The browser panel
+
+> 🌐 **The browser panel** is Yumi’s second face. Turn it on in **Settings → Browser panel**, then open `http://127.0.0.1:8765` and manage her from any tab: settings, buttons, music, memory, notes, files, voice and more. Changes apply live and are saved to the same files the desktop app uses. Run `yumi --web` to start it. It is **off by default** — no port is opened until you ask.
 
 - **Turning it on:** Settings → Browser panel → “Browser panel”, then “Open in the browser”.
   Or run `yumi --web`. It is **off by default**; no port is opened until you ask.
