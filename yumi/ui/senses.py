@@ -54,6 +54,13 @@ class SensesMixin:
                 b.bubble['until'] = max(b.bubble['until'], b.now + secs + 1.2)
             self.voice_proc = system.play_file(path)
 
+    def play_voice_file(self, path):
+        """play a ready WAV out loud: the panel's «listen to this voice» uses it
+        (the usual speech path would go through her blips and bubble)"""
+        self.hush()
+        self.voice_proc = system.play_file(path)
+        return bool(self.voice_proc)
+
     def hush(self):
         p, self.voice_proc = self.voice_proc, None
         try:
@@ -213,6 +220,27 @@ class SensesMixin:
 
         self.wake_thread = threading.Thread(target=work, daemon=True)
         self.wake_thread.start()
+
+    def wake_pause(self, timeout=6.0):
+        """give the microphone to a one-off test from the panel: stop the wake
+        loop and wait for its daemon window to close (True if it was running)"""
+        was_on = bool(self.wake_on)
+        self.wake_set(False)
+        t = self.wake_thread
+        if t and t.is_alive():
+            t.join(timeout)
+        if t and not t.is_alive():
+            self.wake_thread = None
+        return was_on
+
+    def wake_resume(self, was_on):
+        """the panel's test is over: the wake loop takes the microphone back"""
+        if not was_on:
+            return
+        if not (self.wake_thread and self.wake_thread.is_alive()):
+            self.wake_thread = None
+        self.wake_on = True
+        self.wake_set(True)
 
     def tap_set(self, on):
         """the ears' diary: while it is on, the daemon records everything the ears hear

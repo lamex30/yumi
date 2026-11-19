@@ -36,7 +36,8 @@ yumi/
       js/ui.js         DOM-хелперы, иконки, тосты, модалки, контролы настроек
       js/pages/*.js    12 страниц
 bin/yumi               флаг --web
-moth_girl.py           жизненный цикл панели и WebBridge
+yumi/ui/app.py         жизненный цикл панели
+yumi/ui/bridge.py      WebBridge — контракт HTTP ↔ приложение
 yumi/config.py         настройки web_panel_* и строки интерфейса
 yumi/brain.py          пункты меню и действия в мире
 yumi/memory.py         хелперы дневника для страницы «Память»
@@ -44,7 +45,7 @@ tests/test_webpanel.py интеграционный тест API и безопа
 ```
 
 Ключевое правило: `yumi/webpanel/*` **не импортирует GTK**. HTTP-потоки не трогают
-виджеты напрямую. Мост `WebBridge` в `moth_girl.py` перекладывает каждый вызов в
+виджеты напрямую. Мост `WebBridge` в `yumi/ui/bridge.py` перекладывает каждый вызов в
 GTK-поток через `GLib.idle_add` (`_on`) и возвращает результат в HTTP-поток.
 
 ```
@@ -54,7 +55,7 @@ GTK-поток через `GLib.idle_add` (`_on`) и возвращает рез
 ThreadingHTTPServer (webpanel.server)
   │  Panel.bridge.<method>(...)
   ▼
-WebBridge (moth_girl.WebBridge)  ── GLib.idle_add ──▶  App / Brain / Memory
+WebBridge (yumi.ui.bridge)  ── GLib.idle_add ──▶  App / Brain / Memory
 ```
 
 ---
@@ -70,7 +71,7 @@ WebBridge (moth_girl.WebBridge)  ── GLib.idle_add ──▶  App / Brain / M
 | `chat` | Разговор | чат с умом, история, очистка, «сказать в мир», быстрый старт, живая реплика |
 | `files` | Файлы | очередь обработки, drag-and-drop загрузка, недавние, полка, открыть, конвертировать, сжать |
 | `music` | Музыка | текущий трек, play/pause/next/stop, громкость, поиск по Jellyfin/папкам |
-| `voice` | Ушки и голос | проверка слуха, «закрыть ушки», сказать фразу, микрофоны, живые индикаторы, настройки ушек и TTS |
+| `voice` | Ушки и голос | карточки «Активация», «Судья фраз», «Голос»: выбор движка, состояние «доступно/нет», проверка имени и фразы вживую, прослушивание TTS; ниже — «закрыть ушки», микрофоны, живые индикаторы и остальные настройки ушек/звука |
 | `buttons` | Кнопки | кольцо, порядок, выключенные кнопки, свои команды, добавление и редактирование |
 | `appearance` | Внешний вид | текущая палитра, пипетка, пересборка цветов, наряд, масштаб, другой экран, JSON палитры |
 | `settings` | Настройки | все ключи `settings.json`, сгруппированные по секциям, поиск, сброс, живое применение |
@@ -141,7 +142,11 @@ ctx.navigate(id)
 | GET | `/api/music` | текущий трек и громкость |
 | GET | `/api/music/search` | `?kind=&q=` |
 | POST | `/api/music/play`, `/api/music/control` | play/pause/next/stop/volume |
-| POST | `/api/voice/listen`, `/api/voice/stop`, `/api/voice/speak` | ушки и голос |
+| GET | `/api/voice/engines` | наличие oww/vosk/whisper/nemotron/TTS, список голосов и моделей |
+| POST | `/api/voice/listen` | `{seconds?, engine?}` — записать фразу выбранным судьёй |
+| POST | `/api/voice/test-wake` | `{seconds?, ear?}` — проверить имя выбранным ухом |
+| POST | `/api/voice/test` | `{text?, lang?}` — синхронизировать профиль и озвучить пробу текущим голосом |
+| POST | `/api/voice/stop`, `/api/voice/speak` | остановить запись/озвучку, сказать текст |
 | GET | `/api/security` | адрес, токен (маска), сессии |
 | POST | `/api/security/rotate` | новая ссылка |
 | POST | `/api/security/link` | показать ссылку с токеном (только POST + CSRF) |
@@ -153,12 +158,19 @@ ctx.navigate(id)
 Важно: `/api/security/link` намеренно **не** отдаёт токен по GET, чтобы он не попал в
 историю, referer или кэш. Фронтенд показывает его только после явного нажатия.
 
-`WebBridge` (см. `moth_girl.py`) — контракт между HTTP и приложением:
+`WebBridge` (см. `yumi/ui/bridge.py`) — контракт между HTTP и приложением:
 `snapshot, configs, config_get, config_save, actions_get, actions_save, action_run,
 apply_settings, state_action, files_recent, files_shelf, shelf_change, files_open,
 job_add, jobs_cancel, timer_get, timer, ask, chat, chat_history, chat_clear,
 memory_recent, memory_search, memory_clear, music_status, music_search, music_play,
-music_control, voice_listen, voice_stop, voice_speak, tools_*, logs`.
+music_control, voice_listen(seconds, engine), voice_stop, voice_speak,
+voice_engines, voice_test_wake(seconds, ear), voice_test(text, lang),
+tools_*, logs`.
+
+Проверки слуха и голоса (`voice_listen`, `voice_test_wake`) на время записи ставят
+фоновый wake-цикл на паузу и всегда возобновляют его. `voice_test` синхронизирует
+профиль TTS с `tts.json`, при необходимости перезапускает демон и проигрывает
+полученный WAV через `SensesMixin.play_voice_file`.
 
 ---
 
@@ -173,7 +185,8 @@ music_control, voice_listen, voice_stop, voice_speak, tools_*, logs`.
    - `SECRET_KEYS` — если значение нельзя отдавать в браузер;
    - `TITLES` / `HINTS` — подписи (ru/en).
 3. Если ключ требует действия в живом приложении, добавить его обработку в
-   `App._web_apply_settings` (`moth_girl.py`).
+   `App._web_apply_settings` (`yumi/ui/webpanel.py`) и в `App.handle_requests`
+   (`yumi/ui/app.py`) для изменений из GTK.
 4. Прогнать `python3 tests/test_webpanel.py` — тест проверяет, что каждый ключ из
    `DEFAULT_SETTINGS` попал в схему.
 
@@ -252,8 +265,9 @@ python3 tests/test_library.py
 python3 tests/test_music_text.py
 python3 tests/test_nlu.py
 python3 tests/test_arbiter.py
+python3 tests/test_tts.py
 
-python3 -m py_compile yumi/webpanel/*.py yumi/config.py yumi/brain.py yumi/memory.py moth_girl.py
+python3 -m py_compile yumi/webpanel/*.py yumi/ui/*.py yumi/config.py yumi/brain.py yumi/memory.py
 for f in yumi/webui/static/js/*.js yumi/webui/static/js/pages/*.js; do
   node --input-type=module --check < "$f" || echo "FAIL $f"
 done
@@ -294,6 +308,10 @@ bash -n bin/yumi
 интеграционные тесты. Дополнительно проверено в headless-Chromium: все страницы
 отрисовываются без исключений и неудачных запросов, переключение языка перестраивает
 оболочку и текущую страницу, PATCH настроек, чат, память и выдача ссылки работают.
+
+Страница «Ушки и голос» получила три карточки выбора и живые проверки: активация
+(openWakeWord/vosk), судья фраз (whisper/nemotron) и голос Silero с прослушиванием.
+Подробности и оставшаяся живая приёмка — в `docs/handoff-voice-controls.md`.
 
 Всё это лежит в репозитории. Перед передачей стоит прогнать тесты ещё раз и
 посмотреть панель на живом GTK-запуске.

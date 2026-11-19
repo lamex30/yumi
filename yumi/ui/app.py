@@ -417,6 +417,7 @@ class App(PanelMixin, SensesMixin, Gtk.Application):
                 self.state.save()
             elif kind == 'save_settings':
                 self.settings.save()
+                tts.sync_profile(self.settings)       # a voice change relaunches the daemon
                 music.apply_settings(self.settings)   # the server mpd may have moved
                 self.web_sync_soon()                  # on / off / another port, live
             elif kind == 'web_open':

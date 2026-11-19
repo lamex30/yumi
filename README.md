@@ -341,6 +341,13 @@ models sit in the cache side by side, so no re-download.
 `pitch` is 1.0 as recorded, 1.2 a proper squeak. After editing the file, restart the voice:
 `pkill -f yumi/tts_daemon.py`. Without the setup she simply keeps her blips.
 
+The same profile is now editable without the file: **Settings → Sound → Real voice** shows the
+Russian and English speakers, the Russian model and the pitch; the browser panel has the same
+controls on **Ears & voice → 3. Voice**. Changing a voice restarts the TTS daemon once (a few
+seconds), and the panel's **Listen to the voice** button plays a sample even while her usual
+voice is still the 8-bit blips. `tts.json` remains the source of truth: a manual edit is picked
+up on the next start.
+
 She puts the stress on the wrong syllable? Fix it in `~/.config/yumi/stress.json`: a word and
 the stressed vowel with a `+` after it. The file is re-read for every phrase, no restart needed:
 
@@ -421,6 +428,14 @@ from the disk when the Nemotron ear is missing or fails — a fallback, not a wo
 go entirely: `rm -rf ~/.local/share/yumi/stt/whisper` frees ~3.4 GB, and `stt_setup.sh`
 stops installing faster-whisper once the settings name the nemotron ear (vosk then stands
 alone if the ear ever fails). The wake-word judge uses it too.
+
+The browser panel's **Ears & voice** page puts the two choices beside each other and can test
+them without leaving the browser: **1. Activation** picks the ear that hears «Yumi» —
+openWakeWord (the trained `yumi.onnx` model) or vosk — and **Test the name** holds the
+microphone for a few seconds and answers «heard / silence». **2. Judge** picks who reads the
+phrase after the name — Whisper or Nemotron — and **Test the judge** shows the text that
+engine actually read. A missing openWakeWord model or Nemotron model is shown as «missing»
+with the reason, so a broken setup is not mistaken for a quiet microphone.
 
 **The time and the weather.** «Который час» and «what time is it» she answers by herself,
 no mind involved — she just reads the clock. «Какая погода» and «what's the weather» make her

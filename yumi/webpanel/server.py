@@ -398,6 +398,9 @@ def _make_handler(panel):
                 ('POST', '/api/voice/listen'): self._voice_listen,
                 ('POST', '/api/voice/stop'): self._voice_stop,
                 ('POST', '/api/voice/speak'): self._voice_speak,
+                ('GET', '/api/voice/engines'): self._voice_engines,
+                ('POST', '/api/voice/test-wake'): self._voice_test_wake,
+                ('POST', '/api/voice/test'): self._voice_test,
                 ('GET', '/api/security'): self._security,
                 ('POST', '/api/security/rotate'): self._security_rotate,
                 ('POST', '/api/security/link'): self._security_link,
@@ -729,8 +732,9 @@ def _make_handler(panel):
         def _voice_listen(self, _q):
             body = self._body()
             secs = float(body.get('seconds') or 8)
-            result = panel.bridge.voice_listen(secs)
-            panel.audit(self._ip(), 'voice-listen', f'{secs}s')
+            engine = str(body.get('engine') or '') or None
+            result = panel.bridge.voice_listen(secs, engine)
+            panel.audit(self._ip(), 'voice-listen', f'{secs}s {engine or "settings"}')
             return self._json(200, {'ok': True, **result})
 
         def _voice_stop(self, _q):
@@ -744,6 +748,25 @@ def _make_handler(panel):
                 raise ValueError('text is needed')
             result = panel.bridge.voice_speak(text)
             panel.audit(self._ip(), 'voice-speak', text[:120])
+            return self._json(200, {'ok': True, **result})
+
+        def _voice_engines(self, _q):
+            return self._json(200, {'ok': True, **panel.bridge.voice_engines()})
+
+        def _voice_test_wake(self, _q):
+            body = self._body()
+            secs = float(body.get('seconds') or 8)
+            ear = str(body.get('ear') or '') or None
+            result = panel.bridge.voice_test_wake(secs, ear)
+            panel.audit(self._ip(), 'voice-test-wake', f'{secs}s {ear or "settings"}')
+            return self._json(200, {'ok': True, **result})
+
+        def _voice_test(self, _q):
+            body = self._body()
+            text = str(body.get('text') or '').strip() or None
+            lang = str(body.get('lang') or '') or None
+            result = panel.bridge.voice_test(text, lang)
+            panel.audit(self._ip(), 'voice-test', (text or 'sample')[:120])
             return self._json(200, {'ok': True, **result})
 
         # ---------------------------------------------------------------- security

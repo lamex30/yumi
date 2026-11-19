@@ -32,6 +32,7 @@ class Bridge:
         self.settings = settings if settings is not None else dict(config.DEFAULT_SETTINGS)
         self.applied = []
         self.saved = []
+        self.voice_calls = []
         self.allowed = set()
         self.actions = [{'label': 'Term', 'label_ru': 'Терм', 'icon': 'terminal',
                          'command': 'foot', 'phrases': []}]
@@ -99,6 +100,24 @@ class Bridge:
             raise ValueError('unknown log')
         return {'name': name, 'path': '/tmp/yumi.log', 'text': 'line\n' * 3}
 
+    def voice_engines(self):
+        return {'activation': {'oww': {'available': False}, 'vosk': {'available': True}},
+                'judge': {'whisper': {'available': True}, 'nemotron': {'available': False}},
+                'tts': {'available': False}}
+
+    def voice_listen(self, seconds, engine=None):
+        self.voice_calls.append(('listen', seconds, engine))
+        return {'heard': 'фраза', 'engine': engine}
+
+    def voice_test_wake(self, seconds, ear=None):
+        self.voice_calls.append(('wake', seconds, ear))
+        return {'woke': True, 'text': '', 'ear': ear, 'word': 'юми',
+                'seconds': seconds, 'elapsed': 1.0}
+
+    def voice_test(self, text=None, lang=None):
+        self.voice_calls.append(('tts', text, lang))
+        return {'text': text or 'sample', 'lang': lang, 'profile': {'pitch': 1.12}}
+
     def state_action(self, name, payload):
         return {'action': name}
 
@@ -162,6 +181,16 @@ try:
     assert entries['ui_lang']['type'] == 'select'
     assert entries['stt_echo']['type'] == 'switch'
     assert entries['voice_vol']['type'] == 'range'
+    assert entries['tts_pitch']['type'] == 'range'
+    assert entries['tts_ru_speaker']['type'] == 'select'
+    assert entries['tts_en_speaker']['choices'][0] == 'en_0'
+    assert entries['tts_ru_model']['type'] == 'select'
+    assert catalog.validate_settings_patch({'tts_pitch': '1.3'}) == {'tts_pitch': 1.3}
+    try:
+        catalog.validate_settings_patch({'tts_pitch': 3})
+        raise AssertionError('bad pitch accepted')
+    except ValueError:
+        pass
     assert catalog.redact({'polza_api_key': 'secret', 'music_jellyfin_password': 'x'})['polza_api_key'] == catalog.MASK
     assert catalog.validate_settings_patch({'web_panel': True, 'web_panel_port': '9000'}) == {
         'web_panel': True, 'web_panel_port': 9000}
@@ -226,6 +255,21 @@ try:
     assert code == 200 and bridge.saved[-1] == ('settings', {'chatter': False})
     code, data, _ = call('GET', '/api/config/nope')
     assert code == 400
+
+    # voice pickers: engines, activation test, judge test, TTS sample
+    code, data, _ = call('GET', '/api/voice/engines')
+    assert code == 200 and data['activation']['vosk']['available'] is True
+    code, data, _ = call('POST', '/api/voice/test-wake',
+                         {'seconds': 5, 'ear': 'vosk'}, csrf=csrf)
+    assert code == 200 and data['woke'] is True
+    code, data, _ = call('POST', '/api/voice/listen',
+                         {'seconds': 5, 'engine': 'nemotron'}, csrf=csrf)
+    assert code == 200 and data['engine'] == 'nemotron'
+    code, data, _ = call('POST', '/api/voice/test',
+                         {'text': 'Привет', 'lang': 'ru'}, csrf=csrf)
+    assert code == 200 and data['lang'] == 'ru'
+    assert bridge.voice_calls[-3:] == [('wake', 5.0, 'vosk'), ('listen', 5.0, 'nemotron'),
+                                      ('tts', 'Привет', 'ru')], bridge.voice_calls
 
     code, data, _ = call('GET', '/api/security/link')
     assert code == 404, 'the link must only be handed out by an explicit POST'

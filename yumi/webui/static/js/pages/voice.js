@@ -1,39 +1,54 @@
 import { api } from '../api.js';
 import {
-  el, tr, icon, errToast, toast, sectionTitle, buildSetting, emptyBox, badge,
+  el, tr, errToast, toast, sectionTitle, buildSetting, emptyBox, badge,
 } from '../ui.js';
 
-const SOUND_KEYS = ['voice_kind', 'voice_vol', 'timer_sound'];
+const CARD_KEYS = {
+  activation: ['wake_ears', 'wake_word', 'wake_ear', 'wake_sensitivity',
+    'wake_confirm', 'wake_model_size'],
+  judge: ['stt_engine', 'stt_size', 'phrase_tail_ms', 'wake_after', 'wake_judge_log'],
+  voice: ['voice_kind', 'voice_vol', 'tts_ru_speaker', 'tts_en_speaker',
+    'tts_pitch', 'tts_ru_model'],
+  rest: ['stt_mic', 'stt_echo', 'stt_selfmute', 'name_duck', 'tap_ears', 'timer_sound'],
+};
+const ALL_KEYS = [...new Set(Object.values(CARD_KEYS).flat())];
 
 export function render(view, ctx) {
   const lang = () => ctx.lang;
   let status = ctx.status || {};
-  let micsSig = '';
+  let drawnSig = '';
+
+  const say = (ru, en) => (lang() === 'ru' ? ru : en);
+  const entries = () => {
+    const map = {};
+    for (const entry of (ctx.schema?.settings || [])) map[entry.key] = entry;
+    return map;
+  };
 
   view.append(
-    el('h2', { class: 'pagehead', text: lang() === 'ru' ? 'Ушки и голос' : 'Ears & voice' }),
-    el('p', { class: 'pagelead', text: lang() === 'ru'
-      ? 'Как она слышит имя, каким ухом слушает фразы и каким голосом отвечает.'
-      : 'How she hears her name, which ear listens for phrases and which voice answers.' }),
+    el('h2', { class: 'pagehead', text: say('Ушки и голос', 'Ears & voice') }),
+    el('p', { class: 'pagelead', text: say(
+      'Какое ухо ловит имя, кто читает фразу и каким голосом она отвечает — всё можно проверить здесь же.',
+      'Which ear hears the name, who reads the phrase and which voice answers — test all three right here.') }),
   );
 
-  // ---------------------------------------------------------------- live test
-  const heard = el('div', { class: 'bubble', text: lang() === 'ru' ? 'Нажми «Слушать» и скажи что-нибудь.' : 'Press “Listen” and say something.' });
+  // ---------------------------------------------------------------- live state
+  const heard = el('div', { class: 'bubble', text: say('Нажми «Слушать» и скажи что-нибудь.', 'Press “Listen” and say something.') });
   const secs = el('input', { type: 'number', min: 2, max: 30, value: 8, style: { maxWidth: '80px' } });
-  const speakInput = el('input', { type: 'text', placeholder: lang() === 'ru' ? 'Что ей сказать?' : 'What should she say?' });
+  const speakInput = el('input', { type: 'text', placeholder: say('Что ей сказать?', 'What should she say?') });
   const testCard = el('div', { class: 'card' },
-    el('h3', { text: lang() === 'ru' ? 'Проверка' : 'A quick test' }),
+    el('h3', { text: say('Быстрая проверка слуха', 'A quick listening test') }),
     el('div', { class: 'row' },
       secs,
       el('button', {
-        class: 'btn btn-primary', type: 'button', text: lang() === 'ru' ? 'Слушать' : 'Listen',
+        class: 'btn btn-primary', type: 'button', text: say('Слушать', 'Listen'),
         onclick: async () => {
-          heard.textContent = lang() === 'ru' ? 'слушаю…' : 'listening…';
+          heard.textContent = say('слушаю…', 'listening…');
           try {
             const data = await api.post('/api/voice/listen', { seconds: Number(secs.value) || 8 });
             heard.textContent = data.heard
-              ? `${lang() === 'ru' ? 'услышала' : 'heard'}: «${data.heard}»`
-              : (lang() === 'ru' ? 'тишина' : 'silence');
+              ? `${say('услышала', 'heard')}: «${data.heard}» (${data.engine || ''})`
+              : say('тишина', 'silence');
           } catch (err) {
             heard.textContent = err.message;
             errToast(err);
@@ -41,89 +56,194 @@ export function render(view, ctx) {
         },
       }),
       el('button', {
-        class: 'btn btn-danger', type: 'button', text: lang() === 'ru' ? 'Закрыть ушки' : 'Stop listening',
+        class: 'btn btn-danger', type: 'button', text: say('Закрыть ушки', 'Stop listening'),
         onclick: async () => {
           try {
             await api.post('/api/voice/stop');
-            heard.textContent = lang() === 'ru' ? 'ушки закрыты' : 'ears closed';
+            heard.textContent = say('ушки закрыты', 'ears closed');
           } catch (err) { errToast(err); }
         },
       })),
     el('div', { class: 'row', style: { marginTop: '10px' } },
       speakInput,
       el('button', {
-        class: 'btn', type: 'button', text: lang() === 'ru' ? 'Сказать' : 'Speak',
+        class: 'btn', type: 'button', text: say('Сказать', 'Speak'),
         onclick: async () => {
           const text = speakInput.value.trim();
           if (!text) return;
           try {
             await api.post('/api/voice/speak', { text });
-            toast(lang() === 'ru' ? 'Говорит' : 'Speaking', 'good');
+            toast(say('Говорит', 'Speaking'), 'good');
           } catch (err) { errToast(err); }
         },
       })),
     el('div', { style: { marginTop: '12px' } }, heard));
 
   const live = el('div', { class: 'card' },
-    el('h3', { text: lang() === 'ru' ? 'Прямо сейчас' : 'Right now' }),
-    el('div', { class: 'card-hint', text: '' }));
+    el('h3', { text: say('Прямо сейчас', 'Right now') }));
 
   view.append(el('div', { class: 'grid two' }, testCard, live));
 
-  // ---------------------------------------------------------------- settings
-  const settingsBox = el('div', { class: 'card', style: { marginTop: '16px' } });
-  view.append(sectionTitle(lang() === 'ru' ? 'Настройки ушек и голоса' : 'Ears and voice settings'));
-  view.append(settingsBox);
+  // ---------------------------------------------------------------- the three pickers
+  const activationBox = el('div', { class: 'card' });
+  const judgeBox = el('div', { class: 'card' });
+  const voiceBox = el('div', { class: 'card' });
+  const restBox = el('div', { class: 'card', style: { marginTop: '16px' } });
 
-  function entries() {
-    const all = ctx.schema?.settings || [];
-    const ears = all.filter((entry) => entry.page === 'voice' || entry.section === 'ears');
-    const sound = all.filter((entry) => SOUND_KEYS.includes(entry.key));
-    const seen = new Set();
-    const out = [];
-    for (const entry of [...ears, ...sound]) {
-      if (seen.has(entry.key)) continue;
-      seen.add(entry.key);
-      const copy = { ...entry };
-      if (entry.key === 'stt_mic') {
-        const mics = status.runtime?.mics || [];
-        copy.choices = [null, ...mics];
-        copy.choice_labels = { ...(entry.choice_labels || {}) };
-        for (const mic of mics) copy.choice_labels[mic] = mic;
-      }
-      if (entry.key === 'wake_ear') {
-        // keep the schema choices; this only makes the current choice readable
-      }
-      out.push(copy);
-    }
-    return out;
+  view.append(sectionTitle(say('Активация, судья и голос', 'Activation, judge and voice')));
+  view.append(el('div', { class: 'stack' }, activationBox, judgeBox, voiceBox));
+  view.append(sectionTitle(say('Тонкая настройка', 'Fine tuning')));
+  view.append(restBox);
+
+  function value(key) {
+    return status.settings?.[key];
   }
 
-  function drawSettings() {
-    settingsBox.replaceChildren();
-    const list = entries();
-    if (!list.length) {
-      settingsBox.append(emptyBox(lang() === 'ru' ? 'Нет настроек' : 'No settings'));
-      return;
+  async function apply(key, next) {
+    try {
+      const data = await ctx.applySettings({ [key]: next });
+      if (data?.result?.saved) {
+        status.settings = { ...(status.settings || {}), ...data.result.saved };
+      }
+      return data;
+    } catch (err) {
+      errToast(err);
+      return null;
     }
-    for (const entry of list) {
-      const value = status.settings?.[entry.key];
-      settingsBox.append(buildSetting(entry, value, async (next) => {
-        const data = await ctx.applySettings({ [entry.key]: next });
-        if (data?.result?.saved) {
-          status.settings = { ...(status.settings || {}), ...data.result.saved };
+  }
+
+  function fill(box, keys, title, lead) {
+    box.replaceChildren(el('h3', { text: title }));
+    if (lead) box.append(el('p', { class: 'card-hint', text: lead }));
+    const map = entries();
+    let any = false;
+    for (const key of keys) {
+      const entry = map[key];
+      if (!entry) continue;
+      any = true;
+      box.append(buildSetting(entry, value(key), (next) => apply(key, next)));
+    }
+    if (!any) box.append(emptyBox(say('Нет настроек', 'No settings')));
+    return box;
+  }
+
+  function engineLine(label, info, note) {
+    const ok = Boolean(info?.available);
+    return el('div', { class: 'row' },
+      el('span', { class: 'dot', style: { background: ok ? 'var(--mint)' : 'var(--red)' } }),
+      el('span', { text: `${label}: ${ok ? say('готово', 'ready') : say('нет', 'missing')}` }),
+      note ? el('span', { class: 'card-hint', text: note }) : null);
+  }
+
+  function testRow(buttonText, onclick, extra) {
+    const out = el('div', { class: 'bubble', text: say('результат появится здесь', 'the result will appear here') });
+    const button = el('button', { class: 'btn btn-primary', type: 'button', text: buttonText, onclick: async () => {
+      button.disabled = true;
+      const old = button.textContent;
+      button.textContent = say('слушаю…', 'listening…');
+      out.textContent = say('говорю с микрофоном, подожди…', 'holding the microphone, wait…');
+      try {
+        const text = await onclick();
+        out.textContent = text;
+      } catch (err) {
+        out.textContent = err.message;
+        errToast(err);
+      } finally {
+        button.disabled = false;
+        button.textContent = old;
+      }
+    } });
+    return el('div', { class: 'row', style: { marginTop: '10px' } }, ...(extra || []), button, out);
+  }
+
+  function drawActivation() {
+    const voice = status.runtime?.voice || {};
+    const act = voice.activation || {};
+    const seconds = el('input', { type: 'number', min: 3, max: 30, value: 8, style: { maxWidth: '80px' } });
+    fill(activationBox, CARD_KEYS.activation,
+      say('1. Активация: кто слышит имя', '1. Activation: who hears the name'),
+      say('openWakeWord — обученное ухо «Юми»; vosk — прежнее угадывание по словам.',
+          'openWakeWord is the trained «Yumi» ear; vosk is the old word guessing.'));
+    activationBox.append(engineLine('openWakeWord', act.oww,
+      act.oww?.model_ok ? `${Math.round((act.oww.model_bytes || 0) / 1024)} KB` : ''));
+    activationBox.append(engineLine('vosk', act.vosk));
+    activationBox.append(testRow(
+      say('Проверить имя', 'Test the name'),
+      async () => {
+        const ear = value('wake_ear') || 'auto';
+        const data = await api.post('/api/voice/test-wake', {
+          seconds: Number(seconds.value) || 8, ear,
+        });
+        if (data.woke) {
+          return say(`услышала имя (${data.ear}, ${data.elapsed} с)`,
+            `heard the name (${data.ear}, ${data.elapsed}s)`);
         }
-      }));
-    }
-    const restart = list.some((entry) => entry.restart);
-    if (restart) {
-      settingsBox.append(el('p', { class: 'card-hint', text: lang() === 'ru'
-        ? 'Масштаб окна применится после перезапуска.'
-        : 'The window scale applies after a restart.' }));
-    }
+        return say(`тишина за ${data.seconds} с (${data.ear})`,
+          `silence for ${data.seconds}s (${data.ear})`);
+      },
+      [seconds]));
   }
 
-  function draw() {
+  function drawJudge() {
+    const voice = status.runtime?.voice || {};
+    const judge = voice.judge || {};
+    const seconds = el('input', { type: 'number', min: 2, max: 30, value: 8, style: { maxWidth: '80px' } });
+    fill(judgeBox, CARD_KEYS.judge,
+      say('2. Судья: кто читает фразу', '2. Judge: who reads the phrase'),
+      say('Whisper — проверенный местный распознаватель; Nemotron 0.6b — быстрый потоковый.',
+          'Whisper is the reliable local reader; Nemotron 0.6b is the fast streaming one.'));
+    judgeBox.append(engineLine('Whisper', judge.whisper));
+    judgeBox.append(engineLine('Nemotron 0.6b', judge.nemotron,
+      judge.nemotron?.available ? '' : say('нет модели — whisper прочитает запасным', 'no model — whisper reads as the fallback')));
+    judgeBox.append(testRow(
+      say('Проверить судью', 'Test the judge'),
+      async () => {
+        const engine = value('stt_engine') || 'whisper';
+        const data = await api.post('/api/voice/listen', {
+          seconds: Number(seconds.value) || 8, engine,
+        });
+        return data.heard
+          ? `${engine}: «${data.heard}»`
+          : say(`${engine}: тишина или не разобрала`, `${engine}: silence or nothing read`);
+      },
+      [seconds]));
+  }
+
+  function drawVoice() {
+    const voice = status.runtime?.voice || {};
+    const info = voice.tts || {};
+    const sample = el('input', {
+      type: 'text',
+      placeholder: say('Фраза для проверки голоса', 'A phrase to test the voice'),
+      value: say('Привет! Это Юми, я говорю своим голосом.', 'Hi! This is Yumi, speaking with my real voice.'),
+    });
+    fill(voiceBox, CARD_KEYS.voice,
+      say('3. Голос: чем она говорит', '3. Voice: how she sounds'),
+      say('Голос, модель и высота применяются сразу; проверка звучит даже при типе «Пищалка».',
+          'Voice, model and pitch apply at once; the test plays even when the type is “8-bit blips”.'));
+    voiceBox.append(engineLine(say('настоящий голос', 'real voice'), info,
+      info.profile ? `${info.profile.ru_speaker} / ${info.profile.en_speaker} · ${info.profile.pitch}` : ''));
+    voiceBox.append(testRow(
+      say('Послушать голос', 'Listen to the voice'),
+      async () => {
+        const data = await api.post('/api/voice/test', {
+          text: sample.value.trim() || undefined,
+          lang: value('speech_lang') || lang(),
+        });
+        return say(`сказала «${data.text}» (${data.profile?.ru_speaker || ''} / ${data.profile?.pitch ?? ''})`,
+          `said “${data.text}” (${data.profile?.ru_speaker || ''} / ${data.profile?.pitch ?? ''})`);
+      },
+      [sample]));
+  }
+
+  function drawRest() {
+    restBox.replaceChildren();
+    fill(restBox, CARD_KEYS.rest,
+      say('Остальные настройки ушей', 'The rest of the ears'),
+      say('Микрофон, эхо, тишина и дневник ушек.', 'Microphone, echo, quiet and the ears’ diary.'));
+  }
+
+  function drawLive() {
     const runtime = status.runtime || {};
     const mics = runtime.mics || [];
     const unavailable = runtime.unavailable || [];
@@ -131,46 +251,61 @@ export function render(view, ctx) {
     liveText.push(el('div', { class: 'row' },
       el('span', { class: 'dot', style: { background: runtime.wake_on ? 'var(--mint)' : 'var(--red)' } }),
       el('span', { text: runtime.wake_on
-        ? (lang() === 'ru' ? 'имя слышит' : 'listening for her name')
-        : (lang() === 'ru' ? 'имя не слышит' : 'name listening is off') })));
-    if (runtime.sleeping) liveText.push(badge(lang() === 'ru' ? 'не мешать' : 'dnd', 'amber'));
-    if (runtime.listening) liveText.push(badge(lang() === 'ru' ? 'слушает фразу' : 'listening', 'mint'));
-    if (runtime.busy) liveText.push(badge(lang() === 'ru' ? 'занята' : 'busy', 'amber'));
+        ? say('имя слышит', 'listening for her name')
+        : say('имя не слышит', 'name listening is off') })));
+    if (runtime.sleeping) liveText.push(badge(say('не мешать', 'dnd'), 'amber'));
+    if (runtime.listening) liveText.push(badge(say('слушает фразу', 'listening'), 'mint'));
+    if (runtime.busy) liveText.push(badge(say('занята', 'busy'), 'amber'));
     if (unavailable.length) {
-      liveText.push(el('div', { class: 'card-hint', text: `${lang() === 'ru' ? 'недоступно' : 'unavailable'}: ${unavailable.join(', ')}` }));
+      liveText.push(el('div', { class: 'card-hint', text: `${say('недоступно', 'unavailable')}: ${unavailable.join(', ')}` }));
     }
-    live.replaceChildren(el('h3', { text: lang() === 'ru' ? 'Прямо сейчас' : 'Right now' }));
+    live.replaceChildren(el('h3', { text: say('Прямо сейчас', 'Right now') }));
     live.append(el('div', { class: 'stack' }, ...liveText));
     if (mics.length) {
-      live.append(el('div', { class: 'card-hint', style: { marginTop: '10px' }, text: `${lang() === 'ru' ? 'микрофоны' : 'microphones'}:` }));
+      live.append(el('div', { class: 'card-hint', style: { marginTop: '10px' }, text: `${say('микрофоны', 'microphones')}:` }));
       const list = el('div', { class: 'stack', style: { marginTop: '4px' } });
       for (const mic of mics) {
         list.append(el('button', {
           class: 'btn btn-small', type: 'button', text: mic,
-          title: lang() === 'ru' ? 'выбрать этот микрофон' : 'use this microphone',
+          title: say('выбрать этот микрофон', 'use this microphone'),
           onclick: async () => {
-            await ctx.applySettings({ stt_mic: mic });
-            status.settings = { ...(status.settings || {}), stt_mic: mic };
-            drawSettings();
+            await apply('stt_mic', mic);
+            drawAll(true);
           },
         }));
       }
       live.append(list);
     }
-    const sig = mics.join('|');
-    if (sig !== micsSig) {
-      micsSig = sig;
-      drawSettings();
-    }
+  }
+
+  function signature() {
+    const parts = [];
+    for (const key of ALL_KEYS) parts.push(value(key));
+    parts.push((status.runtime?.mics || []).join('|'));
+    const voice = status.runtime?.voice || {};
+    parts.push(voice.activation?.oww?.available, voice.activation?.vosk?.available,
+      voice.judge?.nemotron?.available, voice.tts?.available);
+    return JSON.stringify(parts);
+  }
+
+  function drawAll(force = false) {
+    const sig = signature();
+    if (!force && sig === drawnSig) return;
+    drawnSig = sig;
+    drawActivation();
+    drawJudge();
+    drawVoice();
+    drawRest();
   }
 
   const offStatus = ctx.onStatus((next) => {
     status = next;
-    draw();
+    drawLive();
+    drawAll();
   });
   status = ctx.status || status;
-  draw();
-  drawSettings();
+  drawLive();
+  drawAll(true);
 
   return () => { offStatus(); };
 }

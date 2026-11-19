@@ -3,7 +3,7 @@ import threading
 import time
 from pathlib import Path
 
-from yumi import chat, config, ears, files, jobs, memory, music, system
+from yumi import chat, config, ears, engines, files, jobs, memory, music, system, tts
 
 
 class WebBridge:
@@ -236,16 +236,99 @@ class WebBridge:
         ok = music.music_control(cmd)
         return {'ok': bool(ok), 'cmd': cmd, 'volume': music.read_volume()}
 
-    def voice_listen(self, seconds):
-        res = ears.listen(lang=self.app.settings.get('speech_lang', 'en'),
-                          secs=max(2, min(30, float(seconds or 8))),
-                          size=self.app.settings.get('stt_size', 'small'),
-                          mic=self.app.settings.get('stt_mic'),
-                          engine=self.app.settings.get('stt_engine'))
-        if not res:
-            return {'heard': None, 'readings': None}
+    def voice_listen(self, seconds, engine=None):
+        """one phrase through the chosen judge; the background wake loop is paused
+        first, or the daemon would answer «busy» (one microphone, one ear)"""
+        engine = str(engine or self.app.settings.get('stt_engine') or 'whisper')
+        if engine not in ('whisper', 'nemotron'):
+            raise ValueError(f'unknown judge: {engine}')
+        info = engines.status(self.app.settings)
+        if engine == 'nemotron' and not info['judge']['nemotron']['available']:
+            raise ValueError('nemotron is not installed (tools/nemotron_setup.sh)')
+
+        def work():
+            return ears.listen(lang=self.app.settings.get('speech_lang', 'en'),
+                               secs=max(2, min(30, float(seconds or 8))),
+                               size=self.app.settings.get('stt_size', 'small'),
+                               mic=self.app.settings.get('stt_mic'),
+                               engine=engine)
+
+        res = self._ears_exclusive(work)
+        if res is None:
+            return {'heard': None, 'readings': None, 'engine': engine,
+                    'reason': 'the ears are away or busy'}
         heard = str(res.get('text') or res.get('vosk') or '').strip()
-        return {'heard': heard or None, 'readings': res}
+        return {'heard': heard or None, 'readings': res, 'engine': engine}
+
+    def voice_test_wake(self, seconds=8, ear=None):
+        """hold the microphone for a few seconds with the chosen activation ear:
+        say the name and the panel gets a yes/no, not a guess"""
+        s = self.app.settings
+        ear = str(ear or s.get('wake_ear') or 'auto')
+        if ear not in ('auto', 'oww', 'vosk'):
+            raise ValueError(f'unknown activation ear: {ear}')
+        info = engines.status(s)
+        if ear == 'oww' and not info['activation']['oww']['available']:
+            raise ValueError('openWakeWord is not installed (model or oww venv is missing)')
+        if ear == 'vosk' and not info['activation']['vosk']['available']:
+            raise ValueError('the Vosk ear is not installed (tools/stt_setup.sh)')
+        secs = max(3.0, min(30.0, float(seconds or 8)))
+
+        def work():
+            started = time.monotonic()
+            res = ears.wake(lang=s.get('speech_lang', 'en'),
+                            word=s.get('wake_word', 'юми'),
+                            secs=secs,
+                            size=s.get('stt_size', 'small'),
+                            mic=s.get('stt_mic'),
+                            sensitivity=s.get('wake_sensitivity', 'normal'),
+                            confirm=s.get('wake_confirm', True),
+                            model_size=s.get('wake_model_size', 'small'),
+                            judge_log=s.get('wake_judge_log', True),
+                            engine=s.get('stt_engine'),
+                            oww_ear=ear)
+            return res, round(time.monotonic() - started, 2)
+
+        res, elapsed = self._ears_exclusive(work)
+        if res is None:
+            raise ValueError('the ears are away: run tools/stt_setup.sh')
+        return {'woke': bool(res.get('woke')), 'text': str(res.get('text') or ''),
+                'ear': ear, 'word': str(s.get('wake_word') or 'юми'),
+                'seconds': secs, 'elapsed': elapsed}
+
+    def voice_test(self, text=None, lang=None):
+        """say a sample with the current TTS profile even when her usual voice is
+        blips; a changed profile is written and the daemon restarted first"""
+        s = self.app.settings
+        lang = str(lang or s.get('speech_lang') or 'en')
+        if lang not in ('ru', 'en'):
+            lang = 'en'
+        text = ' '.join(str(text or '').split())[:300]
+        if not text:
+            text = ('Привет! Это Юми, я говорю своим голосом.' if lang == 'ru'
+                    else 'Hi! This is Yumi, speaking with my real voice.')
+        report = tts.sync_profile(s)
+        volume = max(0.1, min(1.0, float(s.get('voice_vol', 50) or 50) / 100.0))
+        path = tts.speak(text, volume)
+        if not path:
+            raise ValueError('the real voice is not set up (tools/tts_setup.sh)')
+        self._on(lambda: self.app.play_voice_file(path))
+        return {'text': text, 'lang': lang, 'path': str(path),
+                'profile': report.get('profile'), 'changed': report.get('changed', False)}
+
+    def voice_engines(self):
+        return engines.status(self.app.settings)
+
+    def _ears_exclusive(self, fn):
+        """run one microphone test with the background wake loop parked"""
+        was_on = self._on(lambda: self.app.wake_pause())
+        try:
+            return fn()
+        finally:
+            try:
+                self._on(lambda: self.app.wake_resume(was_on))
+            except Exception:
+                pass
 
     def voice_stop(self):
         threading.Thread(target=ears.stop, daemon=True).start()

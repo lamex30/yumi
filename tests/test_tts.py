@@ -16,7 +16,7 @@ os.environ['XDG_CACHE_HOME'] = tmp          # her cache must be redirected befor
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ['YUMI_TTS_PY'] = '/nonexistent'  # she must not start a real daemon here
 
-from yumi import tts  # noqa: E402
+from yumi import config, tts  # noqa: E402
 
 HITS = []
 
@@ -108,5 +108,28 @@ tts.LIMIT = 150
 tts._evict()
 assert not old.exists() and new.exists(), 'the oldest file must go'
 tts.LIMIT = 256 * 1024 * 1024
+
+# the voice profile: settings and tts.json stay one thing; no real restart here
+tts.CONF = Path(tmp) / 'tts.json'
+restarts = []
+tts.restart = lambda: restarts.append('restart') or True
+settings = dict(config.DEFAULT_SETTINGS)
+settings['tts_ru_speaker'] = 'baya'
+settings['tts_pitch'] = 1.25
+want = tts.profile_from_settings(settings)
+assert want['ru_speaker'] == 'baya' and want['pitch'] == 1.25, want
+first = tts.sync_profile(settings)
+assert first['changed'] is True and restarts == ['restart'], first
+saved = json.loads(tts.CONF.read_text())
+assert saved['ru_speaker'] == 'baya' and saved['pitch'] == 1.25, saved
+again = tts.sync_profile(settings)
+assert again['changed'] is False and restarts == ['restart'], 'a plain save must not relaunch the voice'
+assert tts.current_profile()['ru_speaker'] == 'baya'
+
+# the panel's cheap status reads the same tts.json and speaks the daemon's key names
+from yumi import engines  # noqa: E402
+engines.TTS_CONF = tts.CONF
+profile = engines.tts_profile()
+assert profile['ru_speaker'] == 'baya' and profile['pitch'] == 1.25, profile
 
 print('ok')

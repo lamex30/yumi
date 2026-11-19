@@ -500,6 +500,10 @@ class Brain(Extras):
         return {'ui_lang': ['en', 'ru'], 'speech_lang': ['en', 'ru'],
                 'breaks': [0, 20, 30, 45, 60], 'outfit': ['auto', 'off'] + self.outfit_names,
                 'voice_vol': [0, 25, 50, 75, 100], 'voice_kind': ['blips', 'tts'],
+                'tts_ru_speaker': ['kseniya', 'baya', 'xenia', 'aidar', 'eugene'],
+                'tts_en_speaker': ['en_0', 'en_10', 'en_21', 'en_50', 'en_99', 'en_117'],
+                'tts_ru_model': ['v5_6_ru', 'v4_ru'],
+                'tts_pitch': [1.0, 1.12, 1.25, 1.4],
                 'stt_engine': ['whisper', 'nemotron'],
                 'stt_size': ['small', 'big'],
                 'stt_mic': [None] + [m['name'] for m in self.mics],
@@ -526,6 +530,10 @@ class Brain(Extras):
             return t('off') if not val else f'{val}%'
         if arg == 'voice_kind':
             return t('v_' + str(val)) if f'v_{val}' in UI['en'] else str(val)
+        if arg == 'tts_pitch':
+            return f'{float(val):.2f}×' if val is not None else t('n_a')
+        if arg in ('tts_ru_speaker', 'tts_en_speaker', 'tts_ru_model'):
+            return str(val)
         if arg == 'stt_size':
             return t('e_' + str(val)) if f'e_{val}' in UI['en'] else str(val)
         if arg == 'stt_engine':
@@ -895,8 +903,13 @@ class Brain(Extras):
                     ('menu', 'settings', t('back'))]
         elif kind == 'set_sound':
             s = self.settings
-            rows = [('set', 'voice_kind', t('voice_kind')), ('set', 'voice_vol', t('voice')),
-                    ('sound_pick', None, t('timer_sound'))]
+            rows = [('set', 'voice_kind', t('voice_kind')), ('set', 'voice_vol', t('voice'))]
+            if (s.get('voice_kind') or 'blips') == 'tts':
+                rows += [('set', 'tts_ru_speaker', t('tts_ru_speaker')),
+                         ('set', 'tts_en_speaker', t('tts_en_speaker')),
+                         ('set', 'tts_pitch', t('tts_pitch')),
+                         ('set', 'tts_ru_model', t('tts_ru_model'))]
+            rows.append(('sound_pick', None, t('timer_sound')))
             if s.get('timer_sound'):
                 rows.append(('sound_reset', None, t('sound_reset')))
             rows += [('sound_test', None, t('sound_test')), ('menu', 'settings', t('back'))]
@@ -1103,6 +1116,8 @@ class Brain(Extras):
             if arg == 'tap_ears':
                 self.requests.append(('tap_set', s[arg]))
             if arg in ('voice_vol', 'voice_kind') and s[arg]:
+                self.say_sample()
+            if arg.startswith('tts_') and (s.get('voice_kind') or 'blips') == 'tts':
                 self.say_sample()
             if arg == 'chat_provider':
                 self.chat_models = []       # refetch for the new provider

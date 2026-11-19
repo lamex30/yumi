@@ -24,6 +24,10 @@ DEFAULT_SETTINGS = {
     'chatter': True,          # idle small talk (at most every 10 minutes, only while she is out)
     'voice_vol': 50,          # her voice while her words type out, % (0 = silent)
     'voice_kind': 'blips',    # her voice: blips (8-bit) / tts (a real one, tools/tts_setup.sh)
+    'tts_ru_speaker': 'kseniya',  # her Russian Silero voice: kseniya/baya/xenia/aidar/eugene
+    'tts_en_speaker': 'en_10',    # her English Silero voice: en_0 … en_117
+    'tts_ru_model': 'v5_6_ru',    # v5_6_ru (questions) / v4_ru (the older one)
+    'tts_pitch': 1.12,        # 1.0 = as recorded, 1.2 = a proper squeak
     'scale': 1,               # integer pixel scale of the sprites
     'recolor': True,          # follow the wallpaper palette
     'gaze': True,             # her eyes follow the pointer
@@ -110,6 +114,17 @@ DEFAULT_SETTINGS = {
     'web_panel_open': False,  # open the browser when the panel is switched on
     'web_panel_session_hours': 168,  # how long a browser session stays signed in
 }
+
+# the Silero profile lives in ~/.config/yumi/tts.json (the daemon's own file);
+# these settings are its copy, so the panel and the in-world menu can edit it
+TTS_PROFILE_KEYS = {
+    'tts_ru_speaker': 'ru_speaker',
+    'tts_en_speaker': 'en_speaker',
+    'tts_ru_model': 'ru_model',
+    'tts_pitch': 'pitch',
+}
+TTS_PROFILE_DEFAULTS = {key: DEFAULT_SETTINGS[key] for key in TTS_PROFILE_KEYS}
+
 DEFAULT_STATE = {
     'mode': 'docked',         # docked / air
     'dock_x': None,           # foot x when docked (None = bottom-right corner)
@@ -154,11 +169,26 @@ class Store(dict):
             pass
 
 
+def _adopt_tts_profile(st):
+    """tts.json stays editable by hand: its profile wins when Yumi starts, so a
+    manual tweak is never overwritten by the defaults in settings.json"""
+    try:
+        data = json.loads((CONFIG_DIR / 'tts.json').read_text())
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    for key, name in TTS_PROFILE_KEYS.items():
+        if name in data and data[name] is not None:
+            st[key] = data[name]
+
+
 def load_settings():
     st = Store(CONFIG_DIR / 'settings.json', DEFAULT_SETTINGS)
     if st.fresh:                                  # first run: speak the system language
         st['ui_lang'] = st['speech_lang'] = detect_lang()
         st.save()
+    _adopt_tts_profile(st)
     return st
 
 
@@ -266,6 +296,8 @@ UI = {
         'hint': 'Drag a file onto me to convert, compress or keep it',
         'breaks': 'Health breaks', 'idle_nap': 'Nap when idle', 'outfit': 'Outfit',
         'voice': 'Voice', 'voice_kind': 'Voice type', 'v_blips': '8-bit', 'v_tts': 'Real voice',
+        'tts_ru_speaker': 'Russian voice', 'tts_en_speaker': 'English voice',
+        'tts_ru_model': 'Russian voice model', 'tts_pitch': 'Voice pitch',
         'cat_her': 'Her', 'cat_sound': 'Sound', 'cat_look': 'Look', 'cat_lang': 'Language', 'n_a': 'not available yet', 'o_auto': 'auto', 'o_off': 'none', 'o_halloween': 'Halloween', 'o_newyear': 'New Year',
         'o_valentine': 'Valentine', 'o_spring': 'March 8', 'min': 'min', 'monitor': 'Screen',
         'cat_ring': 'Buttons', 'ring_done': 'Done', 'ring_new': 'New button', 'ring_change': 'Edit button', 'ring_save': 'Save',
@@ -330,6 +362,8 @@ UI = {
         'hint': 'Перетащи файл на меня: сконвертирую, сожму или сохраню',
         'breaks': 'Перерывы', 'idle_nap': 'Дремать без тебя', 'outfit': 'Наряд',
         'voice': 'Голосок', 'voice_kind': 'Тип голоска', 'v_blips': 'Пищалка', 'v_tts': 'Настоящий',
+        'tts_ru_speaker': 'Русский голос', 'tts_en_speaker': 'Английский голос',
+        'tts_ru_model': 'Модель русского голоса', 'tts_pitch': 'Высота голоса',
         'cat_her': 'Поведение', 'cat_sound': 'Звук', 'cat_look': 'Внешний вид', 'cat_lang': 'Язык', 'n_a': 'пока недоступно', 'o_auto': 'авто', 'o_off': 'нет', 'o_halloween': 'Хэллоуин', 'o_newyear': 'Новый год',
         'hourly_chimes': 'Каждый час она говорит время',
         'o_valentine': 'Валентинка', 'o_spring': '8 Марта', 'min': 'мин', 'monitor': 'Экран',

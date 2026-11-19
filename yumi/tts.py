@@ -27,6 +27,7 @@ PY = Path(os.environ.get('YUMI_TTS_PY') or Path.home() / '.local/share/yumi/tts/
 DAEMON = Path(__file__).resolve().parent / 'tts_daemon.py'
 DIR = config.CACHE_DIR / 'tts'
 STATE = DIR / 'port.json'
+CONF = Path(config.CONFIG_DIR) / 'tts.json'
 LIMIT = 256 * 1024 * 1024          # the phrase cache stays under this
 _sys_py_ok = None
 
@@ -84,8 +85,14 @@ _shutting_down = False # close() already said goodbye: no thread may start the d
 def close():
     """stop the TTS daemon — Yumi's own child or an adopted one — and forbid new
     starts; safe to call more than once"""
-    global _proc, _shutting_down
+    global _shutting_down
     _shutting_down = True
+    _stop_daemon()
+
+
+def _stop_daemon():
+    """terminate the running daemon (ours or an adopted one); no flag is touched"""
+    global _proc
     p, _proc = _proc, None
     if p:
         try:
@@ -106,6 +113,88 @@ def close():
         os.kill(pid, signal.SIGKILL)
     except (OSError, TypeError):
         pass
+
+
+# ---- the voice profile: settings.json and tts.json stay one thing ----
+
+def _profile_defaults():
+    return {name: config.TTS_PROFILE_DEFAULTS[key]
+            for key, name in config.TTS_PROFILE_KEYS.items()}
+
+
+def profile_from_settings(settings):
+    """the tts.json-shaped profile the app's settings ask for"""
+    out = _profile_defaults()
+    for key, name in config.TTS_PROFILE_KEYS.items():
+        value = settings.get(key, out.get(name))
+        if name == 'pitch':
+            try:
+                value = round(max(0.5, min(2.0, float(value))), 3)
+            except (TypeError, ValueError):
+                value = out[name]
+        elif value not in (None, ''):
+            value = str(value)
+        else:
+            value = out[name]
+        out[name] = value
+    return out
+
+
+def current_profile():
+    """what tts_daemon would load now (tts.json over its own defaults)"""
+    data = _profile_defaults()
+    try:
+        saved = json.loads(CONF.read_text())
+        if isinstance(saved, dict):
+            for name in data:
+                if name in saved and saved[name] is not None:
+                    data[name] = saved[name]
+    except (OSError, ValueError):
+        pass
+    return data
+
+
+def write_profile(profile):
+    """save the profile where the daemon reads it; unknown manual keys are kept"""
+    data = {}
+    try:
+        saved = json.loads(CONF.read_text())
+        if isinstance(saved, dict):
+            data.update(saved)
+    except (OSError, ValueError):
+        pass
+    data.update(profile)
+    try:
+        CONF.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CONF.with_suffix('.tmp')
+        tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False) + '\n')
+        tmp.replace(CONF)
+        return True
+    except OSError:
+        return False
+
+
+def restart():
+    """stop the daemon so the next speak() starts one with the new profile;
+    unlike close() this leaves the door open for that next start"""
+    global _shutting_down
+    _shutting_down = True
+    _stop_daemon()
+    _shutting_down = False
+    return True
+
+
+def sync_profile(settings):
+    """make tts.json match the settings and restart the daemon only when the
+    profile really changed (a plain settings save must not relaunch the voice)"""
+    want = profile_from_settings(settings)
+    have = current_profile()
+    if want == have:
+        return {'changed': False, 'profile': have}
+    if not write_profile(want):
+        return {'changed': False, 'profile': have, 'error': 'tts.json is not writable'}
+    restart()
+    return {'changed': True, 'profile': want}
 
 
 def _is_daemon(pid):

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from gi.repository import Gdk, GLib
 
-from yumi import chat, config, memory, music, pixui, system, webpanel
+from yumi import chat, config, engines, memory, music, pixui, system, tts, webpanel
 from yumi.sprites import ui_colors
 from yumi.webpanel import catalog as webcatalog
 
@@ -252,6 +252,7 @@ class PanelMixin:
                 'music': {'now_playing': self._web_music, 'volume': self._web_volume},
                 'wake_on': bool(self.wake_on),
                 'tap_ears': bool(s.get('tap_ears')),
+                'voice': engines.status(s),
                 'downloads': self.dl_announced,
                 'outfit': getattr(self.meta, 'outfit', None),
                 'shelf_count': len([p for p in (st.get('shelf') or []) if Path(p).exists()]),
@@ -295,6 +296,11 @@ class PanelMixin:
         if 'chat_provider' in patch:
             b.chat_models = []
             b.requests.append(('chat_models',))
+        if any(k.startswith('tts_') for k in patch):
+            try:
+                tts.sync_profile(self.settings)
+            except Exception:
+                pass
         try:
             music.apply_settings(self.settings)
         except Exception:

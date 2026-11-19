@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .. import config
+from .. import config, engines
 
 # settings that must never travel to a browser in clear text
 SECRET_KEYS = {
@@ -86,6 +86,8 @@ KEY_SECTION = {
     'pinned': 'behavior', 'reactions': 'behavior', 'chatter': 'behavior',
     'hourly_chimes': 'behavior', 'idle_nap': 'behavior', 'breaks': 'behavior',
     'gaze': 'behavior', 'voice_vol': 'sound', 'voice_kind': 'sound',
+    'tts_ru_speaker': 'sound', 'tts_en_speaker': 'sound',
+    'tts_ru_model': 'sound', 'tts_pitch': 'sound',
     'timer_sound': 'sound', 'recolor': 'look', 'hue': 'look', 'scale': 'look',
     'outfit': 'look', 'ui_lang': 'language', 'speech_lang': 'language',
     'chat_provider': 'mind', 'chat_model': 'mind', 'chat_think': 'mind',
@@ -113,6 +115,9 @@ CHOICES = {
     'breaks': [0, 20, 30, 45, 60],
     'voice_vol': [0, 25, 50, 75, 100],
     'voice_kind': ['blips', 'tts'],
+    'tts_ru_speaker': engines.RU_SPEAKERS,
+    'tts_en_speaker': engines.EN_SPEAKERS,
+    'tts_ru_model': engines.RU_MODELS,
     'stt_engine': ['whisper', 'nemotron'],
     'stt_size': ['small', 'big'],
     'stt_echo': [True, False],
@@ -134,6 +139,10 @@ CHOICE_LABELS = {
     'speech_lang': {'en': 'English', 'ru': 'Русский'},
     'voice_kind': {'blips': {'en': '8-bit blips', 'ru': 'Пищалка'},
                    'tts': {'en': 'Real voice', 'ru': 'Настоящий'}},
+    'tts_ru_speaker': {'kseniya': 'Kseniya', 'baya': 'Baya', 'xenia': 'Xenia',
+                       'aidar': 'Aidar', 'eugene': 'Eugene'},
+    'tts_ru_model': {'v5_6_ru': {'en': 'v5.6 (questions)', 'ru': 'v5.6 (вопросы)'},
+                     'v4_ru': {'en': 'v4 (older)', 'ru': 'v4 (старая)'}},
     'stt_engine': {'whisper': 'Whisper', 'nemotron': 'Nemotron 0.6b'},
     'stt_size': {'small': {'en': 'Lite', 'ru': 'Лёгкая'},
                  'big': {'en': 'Sharp', 'ru': 'Точная'}},
@@ -157,7 +166,9 @@ TYPES = {
     'scale': 'range', 'voice_vol': 'range', 'hue': 'range', 'breaks': 'select',
     'chat_history_n': 'select', 'web_panel_port': 'number',
     'web_panel_session_hours': 'number', 'phrase_tail_ms': 'number',
-    'wake_after': 'number', 'timer_sound': 'path',
+    'wake_after': 'number', 'timer_sound': 'path', 'tts_pitch': 'range',
+    'tts_ru_speaker': 'select', 'tts_en_speaker': 'select',
+    'tts_ru_model': 'select',
     'music_jellyfin_password': 'password', 'polza_api_key': 'password',
     'music_jellyfin_key': 'password', 'music_dirs': 'text',
     'web_panel': 'switch', 'web_panel_open': 'switch',
@@ -167,6 +178,7 @@ RANGES = {
     'scale': (1, 4, 1), 'voice_vol': (0, 100, 5), 'hue': (0, 1, 0.01),
     'web_panel_port': (1024, 65535, 1), 'web_panel_session_hours': (1, 8760, 1),
     'phrase_tail_ms': (200, 5000, 50), 'wake_after': (0, 10, 0.1),
+    'tts_pitch': (0.7, 1.5, 0.01),
 }
 
 TITLES = {
@@ -179,6 +191,10 @@ TITLES = {
     'gaze': {'en': 'Eyes follow the pointer', 'ru': 'Глаза следят за курсором'},
     'voice_vol': {'en': 'Voice volume', 'ru': 'Громкость голоска'},
     'voice_kind': {'en': 'Voice type', 'ru': 'Тип голоска'},
+    'tts_ru_speaker': {'en': 'Russian voice', 'ru': 'Русский голос'},
+    'tts_en_speaker': {'en': 'English voice', 'ru': 'Английский голос'},
+    'tts_ru_model': {'en': 'Russian voice model', 'ru': 'Модель русского голоса'},
+    'tts_pitch': {'en': 'Voice pitch', 'ru': 'Высота голоса'},
     'timer_sound': {'en': 'Timer sound', 'ru': 'Звук таймера'},
     'recolor': {'en': 'Wallpaper colors', 'ru': 'Цвета от обоев'},
     'hue': {'en': 'Manual hue', 'ru': 'Оттенок вручную'},
@@ -207,7 +223,7 @@ TITLES = {
     'wake_judge_log': {'en': 'Judge log', 'ru': 'Лог судьи'},
     'name_duck': {'en': 'Duck sound on the name', 'ru': 'Приглушать звук при имени'},
     'stt_size': {'en': 'Phrase ear size', 'ru': 'Размер уха для фраз'},
-    'stt_engine': {'en': 'Ear for phrases', 'ru': 'Ухо для фраз'},
+    'stt_engine': {'en': 'Phrase judge (STT)', 'ru': 'Судья фраз (STT)'},
     'stt_mic': {'en': 'Microphone', 'ru': 'Микрофон'},
     'stt_echo': {'en': 'Echo canceller', 'ru': 'Подавление эха'},
     'stt_selfmute': {'en': 'Close ears while speaking', 'ru': 'Закрывать ушки, пока говорит'},
@@ -248,6 +264,14 @@ HINTS = {
              'ru': 'Её глаза следят за курсором по экрану.'},
     'timer_sound': {'en': 'Empty = her 8-bit chime. Any WAV or OGG file works.',
                     'ru': 'Пусто = её 8-битный колокольчик. Подойдёт WAV или OGG.'},
+    'tts_ru_speaker': {'en': 'The Silero speaker for Russian lines. A voice change restarts the voice daemon (a few seconds).',
+                       'ru': 'Голос Silero для русских реплик. Смена голоса перезапускает демон озвучки (несколько секунд).'},
+    'tts_en_speaker': {'en': 'The Silero speaker for English lines (en_0 … en_117).',
+                       'ru': 'Голос Silero для английских реплик (en_0 … en_117).'},
+    'tts_ru_model': {'en': 'v5.6 hears questions and exclamations; v4 is the older voice. Both live in the cache.',
+                     'ru': 'v5.6 слышит вопросы и восклицания; v4 — старая модель. Обе лежат в кэше.'},
+    'tts_pitch': {'en': '1.0 = as recorded, 1.2 = a proper squeak. Applies to both voices.',
+                  'ru': '1.0 — как записано, 1.2 — уже пищалка. Работает для обоих голосов.'},
     'hue': {'en': 'Used when wallpaper colors are off. 0…1 around the color wheel.',
             'ru': 'Работает, когда цвета от обоев выключены. 0…1 по кругу цветов.'},
     'scale': {'en': 'Whole interface pixels. A restart is needed for the window itself.',
@@ -260,6 +284,8 @@ HINTS = {
                     'ru': 'Дневник sqlite в ~/.local/state/yumi/yumi.db.'},
     'wake_word': {'en': 'Say it, then the question. «Юми» by default.',
                   'ru': 'Скажи его, потом вопрос. По умолчанию «Юми».'},
+    'stt_engine': {'en': 'Who reads the phrase after the name. Nemotron is faster and needs its model; whisper falls back to the lite ear if it is away.',
+                   'ru': 'Кто читает фразу после имени. Nemotron быстрее и требует свою модель; whisper при её отсутствии откатывается на лёгкое ухо.'},
     'stt_mic': {'en': 'Empty = the desktop\'s own choice.',
                 'ru': 'Пусто = выбор рабочего стола.'},
     'music_source': {'en': 'Auto: Jellyfin at home, her folders away.',
