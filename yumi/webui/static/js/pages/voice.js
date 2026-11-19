@@ -135,13 +135,13 @@ export function render(view, ctx) {
       note ? el('span', { class: 'card-hint', text: note }) : null);
   }
 
-  function testRow(buttonText, onclick, extra) {
+  function testRow(buttonText, onclick, extra, busy) {
     const out = el('div', { class: 'bubble', text: say('результат появится здесь', 'the result will appear here') });
     const button = el('button', { class: 'btn btn-primary', type: 'button', text: buttonText, onclick: async () => {
       button.disabled = true;
       const old = button.textContent;
-      button.textContent = say('слушаю…', 'listening…');
-      out.textContent = say('говорю с микрофоном, подожди…', 'holding the microphone, wait…');
+      button.textContent = busy?.button || say('слушаю…', 'listening…');
+      out.textContent = busy?.out || say('говорю с микрофоном, подожди…', 'holding the microphone, wait…');
       try {
         const text = await onclick();
         out.textContent = text;
@@ -233,7 +233,12 @@ export function render(view, ctx) {
         return say(`сказала «${data.text}» (${data.profile?.ru_speaker || ''} / ${data.profile?.pitch ?? ''})`,
           `said “${data.text}” (${data.profile?.ru_speaker || ''} / ${data.profile?.pitch ?? ''})`);
       },
-      [sample]));
+      [sample],
+      {
+        button: say('синтезирую…', 'synthesizing…'),
+        out: say('готовлю голос, сейчас зазвучит… (в первый раз это может занять до минуты)',
+          'preparing the voice, it will sound in a moment… (the first run can take a minute)'),
+      }));
   }
 
   function drawRest() {

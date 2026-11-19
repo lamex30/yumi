@@ -30,6 +30,7 @@ class App(PanelMixin, SensesMixin, Gtk.Application):
         self.active = None
         self.sound_src = None
         self.voice_proc = None          # the player saying her current line
+        self.voice_preview = False      # a panel sample: no bubble owns it, keep it playing
         self.failed = False             # this desktop cannot show her
         self.voice_id = None            # which bubble it belongs to
         self.load_gen = 0               # sprite reloads: only the newest one is used
@@ -303,7 +304,11 @@ class App(PanelMixin, SensesMixin, Gtk.Application):
         b = self.brain
         b.update(time.monotonic())
         self.handle_requests()
-        if self.voice_proc and (not b.bubble or b.bubble.get('id') != self.voice_id):
+        if self.voice_proc and not self.talking():
+            self.voice_proc = None                   # the line is over: nothing left to hush
+            self.voice_preview = False
+        if self.voice_proc and not self.voice_preview and (
+                not b.bubble or b.bubble.get('id') != self.voice_id):
             self.hush()                              # the bubble went away: so does her voice
         self.ops = b.scene()
         self.web_tick()

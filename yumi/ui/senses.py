@@ -58,10 +58,14 @@ class SensesMixin:
         """play a ready WAV out loud: the panel's «listen to this voice» uses it
         (the usual speech path would go through her blips and bubble)"""
         self.hush()
+        self.voice_preview = True
         self.voice_proc = system.play_file(path)
+        if not self.voice_proc:
+            self.voice_preview = False
         return bool(self.voice_proc)
 
     def hush(self):
+        self.voice_preview = False
         p, self.voice_proc = self.voice_proc, None
         try:
             if p:

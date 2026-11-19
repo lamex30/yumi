@@ -312,8 +312,10 @@ class WebBridge:
         path = tts.speak(text, volume)
         if not path:
             raise ValueError('the real voice is not set up (tools/tts_setup.sh)')
-        self._on(lambda: self.app.play_voice_file(path))
-        return {'text': text, 'lang': lang, 'path': str(path),
+        started = self._on(lambda: self.app.play_voice_file(path))
+        if not started:
+            raise ValueError('the sample is ready, but no audio player could play it')
+        return {'text': text, 'lang': lang, 'path': str(path), 'playing': True,
                 'profile': report.get('profile'), 'changed': report.get('changed', False)}
 
     def voice_engines(self):
