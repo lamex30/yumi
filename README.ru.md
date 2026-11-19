@@ -407,14 +407,6 @@ openWakeWord (обученная модель `yumi.onnx`) или vosk, — а *
   `~/.local/state/yumi/web-audit.log`.
 - Подробности для разработчика: [docs/handoff-web-panel.md](docs/handoff-web-panel.md).
 
-## Снимки панели в браузере
-
-| Обзор | Ушки и голос | Настройки |
-|-------|--------------|-----------|
-| ![Обзор](docs/webpanel-overview.png) | ![Ушки и голос](docs/webpanel-voice.png) | ![Настройки](docs/webpanel-settings.png) |
-
-Положите скриншоты в `docs/webpanel-overview.png`, `docs/webpanel-voice.png` и `docs/webpanel-settings.png` (шириной до ~1000 px).
-
 ## Если что-то не так
 
 - **`gtk4-layer-shell is not installed`**: поставьте его (см. таблицу выше) или укажите путь:
