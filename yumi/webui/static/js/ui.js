@@ -317,11 +317,19 @@ export function modal({ title, body, actions = [], wide = false, onClose }) {
     if (!action) continue;
     row.append(button(action.label, {
       kind: action.kind || '',
-      onClick: async () => {
-        if (action.onClick) {
-          const keep = await action.onClick(close);
-          if (keep === false) return;
+      onClick: async (ev) => {
+        // a second click while the first one is still saving must not run the
+        // action twice (two notes out of one, for instance): the button waits
+        const node = ev?.currentTarget;
+        if (node?.disabled) return;
+        if (node) node.disabled = true;
+        let keep;
+        try {
+          keep = action.onClick ? await action.onClick(close) : undefined;
+        } finally {
+          if (node && (keep === false || keep === undefined)) node.disabled = false;
         }
+        if (keep === false) return;
         close();
       },
     }));
