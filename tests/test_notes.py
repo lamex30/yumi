@@ -25,8 +25,19 @@ assert notes.voice_intent('покажи заметки') == {'action': 'list'}
 assert notes.voice_intent('show my notes') == {'action': 'list'}
 assert notes.voice_intent('покажи заметки про молоко') == {
     'action': 'search', 'query': 'молоко'}
+assert notes.voice_intent('последняя заметка') == {'action': 'last'}
+assert notes.voice_intent('покажи последнюю заметку') == {'action': 'last'}
+assert notes.voice_intent('что в последней заметке') == {'action': 'last'}
+assert notes.voice_intent('what is my last note') == {'action': 'last'}
+assert notes.voice_intent('last note') == {'action': 'last'}
 assert notes.voice_intent('как дела') is None
 assert notes.voice_intent('это интересная заметка') is None, 'a mention is not a wish'
+
+# a long note gives her first sentences when the mind cannot make a summary
+assert notes.brief('Короткая заметка.') == 'Короткая заметка.'
+long = 'а' * 200 + '. ' + 'б' * 200
+short = notes.brief(long)
+assert short.endswith('.') and len(short) <= 260, short
 
 # ---- the book: a throwaway sqlite file, the embedder off so the hashed
 # vector stands in (the same fallback the diary trusts after a failure)

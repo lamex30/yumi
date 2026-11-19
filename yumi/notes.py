@@ -59,6 +59,18 @@ _LIST_TRIGGERS = (
     'покажи все заметки', 'покажи заметки', 'мои заметки', 'список заметок', 'все заметки',
     'show all notes', 'show my notes', 'show notes', 'my notes', 'list notes', 'all notes',
 )
+_LAST_TRIGGERS = (
+    'покажи последнюю заметку', 'прочитай последнюю заметку', 'озвучь последнюю заметку',
+    'зачитай последнюю заметку', 'какая у меня последняя заметка', 'какая последняя заметка',
+    'что в последней заметке', 'что я писала последнее', 'что я писал последнее',
+    'самая свежая заметка', 'самая последняя заметка', 'последняя заметка',
+    'последнюю заметку', 'свежая заметка',
+    'what was my last note', 'what was the last note', 'what is my last note',
+    'what is the last note', "what's my last note", "what's the last note",
+    'show my last note', 'show the last note', 'show the latest note',
+    'read my last note', 'read the last note', 'read the latest note',
+    'my last note', 'the last note', 'latest note', 'last note',
+)
 # a wish may come with a polite word before it («пожалуйста, запиши заметку…»):
 # only the verbs take part, so a sentence that merely mentions a «заметка» is
 # not turned into a note
@@ -278,6 +290,18 @@ def _row(row):
             'text': text, 'source': source}
 
 
+def brief(text, limit=260):
+    """the first sentences of a long note: what she reads when the mind is away"""
+    text = ' '.join(str(text or '').split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind('. '), cut.rfind('! '), cut.rfind('? '), cut.rfind('; '))
+    if end >= limit // 2:
+        return cut[:end + 1].strip()
+    return cut.rstrip(' ,;:—–-') + '…'
+
+
 def voice_intent(text, lang='ru'):
     """what a spoken phrase asks of the notes: {'action': 'add', 'text': ...},
     {'action': 'search', 'query': ...}, {'action': 'list'} or None.
@@ -288,7 +312,8 @@ def voice_intent(text, lang='ru'):
     if not raw:
         return None
     low = raw.lower().replace('ё', 'е')
-    for action, triggers in (('search', _SEARCH_TRIGGERS),
+    for action, triggers in (('last', _LAST_TRIGGERS),
+                             ('search', _SEARCH_TRIGGERS),
                              ('list', _LIST_TRIGGERS),
                              ('add', _ADD_TRIGGERS)):
         for trigger in sorted(triggers, key=len, reverse=True):
@@ -296,8 +321,8 @@ def voice_intent(text, lang='ru'):
                 body = raw[len(trigger):].strip(' \t:-,.!?—–')
                 if not body and action == 'search':
                     return {'action': 'list'}
-                if action == 'list':
-                    return {'action': 'list'}
+                if action in ('list', 'last'):
+                    return {'action': action}
                 return {'action': action, 'text': body} if action == 'add' \
                     else {'action': action, 'query': body}
     # «запиши заметку …» said with a word before it («пожалуйста, запиши…»)

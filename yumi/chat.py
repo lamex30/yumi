@@ -186,6 +186,29 @@ def ask(settings, history, timeout=90):
     return _strip_think(' '.join(str((data.get('message') or {}).get('content') or '').split()))
 
 
+def summarize(settings, title, text, lang='en', timeout=15):
+    """one or two sentences about a note, for when she reads it aloud; the note's
+    own first lines are the fallback elsewhere, '' when the mind is away"""
+    text = ' '.join(str(text or '').split())
+    if not text:
+        return ''
+    title = ' '.join(str(title or '').split())
+    if str(lang) == 'ru':
+        system = ('Ты кратко пересказываешь заметки. Отвечай по-русски одним-двумя '
+                  'короткими предложениями, только суть, без вступления и кавычек.')
+        prompt = ('Перескажи эту заметку.\n\n'
+                  + (f'Заголовок: {title}\n' if title else '')
+                  + 'Заметка:\n' + text[:4000])
+    else:
+        system = ('You briefly retell notes. Answer in English in one or two short '
+                  'sentences, only the point, no preamble and no quotes.')
+        prompt = ('Retell this note.\n\n'
+                  + (f'Title: {title}\n' if title else '')
+                  + 'Note:\n' + text[:4000])
+    return _one_shot(settings, prompt, 110, lang, timeout=timeout, temp=0.2,
+                     system=system)
+
+
 # ---- the little questions she needs no mind for: the clock and the window ----
 
 TIME_Q_RE = re.compile(
@@ -306,7 +329,7 @@ def weather_when(text):
     return 'today'
 
 
-def _one_shot(settings, user, tokens, lang='en', timeout=90, temp=None):
+def _one_shot(settings, user, tokens, lang='en', timeout=90, temp=None, system=None):
     """one reply for one user line, no conversation behind it (the hour joke, a joke, ...);
     the reply text, or '' when the mind is out of reach"""
     if _provider(settings) == 'polza.ai' and not str(settings.get('polza_api_key') or '').strip():
@@ -317,7 +340,7 @@ def _one_shot(settings, user, tokens, lang='en', timeout=90, temp=None):
     req_body = {
         'model': settings.get('chat_model') or (POLZA_MODEL if _provider(settings) == 'polza.ai' else DEFAULT_MODEL),
         'messages': [
-            {'role': 'system', 'content': system_prompt(lang, bool(settings.get('sassy')))},
+            {'role': 'system', 'content': system or system_prompt(lang, bool(settings.get('sassy')))},
             {'role': 'user', 'content': user}
         ],
         'stream': False,

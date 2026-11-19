@@ -451,6 +451,8 @@ the artist and the track of whatever is sounding right now.
 **Notes.** Say «Юми, запиши заметку купить молоко» and she writes it down. Ask
 «найди заметку про молоко» («find a note about milk») or «покажи заметки» («show my
 notes») and she reads the closest note aloud, naming the count when there are several.
+Ask «последняя заметка» («last note») and she retells the newest one in a short summary
+made by the mind, or by the note's first sentences when the mind is away.
 Notes can also be typed on the **Notes** page of the browser panel, which has search,
 editing, deletion and a **Record by voice** button. Spoken and typed notes live in the
 same sqlite book, `~/.local/state/yumi/yumi.db` (table `notes`), and each carries two

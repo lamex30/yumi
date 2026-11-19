@@ -1489,6 +1489,24 @@ class Brain(Extras):
         self.thinking = False
         action = str((payload or {}).get('action') or 'search')
         items = list((payload or {}).get('items') or [])
+        if action == 'last':
+            if not items:
+                self.say('notes_empty')
+                return
+            first = items[0]
+            title = str(first.get('title') or '').strip()
+            text = ' '.join(str(first.get('summary') or first.get('text') or '').split())
+            if not text:
+                self.say('notes_empty')
+                return
+            if len(text) > 360:
+                text = text[:357].rstrip() + '…'
+            raw = ' '.join(str(first.get('text') or '').split())
+            if title and not raw.startswith(title):
+                self.say('note_last', title=title, text=text)
+            else:
+                self.say('note_last_plain', text=text)
+            return
         if action == 'list':
             if not items:
                 self.say('notes_empty')

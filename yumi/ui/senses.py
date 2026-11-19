@@ -378,7 +378,18 @@ class SensesMixin:
                         self.web.publish('notes', {'action': 'add', 'note': note})
                     GLib.idle_add(lambda: self.ev(lambda b: b.note_saved(note)) and False)
                     return
-                if action == 'list':
+                if action == 'last':
+                    items = notes.recent(1)
+                    if items:
+                        note = items[0]
+                        try:
+                            summary = chat.summarize(
+                                self.settings, note.get('title'), note.get('text'),
+                                self.settings.get('speech_lang', 'en'))
+                        except Exception:
+                            summary = ''
+                        items = [dict(note, summary=summary or notes.brief(note.get('text')))]
+                elif action == 'list':
                     items = notes.recent(5)
                 else:
                     items = notes.search(query, self.settings, limit=5)

@@ -105,6 +105,16 @@ export function render(view, ctx) {
           note.source === 'voice' ? 'amber' : ''));
       const actions = el('div', { class: 'row', style: { marginTop: '8px' } },
         el('button', {
+          class: 'btn btn-small', type: 'button', text: ru() ? 'Озвучить' : 'Speak',
+          onclick: async () => {
+            const said = [note.title, note.text].filter(Boolean).join('. ');
+            try {
+              await api.post('/api/voice/speak', { text: said.slice(0, 1200) });
+              toast(ru() ? 'Говорю' : 'Speaking', 'good');
+            } catch (err) { errToast(err); }
+          },
+        }),
+        el('button', {
           class: 'btn btn-small', type: 'button', text: ru() ? 'Изменить' : 'Edit',
           onclick: () => openEditor(note),
         }),

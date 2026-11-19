@@ -214,6 +214,10 @@ LINES = {
                         ("My notes are empty. Tell me «write a note ...».", 'wink')],
         'note_list': [("I have {n} notes. The newest: «{title}».", 'happy'),
                       ("{n} notes in the book. The latest is «{title}».", None)],
+        'note_last': [("The last note is «{title}». {text}", 'happy'),
+                      ("Here is the latest, «{title}»: {text}", None)],
+        'note_last_plain': [("The last note: {text}", 'happy'),
+                            ("Here is the latest: {text}", None)],
     },
     'ru': {
         'hello': [("Мм... я тут. Почти.", None), ("Привет. Я буду в уголке.", 'happy'),
@@ -401,6 +405,10 @@ LINES = {
                         ("В заметках пусто. Скажи «запиши заметку ...».", 'wink')],
         'note_list': [("У меня {n} заметок. Последняя: «{title}».", 'happy'),
                       ("В книжке {n} заметок. Самая свежая — «{title}».", None)],
+        'note_last': [("Последняя заметка — «{title}». {text}", 'happy'),
+                      ("Вот самая свежая, «{title}»: {text}", None)],
+        'note_last_plain': [("Последняя заметка: {text}", 'happy'),
+                            ("Вот она, последняя: {text}", None)],
     },
 }
 
