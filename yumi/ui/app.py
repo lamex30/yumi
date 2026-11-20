@@ -313,6 +313,17 @@ class App(PanelMixin, SensesMixin, Gtk.Application):
         if self.voice_proc and not self.voice_preview and (
                 not b.bubble or b.bubble.get('id') != self.voice_id):
             self.hush()                              # the bubble went away: so does her voice
+        # her line finished sounding: drop the streaming safety floor so the bubble
+        # closes soon, but keep it alive while a segment is still being made or played
+        if (b.bubble and not self.voice_preview
+                and self.voice_id == b.bubble.get('id')
+                and not b.chat_streaming and not b.bubble.get('stream')
+                and not self.talking()
+                and not getattr(self, 'voice_queue', None)
+                and not getattr(self, '_voice_ready', None)
+                and not getattr(self, 'voice_streaming', False)
+                and getattr(self, '_voice_next', 1) == getattr(self, '_voice_seq', 0) + 1):
+            b.bubble['until'] = min(b.bubble['until'], b.now + 2.0)
         self.ops = b.scene()
         self.web_tick()
         for w in self.windows:
