@@ -17,7 +17,7 @@ export function render(view, ctx) {
   let text = '';
   let auto = false;
   let timer = 0;
-  let busy = false;
+  let inflight = 0;
 
   view.append(
     el('h2', { class: 'pagehead', text: lang() === 'ru' ? 'Журналы' : 'Logs' }),
@@ -32,15 +32,19 @@ export function render(view, ctx) {
     ...[100, 300, 1000, 2000].map((n) => el('option', { value: String(n), text: String(n), selected: n === lines })));
   const refresh = el('button', {
     class: 'btn btn-small', type: 'button', text: lang() === 'ru' ? 'Обновить' : 'Refresh',
-    onclick: () => load(true),
+    onclick: () => load(true, true),
   });
   const autoButton = el('button', {
     class: 'btn btn-small', type: 'button', text: lang() === 'ru' ? 'Следить' : 'Follow',
     onclick: () => {
       auto = !auto;
       autoButton.classList.toggle('btn-on', auto);
-      if (auto) startTimer();
-      else stopTimer();
+      if (auto) {
+        startTimer();
+        load(true, true);
+      } else {
+        stopTimer();
+      }
       toast(auto ? (lang() === 'ru' ? 'Обновляю каждые 4 секунды' : 'Refreshing every 4 seconds')
         : (lang() === 'ru' ? 'Автообновление выключено' : 'Auto refresh off'), auto ? 'good' : '');
     },
@@ -79,37 +83,47 @@ export function render(view, ctx) {
         name = id;
         for (const child of tabs.children) child.classList.remove('active');
         tab.classList.add('active');
-        load(false);
+        load(false, true);
       },
     });
     tabs.append(tab);
   }
   linesSelect.addEventListener('change', () => {
     lines = Number(linesSelect.value) || 300;
-    load(true);
+    load(true, true);
   });
 
-  async function load(keepScroll) {
-    if (busy) return;
-    busy = true;
-    const stick = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 40;
+  async function load(keepScroll, force = false) {
+    if (inflight && !force) return;
+    const req = ++inflight;
+    const follow = auto;
+    const stick = follow || terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 40;
+    const ctrl = new AbortController();
+    const timerCtrl = setTimeout(() => ctrl.abort(), 15000);
     try {
-      const data = await api.get(`/api/logs?name=${encodeURIComponent(name)}&lines=${lines}`);
+      const data = await api.get(`/api/logs?name=${encodeURIComponent(name)}&lines=${lines}`, { signal: ctrl.signal });
+      if (req !== inflight) return;
       text = data.text || '';
       terminal.textContent = text || (lang() === 'ru' ? '(пусто)' : '(empty)');
       path.textContent = data.path || '';
       if (!keepScroll || stick) terminal.scrollTop = terminal.scrollHeight;
     } catch (err) {
-      terminal.textContent = err.message;
+      if (req !== inflight) return;
+      if (err && err.name === 'AbortError') {
+        terminal.textContent = lang() === 'ru' ? 'не дождалась ответа…' : 'request timed out…';
+      } else {
+        terminal.textContent = err.message;
+      }
       path.textContent = '';
     } finally {
-      busy = false;
+      clearTimeout(timerCtrl);
+      if (req === inflight) inflight = 0;
     }
   }
 
   function startTimer() {
     stopTimer();
-    timer = window.setInterval(() => load(true), 4000);
+    timer = window.setInterval(() => load(true, false), 4000);
   }
 
   function stopTimer() {
@@ -117,6 +131,6 @@ export function render(view, ctx) {
     timer = 0;
   }
 
-  load(false);
+  load(false, true);
   return () => { stopTimer(); };
 }
