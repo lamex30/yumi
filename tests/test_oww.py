@@ -188,7 +188,7 @@ assert "'fallback': bool(res.get('fallback'))" in src_stt, 'the /wake answer dro
 wake_src = src_stt.split('def wake(self, lang', 1)[1].split('def stop(self', 1)[0]
 assert 'if muted():' in wake_src, 'the wake must honor the mute (her own voice on the air)'
 assert 'stop_shout(words, spellings)' in wake_src, '«стоп» must cut through the mute'
-assert 'transcribe_said' in wake_src, 'the phrase after the name must go to STT'
+assert 'read_tape' in wake_src, 'the phrase after the name must go to STT'
 assert 'bytearray(ring[-lead:])' in wake_src, 'the phrase head must come off the ring'
 assert 'elif ear_oww is None' in wake_src, 'vosk fallback: wake_ear vosk must not be deaf'
 assert 'wake_from_vosk' in wake_src, 'the vosk wake lost its shared body'
@@ -213,13 +213,19 @@ assert not stt.note_command('включи музыку')
 assert not stt.note_command('как дела')
 assert "if not woken or stop_shout(words, spellings)" in wake_src, \
     'already listening, «останови музыку» is a command, not a stop'
-# ---- быстрый путь STT: свежее чтение стоп-ухи идёт первым, умный ум запасной ----
-assert 'stt_fast' in wake_src, 'the wake lost its vosk-first fast path'
-assert 'vosk_fallback(time.monotonic(), VOSK_STALE)' in wake_src, \
-    'the fast path must take only a fresh final'
-assert wake_src.index('heard_after or vosk_fallback(') < \
-    wake_src.index('self.transcribe_said'), \
-    'the big ear must read only when the small ear has nothing to say'
+# ---- ухо фразы: Nemotron первым, whisper фоллбэком, Vosk последним ----
+assert 'stt_fast' not in wake_src, \
+    'the ambient vosk final must not stand in for STT (it reads the room, not the user)'
+assert 'read_tape(' in wake_src, 'the phrase after the name must be read from the tape'
+assert wake_src.index('read_tape(') < \
+    wake_src.index('if not text and heard_after and (fallback_wake or ear_oww is None)'), \
+    'the tape is read first: the small ear keeps only a wake that came from it'
+assert 'fallback_route(text, hints)' in wake_src, \
+    'a weak (vosk) reading of the room must not become a command'
+tape_src = src_stt.split('def read_tape(self', 1)[1].split('def transcribe_said', 1)[0]
+assert tape_src.index('transcribe_nemo_model') < tape_src.index("engine != 'whisper'") \
+    < tape_src.index('vosk_read'), \
+    'the read order must be nemotron -> whisper (fallback) -> vosk (last)'
 
 
 # ---- stop_at / stop_shout unchanged ----

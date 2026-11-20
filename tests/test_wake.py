@@ -139,7 +139,7 @@ assert a(900.0, 0.3, 3.0, 15.0) is None           # a real phrase, mid-flight
 # voice, then VAD_TAIL of quiet: the phrase is over
 assert a(900.0, 1.3, 3.0, 15.0) == 'end'
 assert a(stt.PHRASE_MIN, 1.3, 3.0, 15.0) == 'end'  # 400 ms is a phrase already
-assert a(900.0, 1.1, 3.0, 15.0) is None            # a pause shorter than the tail
+assert a(900.0, stt.VAD_TAIL / 1000.0 - 0.1, 3.0, 15.0) is None  # shorter than the tail
 # the listen ran out: whatever gathered goes to the ear, this wake waits no longer
 assert a(900.0, 0.3, 16.0, 15.0) == 'ceiling'
 assert a(100.0, 0.3, 16.0, 15.0) == 'ceiling'      # reachable in the (0, 400) hole too

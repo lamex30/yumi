@@ -74,7 +74,11 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 28                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 29                            # bumped when the protocol changes: stale twins are restarted
+                                        # (29: the phrase after the name is read from the tape first —
+                                        #     Nemotron, whisper as its fallback, the small ear last;
+                                        #     the stop ear's passing final no longer stands in for
+                                        #     STT, it reads the room's music as readily as the user)
                                         # (22: the ear's veto softened into a rank: a deaf ear alone
                                         #     no longer silences a name-shaped word — the arbitrator
                                         #     weighs every ear, the judge reads a short fresh tape,
@@ -95,10 +99,12 @@ WAKE_VOSK_FALLBACK = 4.0      # s: how long ago the stop ear's last final may st
                               # the name is believed a frame or two late, and may come
                               # at the phrase's very end: the big ear then reads an
                               # empty tape, the small ear's words are what was said
-VOSK_STALE = 2.0              # s: how fresh the small ear's final must be to stand in
-                              # for STT (the fast path). Older than this before the name
-                              # and it is someone else's talk from before the wake — the
-                              # big ear reads the tape instead of acting on those words
+WAKE_READ = 4.0               # s of the tape the phrase ear reads after the name: a
+                              # command is short, and a longer window buys latency,
+                              # not words (the user's own dial: wake_read_s)
+VOSK_STALE = 2.0              # s: how fresh the small ear's final must be for a caller
+                              # that stands in for STT with it (fresh_vosk's slack): an
+                              # older final is someone else's talk from before the wake
 
 OWW_THRESHOLD = 0.5          # the trained ear's score that counts as her name
 OWW_SURE = 0.7               # above it the name is sure: the judge is not asked
@@ -240,7 +246,7 @@ def _wake_tuning():
          'judge_ttl': JUDGE_TTL, 'wake_phonetic': True,
          'stt_diag_wav': False, 'oww_cooldown': OWW_COOLDOWN,
          'wake_lead_ms': WAKE_LEAD_MS, 'wake_listen': WAKE_LISTEN,
-         'wake_vosk_fallback': WAKE_VOSK_FALLBACK}
+         'wake_read_s': WAKE_READ, 'wake_vosk_fallback': WAKE_VOSK_FALLBACK}
 
     def clamp(key, lo, hi):
         try:
@@ -263,6 +269,7 @@ def _wake_tuning():
     clamp('oww_cooldown', 0.0, 30.0)
     clamp('wake_lead_ms', 0.0, 4000.0)
     clamp('wake_listen', 5.0, 30.0)
+    clamp('wake_read_s', 2.0, 10.0)
     clamp('wake_vosk_fallback', 0.0, 10.0)
     t['oww_spike'] = int(t['oww_spike'])
     for key in ('wake_phonetic', 'stt_diag_wav'):
@@ -1382,32 +1389,49 @@ class Ears:
             return ''
         return text
 
-    def transcribe_said(self, said, lang, size='small', engine='whisper'):
-        """the phrase's bytes (s16 mono RATE) through the engine the settings name:
-        nemotron or whisper read it; when the big ear says nothing (silence, a
-        failure, an empty reading) the small ear reads the tape anew — a phrase
-        the settings' engine missed must not die on an empty reading. None never
-        leaves here: the caller gets the best reading of the two"""
-        text = None
+    def read_tape(self, said, lang, size='small', engine='whisper'):
+        """the phrase's bytes (s16 mono RATE) and who read them: (text, ear).
+        The ear the settings name reads first — Nemotron 0.6b when it is chosen,
+        whisper otherwise. Whisper is the fallback, never the worker: when
+        Nemotron is silent, away or failed, whisper takes the same tape (a second,
+        different reading is what a fallback is for). The small ear reads the tape
+        anew only when both are silent — last, because over music it reads the
+        background as readily as the user. '' and '' when nobody could read it"""
+        text, ear = '', ''
         if engine == 'nemotron':
             nrec = self.nemotron()
-            if nrec:                    # the streaming ear reads; when it fails,
-                try:                    # the small ear answers below
+            if nrec:                    # the streaming ear reads; a failure falls through
+                try:
                     text = transcribe_nemo_model(nrec, said, lang)
+                    ear = 'nemotron' if text else ''
                 except Exception as e:  # noqa: BLE001 - it is best effort
-                    log('nemotron failed, the small ear answers instead: '
-                        + str(e)[-120:])
+                    log('nemotron failed, whisper answers instead: ' + str(e)[-120:])
         else:                           # the whisper ear (the settings name it) reads
             try:
                 text = self.transcribe(said, lang, size)   # whisper reads the tape
+                ear = 'whisper' if text else ''
             except Exception as e:      # noqa: BLE001 - whisper is best effort
                 log('whisper failed, the small ear answers instead: ' + str(e)[-120:])
-        if not text:                    # the big ear was silent or away: the tape
+        if not text and engine != 'whisper':
+            # whisper is the fallback: the same tape, a different reader — a name
+            # or a command Nemotron swallowed must not die on an empty reading
+            try:
+                text = self.transcribe(said, lang, size)
+                ear = 'whisper' if text else ''
+            except Exception as e:      # noqa: BLE001 - whisper is best effort
+                log('whisper (fallback) failed, the small ear answers instead: '
+                    + str(e)[-120:])
+        if not text:                    # both big ears were silent or away: the tape
             back = self.vosk_read(said, lang)   # is read again by the small ear
             if back:
-                log(f'the big ear was silent: the small ear read it as {back!r}')
-            text = back
-        return text
+                log(f'the big ears were silent: the small ear read it as {back!r}')
+                text, ear = back, 'vosk'
+        return text, ear
+
+    def transcribe_said(self, said, lang, size='small', engine='whisper'):
+        """the phrase's bytes (s16 mono RATE) as words: read_tape's text alone —
+        None never leaves here, the caller gets the best reading of the three"""
+        return self.read_tape(said, lang, size, engine)[0]
 
     def listen(self, lang, secs, quiet, size='small', mic=None, engine='whisper'):
         """hear one phrase: the recognized text ('' when there was nothing)"""
@@ -1521,8 +1545,11 @@ class Ears:
         OpenWakeWord with yumi.onnx is the only ear that decides (раздел 2 ТЗ) — Vosk,
         Nemotron and Whisper stay out of the wake decision: vosk runs as the light
         independent «стоп» channel (it works in every state, раздел 9), and after the
-        name the phrase is heard out by the VAD endpointing and read by the configured
-        STT (раздел 7), with the phrase's head restored from the ring buffer.
+        name the phrase is heard out by the VAD endpointing and read from the tape by
+        the configured ear — Nemotron first, whisper as its fallback (раздел 7), with
+        the phrase's head restored from the ring buffer. The stop ear's passing final
+        is not the command: over music it reads the room better than the user, so only
+        a wake that came from that ear keeps its tail (tmp/verdict.txt).
         When the trained ear misses the name but vosk has both the name and a tail,
         the tail is routed (yumi/addressing.py): a command or a phrase meant for her
         may wake her, background talk stays a dream. `hints` are the user's own
@@ -1604,9 +1631,12 @@ class Ears:
 
         def greet_or_fallback(why):
             """nothing followed the name: her turn to greet — unless the small
-            ear's fresh final holds the phrase the name stood at the end of"""
+            ear's fresh final holds the phrase the name stood at the end of.
+            That final is the weakest source the wake has: over music it reads the
+            room, so only words meant for her stand in (fallback_route) — anything
+            else is background talk and she asks what you wanted instead"""
             text = vosk_fallback()
-            if text:
+            if text and fallback_route(text, hints) != 'ignore':
                 judge_note(f'WAKE vosk fallback ({text!r})')
                 return wake_result(text, 'vosk_fallback', wake_score)
             return wake_result('', why, wake_score)
@@ -1921,37 +1951,41 @@ class Ears:
                                judge_called=False, final_wake=False,
                                **diag_base('SLEEP', voiced))
                     return {'woke': False, 'text': None}
-                # the name was heard: the phrase on the tape goes to the configured
-                # STT (Nemotron/Whisper read it, vosk stays for the phrase ends —
-                # exactly as the settings say, раздел 7 ТЗ). But the stop ear was
-                # reading the air the whole time the phrase gathered on the tape:
-                # when its fresh final already holds the words, the big ear's pass
-                # buys nothing — that pass took a median 8.5 s and grows with the
-                # phrase (a 150-word monologue waited a minute), while the small
-                # ear's reading had arrived before the phrase ended. So the reading
-                # that came first is the reading; Nemotron/Whisper are asked only
-                # when the small ear has nothing to say (the fast path's own diary
-                # line is stt_fast — no phrase_end/stt_done pair, no STT ran). The
-                # small ear's words count only while they are fresh (VOSK_STALE):
-                # a final from before the wake is someone else's talk, and the big
-                # ear must read the tape rather than act on it
+                # the name was heard: the phrase after it is read from the tape the
+                # LISTENING gathered — the configured ear first (Nemotron when the
+                # settings name it), whisper as its fallback, the small ear last
+                # (раздел 7 ТЗ). The stop ear's passing final is no longer the
+                # command: it read the air the whole time and over music it reads
+                # the room better than the user («я ведь», «июне включи музыку»),
+                # so a wrong reading would reach the mind instead of the right one
+                # (tmp/verdict.txt). Only a wake that came from that ear keeps its
+                # tail: there the phrase was over before the wake and the tape is
+                # empty, so those words are the phrase (and fallback_route let them
+                # through already). The read is bounded by wake_read_s: a command is
+                # short, and a longer window buys latency, not words.
                 said = utt.take() if utt is not None else b''
-                text = ''
-                fast = heard_after or vosk_fallback(time.monotonic(), VOSK_STALE)
-                if fast:
-                    text = fast
-                    judge_note(f'WAKE vosk first ({text!r})')
-                    diag.event(arbitration='STT', reason='stt_fast', stt_text=text,
-                               judge_called=False, final_wake=False,
-                               **diag_base('LISTENING', voiced))
-                elif len(said) >= RATE:       # under a second is a breath, not a phrase
+                window = said[:int(TUNE['wake_read_s'] * RATE * 2)]
+                text, ear = '', ''
+                if len(window) >= RATE // 2:      # under half a second is a breath
                     diag.event(arbitration='STT', reason='phrase_end', stt_start=True,
                                judge_called=False, final_wake=False,
                                **diag_base('LISTENING', voiced))
-                    text = self.transcribe_said(said, lang, size, engine) or ''
+                    text, ear = self.read_tape(window, lang, size, engine)
+                    if text and ear == 'vosk' and fallback_route(text, hints) == 'ignore':
+                        # the weakest ear read the background: an honest «не расслышала»
+                        # (she asks what you wanted) beats a confident wrong command
+                        judge_note(f'WAKE {ear} stays out ({text!r})')
+                        text, ear = '', ''
                     diag.event(arbitration='STT', reason='stt_done', stt_text=text,
-                               judge_called=False, final_wake=False,
+                               stt_by=ear, judge_called=False, final_wake=False,
                                **diag_base('LISTENING', voiced))
+                if not text and heard_after and (fallback_wake or ear_oww is None):
+                    # the wake came from the small ear's own words: the tape may be
+                    # empty (the phrase ended before the wake) — its tail is the
+                    # phrase, and fallback_route already let it through when it was
+                    # not the trained ear that woke
+                    text = heard_after
+                    judge_note(f'WAKE vosk name tail ({text!r})')
                 return wake_result(text, 'phrase_after_name' if text else 'name_alone',
                                    wake_score)
             finally:

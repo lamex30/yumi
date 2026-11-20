@@ -86,6 +86,8 @@ DEFAULT_SETTINGS = {
     'phrase_tail_ms': 1200,   # ms of quiet that ends a phrase: raise it when she cuts you
                               # off during your pauses, lower it when answers come too slow
     'wake_after': 1.5,        # s of quiet after the name before the half-heard words count
+    'wake_read_s': 4.0,       # s of the phrase after the name the ear reads: a command is
+                              # short, a longer window buys latency, not words
     'tap_ears': False,        # a diary of everything the ears hear: /tmp/yumi (sound + words)
     'hourly_chimes': True,    # she speaks the time with a joke every hour
     'weather_city': 'Анапа',  # the city she peeks the weather at ('' = wherever she is);

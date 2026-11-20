@@ -6,7 +6,8 @@ import {
 const CARD_KEYS = {
   activation: ['wake_ears', 'wake_word', 'wake_ear', 'wake_sensitivity',
     'wake_confirm', 'wake_model_size'],
-  judge: ['stt_engine', 'stt_size', 'phrase_tail_ms', 'wake_after', 'wake_judge_log'],
+  judge: ['stt_engine', 'stt_size', 'wake_read_s', 'phrase_tail_ms', 'wake_after',
+    'wake_judge_log'],
   voice: ['voice_kind', 'voice_vol', 'tts_ru_speaker', 'tts_en_speaker',
     'tts_pitch', 'tts_ru_model'],
   rest: ['stt_mic', 'stt_echo', 'stt_selfmute', 'name_duck', 'tap_ears', 'timer_sound'],
@@ -190,8 +191,8 @@ export function render(view, ctx) {
     const seconds = el('input', { type: 'number', min: 2, max: 30, value: 8, style: { maxWidth: '80px' } });
     fill(judgeBox, CARD_KEYS.judge,
       say('2. Судья: кто читает фразу', '2. Judge: who reads the phrase'),
-      say('Whisper — проверенный местный распознаватель; Nemotron 0.6b — быстрый потоковый.',
-          'Whisper is the reliable local reader; Nemotron 0.6b is the fast streaming one.'));
+      say('Nemotron 0.6b читает первым; whisper — фоллбэк, если модели нет или она молчит.',
+          'Nemotron 0.6b reads first; whisper is the fallback when the model is away or silent.'));
     judgeBox.append(engineLine('Whisper', judge.whisper));
     judgeBox.append(engineLine('Nemotron 0.6b', judge.nemotron,
       judge.nemotron?.available ? '' : say('нет модели — whisper прочитает запасным', 'no model — whisper reads as the fallback')));

@@ -431,11 +431,18 @@ and en among its 40 locales, noticeably quicker than whisper on the CPU:
 ```
 
 and then `"stt_engine": "nemotron"` in `~/.config/yumi/settings.json` (also **Settings →
-Her ears → Ear for phrases**). Whisper then sleeps: nothing loads it, and it is only read
-from the disk when the Nemotron ear is missing or fails — a fallback, not a worker. It can
-go entirely: `rm -rf ~/.local/share/yumi/stt/whisper` frees ~3.4 GB, and `stt_setup.sh`
-stops installing faster-whisper once the settings name the nemotron ear (vosk then stands
-alone if the ear ever fails). The wake-word judge uses it too.
+Her ears → Ear for phrases**). The Nemotron ear then reads the phrase after the name first,
+and whisper is its fallback: it is loaded only when the streaming ear is silent or fails, and
+it reads the same tape a second time. It can go entirely:
+`rm -rf ~/.local/share/yumi/stt/whisper` frees ~3.4 GB, and `stt_setup.sh` stops installing
+faster-whisper once the settings name the nemotron ear (vosk then stands alone if the ear ever
+fails). The wake-word judge uses it too.
+
+The phrase after the name is read from the tape, not from Vosk's passing stream: how many
+seconds to take is `wake_read_s` (4 s by default, **Settings → Her ears → Phrase window after
+the name**). A command is short, so a longer window adds latency, not words. When neither
+Nemotron nor whisper read anything and the lite ear only caught the background, Yumi asks you
+to repeat instead of carrying out a random command.
 
 The browser panel's **Ears & voice** page puts the two choices beside each other and can test
 them without leaving the browser: **1. Activation** picks the ear that hears «Yumi» —
