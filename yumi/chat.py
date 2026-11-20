@@ -150,24 +150,159 @@ def _strip_think(text):
                   str(text or ''), flags=re.S | re.I).strip()
 
 
-def _ollama_chat(settings, history, timeout):
+def _ollama_chat(settings, history, timeout, stream=False):
     body = {'model': settings.get('chat_model') or DEFAULT_MODEL,
-            'messages': history, 'stream': False,
+            'messages': history, 'stream': stream,
             'options': {'num_predict': 220},
             'think': _think(settings)}          # off: the answer comes right away
+    if stream:
+        req = urllib.request.Request(_url(settings) + '/api/chat', data=json.dumps(body).encode(),
+                                     headers={'Content-Type': 'application/json'})
+        return urllib.request.urlopen(req, timeout=timeout)
     return _post(_url(settings) + '/api/chat', json.dumps(body).encode(), timeout)
 
 
-def _polza_chat(settings, history, timeout):
-    body = json.dumps({'model': settings.get('chat_model') or POLZA_MODEL,
-                       'messages': history, 'stream': False,
-                       'max_tokens': 220}).encode()
+def _polza_chat(settings, history, timeout, stream=False):
+    body = {'model': settings.get('chat_model') or POLZA_MODEL,
+            'messages': history, 'stream': stream,
+            'max_tokens': 220}
     headers = {'Content-Type': 'application/json',
                'Authorization': 'Bearer ' + str(settings.get('polza_api_key') or '')}
-    req = urllib.request.Request(_url(settings) + '/chat/completions', data=body,
-                                 headers=headers)
+    req = urllib.request.Request(_url(settings) + '/chat/completions',
+                                 data=json.dumps(body).encode(), headers=headers)
+    if stream:
+        return urllib.request.urlopen(req, timeout=timeout)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
+
+
+def _think_filter():
+    """a streaming filter for the mind's «<think>…» reasoning: yields only the text
+    that belongs in the answer, holding back a block that may be split across chunks"""
+    tag = '<' + 'think' + '>'
+    end = '<' + '/think' + '>'
+    buf = ''
+    inside = False
+
+    def feed(chunk):
+        nonlocal buf, inside
+        buf += str(chunk or '')
+        out = []
+        while buf:
+            if inside:
+                i = buf.lower().find(end)
+                if i < 0:
+                    keep = len(end) - 1
+                    buf = buf[-keep:] if len(buf) > keep else buf
+                    break
+                buf = buf[i + len(end):]
+                inside = False
+            else:
+                i = buf.lower().find(tag)
+                if i < 0:
+                    keep = len(tag) - 1
+                    if len(buf) > keep:
+                        out.append(buf[:-keep])
+                        buf = buf[-keep:]
+                    break
+                if i:
+                    out.append(buf[:i])
+                buf = buf[i + len(tag):]
+                inside = True
+        return ''.join(out)
+
+    def flush():
+        nonlocal buf, inside
+        if inside:
+            buf = ''
+            return ''
+        out, buf = buf, ''
+        return out
+
+    return feed, flush
+
+
+def _ollama_stream(resp):
+    feed, flush = _think_filter()
+    try:
+        try:
+            for raw in resp:
+                try:
+                    line = raw.decode('utf-8', errors='replace').strip()
+                except Exception:
+                    continue
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except ValueError:
+                    continue
+                chunk = ((data.get('message') or {}).get('content') or '')
+                out = feed(chunk)
+                if out:
+                    yield out
+                if data.get('done'):
+                    break
+        except (OSError, ValueError):
+            pass
+        tail = flush()
+        if tail:
+            yield tail
+    finally:
+        try:
+            resp.close()
+        except Exception:
+            pass
+
+
+def _polza_stream(resp):
+    feed, flush = _think_filter()
+    try:
+        try:
+            for raw in resp:
+                try:
+                    line = raw.decode('utf-8', errors='replace').strip()
+                except Exception:
+                    continue
+                if not line or not line.startswith('data:'):
+                    continue
+                payload = line[5:].strip()
+                if payload == '[DONE]':
+                    break
+                try:
+                    data = json.loads(payload)
+                except ValueError:
+                    continue
+                delta = ((data.get('choices') or [{}])[0].get('delta') or {})
+                chunk = delta.get('content') or ''
+                out = feed(chunk)
+                if out:
+                    yield out
+        except (OSError, ValueError):
+            pass
+        tail = flush()
+        if tail:
+            yield tail
+    finally:
+        try:
+            resp.close()
+        except Exception:
+            pass
+
+
+def ask_stream(settings, history, timeout=90):
+    """a reply as a stream of text chunks; yields nothing when it did not work out"""
+    if _provider(settings) == 'polza.ai' and not str(settings.get('polza_api_key') or '').strip():
+        return          # no key: Polza.ai would hang or refuse, she says so at once
+    try:
+        if _provider(settings) == 'polza.ai':
+            resp = _polza_chat(settings, history, timeout, stream=True)
+            yield from _polza_stream(resp)
+        else:
+            resp = _ollama_chat(settings, history, timeout, stream=True)
+            yield from _ollama_stream(resp)
+    except (urllib.error.URLError, OSError, ValueError):
+        return
 
 
 def ask(settings, history, timeout=90):

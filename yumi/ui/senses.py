@@ -15,8 +15,35 @@ class SensesMixin:
     DUCK_BACK_MS = 12000            # the loudness comes back this long after the name went by
 
     # ---- her voice: 8-bit blips, or a real one from a local Silero (yumi/tts.py)
+    def _voice_state(self):
+        if not hasattr(self, 'voice_queue'):
+            self.voice_queue = []
+        if not hasattr(self, 'voice_streaming'):
+            self.voice_streaming = False
+        if not hasattr(self, 'voice_pending'):
+            self.voice_pending = 0
+        if not hasattr(self, '_voice_seq'):
+            self._voice_seq = 0
+        if not hasattr(self, '_voice_next'):
+            self._voice_next = 1
+        if not hasattr(self, '_voice_ready'):
+            self._voice_ready = {}
+
+    def _voice_blips(self, text):
+        """offsets for the blips of one segment, like voice.render expects"""
+        from yumi.brain import reveal_times
+        times, _ = reveal_times(text)
+        return [t for t, ch in zip(times, text) if ch.isalnum()]
+
     def speak(self, blips, bid, end_pitch, volume=0.5, text=''):
         self.hush()
+        self._voice_state()
+        self.voice_queue.clear()
+        self.voice_pending = 0
+        self.voice_streaming = False
+        self._voice_seq = 0
+        self._voice_next = 1
+        self._voice_ready.clear()
         self.voice_id = bid
         if not blips and not text:
             return
@@ -36,6 +63,97 @@ class SensesMixin:
                 p = path
             GLib.idle_add(lambda: self.voice_start(p, bid) and False)
         threading.Thread(target=work, daemon=True).start()
+
+    def speak_stream(self, text, bid, volume=0.5):
+        """a piece of a streaming answer: synthesize it and play it in turn"""
+        self._voice_state()
+        if not self.voice_streaming or self.voice_id != bid:
+            self.hush()
+            self.voice_id = bid
+            self.voice_streaming = True
+        self._voice_seq += 1
+        seq = self._voice_seq
+        path = config.CACHE_DIR / f'voice{bid % 5}-{seq}.wav'
+
+        def work():
+            p = tts.speak(text, volume)
+            if not p:
+                self.warn_tts()
+                try:
+                    config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                    blips = self._voice_blips(text)
+                    voice.render(blips, path, seed=bid + seq,
+                                 end_pitch=1 if text.rstrip().endswith('?') else 0,
+                                 volume=volume)
+                    p = path
+                except Exception:
+                    p = None
+            GLib.idle_add(lambda s=seq, pp=p, b=bid: self.voice_stream_ready(pp, b, s) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def speak_stream_blip(self, blips, bid, end_pitch, volume=0.5):
+        """a piece of a streaming answer in blips: render it and play it in turn"""
+        self._voice_state()
+        if not self.voice_streaming or self.voice_id != bid:
+            self.hush()
+            self.voice_id = bid
+            self.voice_streaming = True
+        self._voice_seq += 1
+        seq = self._voice_seq
+        path = config.CACHE_DIR / f'voice{bid % 5}-{seq}.wav'
+
+        def work():
+            try:
+                config.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                voice.render(blips, path, seed=bid + seq, end_pitch=end_pitch, volume=volume)
+                p = path
+            except OSError:
+                p = None
+            GLib.idle_add(lambda s=seq, pp=p, b=bid: self.voice_stream_ready(pp, b, s) and False)
+        threading.Thread(target=work, daemon=True).start()
+
+    def voice_stream_ready(self, path, bid, seq=None):
+        """a streaming segment is ready: queue it in order when it is its turn"""
+        self._voice_state()
+        if bid != self.voice_id:
+            return False
+        if seq is None:
+            if path:
+                self.voice_queue.append(path)
+            self._voice_pump()
+            return False
+        self._voice_ready[seq] = path
+        while self._voice_next in self._voice_ready:
+            p = self._voice_ready.pop(self._voice_next)
+            self._voice_next += 1
+            if p:
+                self.voice_queue.append(p)
+        self._voice_pump()
+        return False
+
+    def _voice_pump(self):
+        """play the next queued segment when nothing is sounding"""
+        self._voice_state()
+        if self.talking():
+            return
+        b = self.brain
+        while self.voice_queue:
+            path = self.voice_queue.pop(0)
+            if self.voice_id is None or not b.bubble or b.bubble.get('id') != self.voice_id:
+                continue
+            secs = tts.wav_len(path)
+            if secs:
+                b.bubble['until'] = max(b.bubble['until'], b.now + secs + 1.2)
+            self.voice_proc = system.play_file(path)
+            if self.voice_proc:
+                return
+
+    def voice_stream_done(self, bid):
+        """the mind has no more words for this answer"""
+        self._voice_state()
+        if bid == self.voice_id:
+            self.voice_streaming = False
+            self._voice_pump()
 
     def warn_tts(self):
         """once, into the log: why the real voice did not happen"""
@@ -66,7 +184,14 @@ class SensesMixin:
         return bool(self.voice_proc)
 
     def hush(self):
+        self._voice_state()
         self.voice_preview = False
+        self.voice_queue.clear()
+        self.voice_pending = 0
+        self.voice_streaming = False
+        self._voice_seq = 0
+        self._voice_next = 1
+        self._voice_ready.clear()
         p, self.voice_proc = self.voice_proc, None
         try:
             if p:
@@ -265,6 +390,10 @@ class SensesMixin:
                      mic=self.settings.get('stt_mic'))
         threading.Thread(target=work, daemon=True).start()
 
+    def _chat_reply_remember(self, reply):
+        """a streamed reply finished; memory was already saved by the worker"""
+        return False
+
     def chat_ask(self, history):
         """the question is away to Ollama; the answer comes back into her bubble"""
         def work():
@@ -287,19 +416,45 @@ class SensesMixin:
                     hist.append({'role': 'system', 'content': note})
             sassy = bool(s.get('sassy'))
             prompt = chat.system_prompt(lang, sassy)
-            reply = chat.ask(s, [{'role': 'system', 'content': prompt}] + hist)
-            # the «Дерзкая 18+» lines carry their tag too: switching the mode
-            # off wipes them from the diary together with the jokes. A switch
-            # made while the answer was on its way leaves the diary clean
+            full = [{'role': 'system', 'content': prompt}] + hist
             tag = memory.TAG_SASSY if sassy else None
-            if s.get('chat_memory', True) and bool(s.get('sassy')) == sassy:
+            use_stream = bool(s.get('chat_stream', True))
+
+            if not use_stream:
+                reply = chat.ask(s, full)
+                if s.get('chat_memory', True) and bool(s.get('sassy')) == sassy:
+                    try:
+                        memory.remember('user', user_text, s, tag=tag)
+                        if reply:
+                            memory.remember('assistant', reply, s, tag=tag)
+                    except Exception:
+                        pass
+                GLib.idle_add(lambda: self.ev(lambda b: b.replied(reply)) and False)
+                return
+
+            GLib.idle_add(lambda: self.ev(lambda b: b.reply_stream_begin()) and False)
+            reply_parts = []
+            try:
+                for chunk in chat.ask_stream(s, full):
+                    if not chunk:
+                        continue
+                    reply_parts.append(chunk)
+                    GLib.idle_add(lambda c=chunk: self.ev(lambda b: b.reply_stream_chunk(c)) and False)
+            except Exception:
+                pass
+
+            reply = ' '.join(''.join(reply_parts).split())
+            if s.get('chat_memory', True) and bool(s.get('sassy')) == sassy and reply:
                 try:
                     memory.remember('user', user_text, s, tag=tag)
-                    if reply:
-                        memory.remember('assistant', reply, s, tag=tag)
+                    memory.remember('assistant', reply, s, tag=tag)
                 except Exception:
                     pass
-            GLib.idle_add(lambda: self.ev(lambda b: b.replied(reply)) and False)
+
+            if reply:
+                GLib.idle_add(lambda: self.ev(lambda b: b.reply_stream_end()) and False)
+            else:
+                GLib.idle_add(lambda: self.ev(lambda b: b.reply_stream_fail()) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def weather_ask(self, ask):

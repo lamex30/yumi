@@ -85,10 +85,11 @@ def grow(r, d):
 TYPE_CPS = 28                # letters per second while her words type out
 
 
-def reveal_times(text):
+def reveal_times(text, start=0.0):
     """(when each letter of `text` appears, s after she starts; the time it is all out):
-    a little pause after commas, a longer one after a sentence, like someone talking"""
-    t, out = 0.0, []
+    a little pause after commas, a longer one after a sentence, like someone talking.
+    `start` continues timing after text that was already timed (for streaming)"""
+    t, out = float(start), []
     for i, ch in enumerate(text):
         out.append(t)
         t += 1.0 / TYPE_CPS
@@ -97,7 +98,7 @@ def reveal_times(text):
             t += 0.26
         elif ch in ',;:—' and nxt == ' ':
             t += 0.12
-    return out, (out[-1] if out else 0.0) + 0.05
+    return out, (out[-1] if out else start) + 0.05
 
 
 class Moth:
@@ -270,6 +271,7 @@ class Brain(Extras):
         self.chat_history = []          # what you asked and what she answered, the last few turns
         self.listening = False          # the mic button was pressed: she is waiting for a phrase
         self.thinking = False           # the question is away at Ollama
+        self.chat_streaming = False     # the mind is answering in a stream right now
         self.note_pending = False       # she asked «what should I write down?»: the next phrase is a note
         self.chat_models = []           # installed Ollama models, for the settings row
         self.mics = []                  # microphones her ears can hear, for the settings row
@@ -957,7 +959,8 @@ class Brain(Extras):
                 self.requests.append(('chat_models',))
             rows = [('set', 'chat_provider', t('chat_provider')), ('set', 'chat_model', t('chat_model')),
                     ('set', 'sassy', t('sassy')),
-                    ('set', 'chat_think', t('chat_think')), ('set', 'chat_history_n', t('chat_history_n')),
+                    ('set', 'chat_think', t('chat_think')), ('set', 'chat_stream', t('chat_stream')),
+                    ('set', 'chat_history_n', t('chat_history_n')),
                     ('set', 'chat_memory', t('chat_memory')), ('set', 'nlu', t('nlu')),
                     ('set', 'intents', t('intents'))]
             if self.chat_models:        # the list may have grown stale: a way to look again
@@ -1579,6 +1582,145 @@ class Brain(Extras):
         else:
             self.say('joke_fail')
 
+    def reply_stream_begin(self):
+        """the mind starts answering in a stream: an empty bubble grows as words arrive"""
+        self.thinking = True
+        self.chat_streaming = True
+        self._stream_typed = 0.0        # the typing cursor: new letters follow the old ones
+        self._stream_spoken = ''        # the text not yet sent to the voice
+        self._stream_full = ''          # everything the mind said so far
+        self.bubble_n += 1
+        self.bubble = {'text': '', 'until': self.now + 30, 'start': self.now, 'times': [],
+                       'id': self.bubble_n, 'stream': True}
+        self.talk_until = self.now + 30
+        if self.mode == 'docked' and not self.out and not self.sleeping:
+            self.pop(True, temporary=True)
+
+    def reply_stream_chunk(self, chunk):
+        """a piece of the mind's answer arrived: it grows in the bubble right away"""
+        if not (self.chat_streaming and self.bubble and self.bubble.get('stream')):
+            return
+        self.thinking = False
+        chunk = str(chunk or '').replace('\r', '')
+        if not chunk:
+            return
+        # keep the text readable: collapse runs of whitespace, but let a trailing
+        # space through (the next token may finish the word it belongs to)
+        prev = self.bubble['text']
+        add = chunk
+        if prev:
+            if prev[-1].isspace() and add[:1].isspace():
+                add = add.lstrip()
+            elif not prev[-1].isspace() and add[:1] in '\n\t':
+                add = ' ' + add.lstrip()
+        else:
+            add = add.lstrip()
+        add = add.replace('\n', ' ')
+        if not add:
+            return
+        self.bubble['text'] += add
+        self._stream_full += add
+        self._stream_spoken += add
+        times, typed = reveal_times(add, self._stream_typed)
+        self.bubble['times'].extend(times)
+        self._stream_typed = typed
+        self.bubble['until'] = self.now + typed + 30
+        self.talk_until = self.now + typed
+        self._reply_stream_flush(force=False)
+
+    def _reply_stream_flush(self, force=False):
+        """send a finished piece of the answer to her voice (a sentence or a clause),
+        so she speaks while the rest is still coming"""
+        if not (self.chat_streaming and self.bubble and self.bubble.get('stream')):
+            return
+        buf = self._stream_spoken
+        if not buf.strip():
+            self._stream_spoken = ''
+            return
+        vol = self.settings.get('voice_vol', 50)
+        if not vol or self.sleeping:
+            self._stream_spoken = ''
+            return
+        cut = -1
+        # speak whole sentences as soon as they are complete
+        for i, ch in enumerate(buf):
+            if ch in '.!?…' and (i + 1 >= len(buf) or buf[i + 1].isspace()):
+                cut = i + 1
+        # a long clause can be spoken too, so she does not wait for the period
+        if cut < 0 and (force or len(buf) >= 90):
+            for sep in ',;:—':
+                j = buf.rfind(sep)
+                if j > 24 and j > cut:
+                    cut = j + 1
+        if cut < 0 and (force or len(buf) >= 140):
+            j = buf.rfind(' ')
+            if j > 24:
+                cut = j
+        if cut < 0 and force:
+            cut = len(buf)
+        if cut < 0:
+            return
+        seg = buf[:cut].strip()
+        self._stream_spoken = buf[cut:]
+        if not seg:
+            return
+        real = self.settings.get('voice_kind') == 'tts'
+        if real:
+            self.requests.append(('voice_stream', seg, self.bubble['id'], vol / 100.0))
+        else:
+            times, _ = reveal_times(seg)
+            blips = [t for t, ch in zip(times, seg) if ch.isalnum()]
+            end_pitch = 1 if seg.rstrip().endswith('?') else 0
+            self.requests.append(('voice_stream_blip', blips, self.bubble['id'], end_pitch, vol / 100.0))
+
+    def reply_stream_end(self):
+        """the mind finished: the last words are spoken and the answer is remembered"""
+        was = getattr(self, 'chat_streaming', False)
+        self.chat_streaming = False
+        if not was:
+            return
+        self.thinking = False
+        self._reply_stream_flush(force=True)
+        self.requests.append(('voice_stream_done', self.bubble['id'] if self.bubble else None))
+        reply = ' '.join(getattr(self, '_stream_full', '').split())
+        if self.bubble and self.bubble.get('stream'):
+            self.bubble['text'] = reply or self.bubble['text']
+            self.bubble.pop('stream', None)
+            # let her finish speaking and keep the line on screen a little
+            typed = self._stream_typed
+            self.bubble['until'] = self.now + typed + 2.2 + 0.04 * len(reply)
+            self.talk_until = self.now + typed
+        if not reply:
+            self.chat_history.pop()     # the question got no answer: do not confuse her later
+            self.say('chat_fail')
+            return
+        self.chat_history.append({'role': 'assistant', 'content': reply})
+        if self.face and self.now < self.face_until:
+            pass
+        self.requests.append(('chat_reply_done', reply))
+
+    def reply_stream_fail(self):
+        """the stream broke off: keep whatever was said, or admit she could not answer"""
+        if not getattr(self, 'chat_streaming', False):
+            return
+        self.chat_streaming = False
+        self.thinking = False
+        reply = ' '.join(getattr(self, '_stream_full', '').split())
+        self._reply_stream_flush(force=True)
+        self.requests.append(('voice_stream_done', self.bubble['id'] if self.bubble else None))
+        if self.bubble and self.bubble.get('stream'):
+            self.bubble.pop('stream', None)
+        if reply:
+            self.chat_history.append({'role': 'assistant', 'content': reply})
+            if self.bubble:
+                typed = self._stream_typed
+                self.bubble['until'] = self.now + typed + 2.2 + 0.04 * len(reply)
+                self.talk_until = self.now + typed
+            self.requests.append(('chat_reply_done', reply))
+        else:
+            self.chat_history.pop()
+            self.say('chat_fail')
+
     def replied(self, reply):
         """Ollama answered (reply is '' when it did not work out)"""
         self.thinking = False
@@ -1648,6 +1790,9 @@ class Brain(Extras):
         self.bubble = None
         self.talk_until = self.now
         self.thinking = False
+        self.chat_streaming = False
+        self._stream_full = ''
+        self._stream_spoken = ''
         self.listening = False
         self.note_pending = False
         self.timer = None

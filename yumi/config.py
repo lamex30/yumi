@@ -41,6 +41,8 @@ DEFAULT_SETTINGS = {
     'chat_provider': 'ollama',   # ollama or polza.ai: who answers when she listens
     'chat_think': False,      # her mind thinks out loud before answering (deepseek-r1,
                               # qwen3 and friends); off = the answer comes right away
+    'chat_stream': True,      # the answer comes in as it is written and she speaks it
+                              # at once, instead of waiting for the whole reply
     'sassy': False,           # «Дерзкая 18+»: she talks like a street-smart brat —
                               # swears, mocks, no sweet moth-girl manners (off by default)
     'chat_model': 'lakomoor/vikhr-llama-3.2-1b-instruct:1b',   # who answers when she listens
@@ -315,6 +317,7 @@ UI = {
         'joke': 'Joke',
         'chat_refresh': 'Find the model',
         'chat_think': 'Let her think first',
+        'chat_stream': 'Speak while answering',
         'sassy': 'Sassy 18+',
         'chat_history_n': 'Messages in mind', 'chat_memory': 'Recall older talks',
         'wake_ears': 'Wake when you say «Yumi»', 'stt_engine': 'Ear for phrases',
@@ -382,6 +385,7 @@ UI = {
         'joke': 'Анекдот',
         'chat_refresh': 'Найти модель',
         'chat_think': 'Дать ей подумать',
+        'chat_stream': 'Озвучивать по мере ответа',
         'sassy': 'Дерзкая 18+',
         'chat_history_n': 'Сообщений в памяти', 'chat_memory': 'Помнить разговоры',
         'wake_ears': 'Будить, когда скажешь «Юми»', 'stt_engine': 'Ухо для фраз',

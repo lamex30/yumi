@@ -308,6 +308,8 @@ class App(PanelMixin, SensesMixin, Gtk.Application):
         if self.voice_proc and not self.talking():
             self.voice_proc = None                   # the line is over: nothing left to hush
             self.voice_preview = False
+            if getattr(self, 'voice_queue', None) or getattr(self, '_voice_ready', None) or getattr(self, 'voice_streaming', False):
+                self._voice_pump()                   # the next piece of the answer, if any
         if self.voice_proc and not self.voice_preview and (
                 not b.bubble or b.bubble.get('id') != self.voice_id):
             self.hush()                              # the bubble went away: so does her voice
@@ -374,6 +376,17 @@ class App(PanelMixin, SensesMixin, Gtk.Application):
             elif kind == 'voice':
                 self.duck_end()     # her answer sounds at your loudness, not the ducked one
                 self.speak(r[1], r[2], r[3], r[4] if len(r) > 4 else 0.5, r[5] if len(r) > 5 else '')
+            elif kind == 'voice_stream':
+                self.duck_end()
+                self.speak_stream(r[1], r[2], r[3] if len(r) > 3 else 0.5)
+            elif kind == 'voice_stream_blip':
+                self.duck_end()
+                self.speak_stream_blip(r[1], r[2], r[3], r[4] if len(r) > 4 else 0.5)
+            elif kind == 'voice_stream_done':
+                if hasattr(self, 'voice_stream_done'):
+                    self.voice_stream_done(r[1])
+            elif kind == 'chat_reply_done':
+                self._chat_reply_remember(r[1])
             elif kind == 'listen':
                 self.listen_ears(r[1])
             elif kind == 'listen_stop':
