@@ -45,6 +45,7 @@ class App(PanelMixin, SensesMixin, Gtk.Application):
         self.web_sig = None             # (enabled, host, port, session hours) it was started with
         self.web_sync_src = None
         self.web_opened = False
+        self.web_report = None          # last (state, detail) printed about the panel
         self._web_music_at = 0.0
         self._web_music = None
         self._web_volume = None

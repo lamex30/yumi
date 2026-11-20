@@ -2,6 +2,7 @@
 """The browser panel's HTTP face: catalog, lock, CSRF, settings and static files.
 Run: python3 tests/test_webpanel.py"""
 import http.cookiejar
+import io
 import json
 import shutil
 import socket
@@ -10,10 +11,12 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import redirect_stderr
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from yumi import config  # noqa: E402
+from yumi.ui.webpanel import PanelMixin  # noqa: E402
 from yumi.webpanel import auth, catalog, server  # noqa: E402
 
 assert __import__('yumi').__version__
@@ -395,6 +398,31 @@ try:
     assert code == 200
     code, data, _ = call('GET', '/api/status')
     assert code == 401
+
+    # the panel's state is reported only when it changes: retries must not spam
+    class Reporter(PanelMixin):
+        def __init__(self):
+            self.settings = dict(config.DEFAULT_SETTINGS)
+            self.web_report = None
+            self.said = []
+            self.brain = self
+
+        def say_text(self, text):
+            self.said.append(text)
+
+    r = Reporter()
+    err = io.StringIO()
+    with redirect_stderr(err):
+        r._web_panel_report('on', 'http://127.0.0.1:1/?t=x')
+        r._web_panel_report('on', 'http://127.0.0.1:1/?t=x')
+        r._web_panel_report('off', 'port is busy')
+        r._web_panel_report('off', 'port is busy')
+        r._web_panel_report('on', 'http://127.0.0.1:1/?t=x')
+    lines = err.getvalue().splitlines()
+    assert len(lines) == 3, lines
+    assert 'browser panel at' in lines[0]
+    assert 'did not start' in lines[1]
+    assert len(r.said) == 1, r.said
 
     print('ok')
 finally:

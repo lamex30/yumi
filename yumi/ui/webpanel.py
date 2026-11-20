@@ -62,6 +62,20 @@ class PanelMixin:
         self.web_sync()
         return False
 
+    def _web_panel_report(self, state, detail=''):
+        """say the panel's state only when it changes: retries must not spam the log"""
+        report = (state, str(detail))
+        if getattr(self, 'web_report', None) == report:
+            return
+        self.web_report = report
+        if state == 'on':
+            print(f'yumi: browser panel at {detail}', file=sys.stderr)
+            return
+        print(f'yumi: the browser panel did not start: {detail}', file=sys.stderr)
+        b = getattr(self, 'brain', None)
+        if b:
+            b.say_text(config.tr(self.settings, 'web_fail', err=detail or 'port is busy'))
+
     def web_sync(self):
         sig = self.web_config_sig()
         if not sig[0]:
@@ -70,6 +84,7 @@ class PanelMixin:
                 self.web = None
             self.web_sig = None
             self.web_opened = False
+            self.web_report = None
             return
         if self.web and self.web.running and self.web_sig == sig:
             self.web.auth.set_session_hours(sig[3])
@@ -81,17 +96,14 @@ class PanelMixin:
         if panel.start():
             self.web = panel
             self.web_sig = sig
-            print(f'yumi: browser panel at {panel.url(True)}', file=sys.stderr)
+            self._web_panel_report('on', panel.url(True))
             if self.settings.get('web_panel_open') and not self.web_opened:
                 self.web_opened = True
                 system.open_url(panel.url(True))
         else:
             self.web = None
             self.web_sig = None
-            print(f'yumi: the browser panel did not start: {panel.error}', file=sys.stderr)
-            b = getattr(self, 'brain', None)
-            if b:
-                b.say_text(config.tr(self.settings, 'web_fail', err=panel.error or 'port is busy'))
+            self._web_panel_report('off', panel.error or 'port is busy')
 
     def web_open(self):
         was_running = bool(self.web and self.web.running)
