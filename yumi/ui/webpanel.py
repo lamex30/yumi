@@ -264,7 +264,7 @@ class PanelMixin:
                 'music': {'now_playing': self._web_music, 'volume': self._web_volume},
                 'wake_on': bool(self.wake_on),
                 'tap_ears': bool(s.get('tap_ears')),
-                'voice': engines.status(s),
+                'voice': dict(engines.status(s), tts_error=tts.last_error),
                 'downloads': self.dl_announced,
                 'outfit': getattr(self.meta, 'outfit', None),
                 'shelf_count': len([p for p in (st.get('shelf') or []) if Path(p).exists()]),

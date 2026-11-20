@@ -223,7 +223,8 @@ export function render(view, ctx) {
       say('Голос, модель и высота применяются сразу; проверка звучит даже при типе «Пищалка».',
           'Voice, model and pitch apply at once; the test plays even when the type is “8-bit blips”.'));
     voiceBox.append(engineLine(say('настоящий голос', 'real voice'), info,
-      info.profile ? `${info.profile.ru_speaker} / ${info.profile.en_speaker} · ${info.profile.pitch}` : ''));
+      voice.tts_error ? say(`причина: ${voice.tts_error}`, `reason: ${voice.tts_error}`) :
+        (info.profile ? `${info.profile.ru_speaker} / ${info.profile.en_speaker} · ${info.profile.pitch}` : '')));
     voiceBox.append(testRow(
       say('Послушать голос', 'Listen to the voice'),
       async () => {

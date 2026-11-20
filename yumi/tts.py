@@ -29,7 +29,15 @@ DIR = config.CACHE_DIR / 'tts'
 STATE = DIR / 'port.json'
 CONF = Path(config.CONFIG_DIR) / 'tts.json'
 LIMIT = 256 * 1024 * 1024          # the phrase cache stays under this
+last_error = ''                    # why the last speak() gave up (for the log and the panel)
 _sys_py_ok = None
+
+
+def _fail(reason):
+    """remember why the voice gave up, then hand the line back to the 8-bit blips"""
+    global last_error
+    last_error = reason
+    return None
 
 
 def _ping(port, timeout=0.4):
@@ -224,33 +232,33 @@ def _file_pid():
 def _ensure():
     """the running daemon's port and profile, starting it if needed; None if it cannot be"""
     if _shutting_down:                  # she is leaving: no new daemon rises behind her
-        return None
+        return _fail('she is shutting down')
     DIR.mkdir(parents=True, exist_ok=True)
     info = _state()
     if info:
         return info
     py = _python()
     if not py:
-        return None
+        return _fail('the voice venv is missing (tools/tts_setup.sh)')
     global _proc
     try:
         _proc = subprocess.Popen([str(py), str(DAEMON)], start_new_session=True,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
         _proc = None
-        return None
+        return _fail('cannot start the voice daemon')
     if _shutting_down:                  # close() ran while the daemon was being born
         try:
             _proc.terminate()
         except OSError:
             pass
-        return None
+        return _fail('she is shutting down')
     for _ in range(100):               # 20 s: importing torch is the slow part
         info = _state()
         if info:
             return info
         time.sleep(0.2)
-    return None
+    return _fail('the voice daemon did not become ready in 20 s')
 
 
 def _lang_runs(text):
@@ -314,15 +322,17 @@ def _concat(parts):
 def speak(text, volume=0.5):
     """voice the line: the path of a WAV, or None (she falls back to her blips);
     a line of two languages is said by both voices, a small pause in between"""
+    global last_error
+    last_error = ''
     text = ' '.join(str(text).split())[:500]
     # convert digits like 14:00 to words for better Silero TTS pronunciation
     text = _convert_digits_for_tts(text)
     text = apply_stress(text)      # the user's stress marks win over the auto-accentor
     if not text:
-        return None
+        return _fail('nothing to say')
     info = _ensure()
     if not info:
-        return None
+        return None                # _ensure() has already said why
     key = hashlib.sha1(f"{info['profile']}|{volume:.2f}|{text}".encode()).hexdigest()[:20]
     path = DIR / f'{key}.wav'
     if not path.exists():
@@ -335,13 +345,13 @@ def speak(text, volume=0.5):
                 parts.append(('wav', data))
                 done = True
         if not done:
-            return None
+            return _fail('the voice daemon returned no audio')
         try:
             tmp = path.with_suffix('.part')
             tmp.write_bytes(_concat(parts) if len(parts) > 1 else parts[0][1])
             tmp.replace(path)
         except (OSError, wave.Error):
-            return None
+            return _fail('cannot save the voice WAV')
         _evict()
     return path
 

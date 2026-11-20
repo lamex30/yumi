@@ -42,7 +42,8 @@ class SensesMixin:
         first = not getattr(self, '_tts_warned', False)
         self._tts_warned = True
         if first:
-            print('yumi: her real voice is not set up (run tools/tts_setup.sh); '
+            reason = getattr(tts, 'last_error', '') or 'the voice daemon did not answer'
+            print(f'yumi: her real voice did not work ({reason}); '
                   'the 8-bit blips speak instead', file=sys.stderr)
         return first
 

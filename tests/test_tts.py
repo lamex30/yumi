@@ -92,10 +92,19 @@ tts.STRESS.write_text(json.dumps({'звонит': 'звон+ит'}, ensure_ascii
 tts._stress_cache = None
 assert tts.apply_stress('звонит') == 'звон+ит'
 
+# a failed line says why it fell back, so the log is not a misleading «not set up»
+assert tts.speak('   ') is None and tts.last_error == 'nothing to say', tts.last_error
+ask = tts._ask
+tts._ask = lambda *_a: None
+assert tts.speak('Фраза без звука', 0.5) is None
+assert tts.last_error == 'the voice daemon returned no audio', tts.last_error
+tts._ask = ask
+
 # a stale port file: nothing answers, and starting a daemon is impossible -> None (blips instead)
 server.shutdown()
 (tts.DIR / 'port.json').write_text('{"port": 1, "profile": "x"}')
 assert tts.speak('Привет!', 0.5) is None
+assert tts.last_error, 'the fallback must leave a reason in tts.last_error'
 
 # the cache stays under the limit, the oldest go first
 (tts.DIR / 'port.json').unlink()
