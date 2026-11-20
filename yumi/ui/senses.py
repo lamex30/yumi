@@ -117,6 +117,13 @@ class SensesMixin:
         self._voice_state()
         if bid != self.voice_id:
             return False
+        b = self.brain
+        # keep the bubble alive while this piece waits its turn: TTS can take longer
+        # than the typed text, and an expired bubble would drop the last segment
+        if path and b.bubble and b.bubble.get('id') == bid:
+            secs = tts.wav_len(path)
+            if secs:
+                b.bubble['until'] = max(b.bubble['until'], b.now + secs + 3.0)
         if seq is None:
             if path:
                 self.voice_queue.append(path)

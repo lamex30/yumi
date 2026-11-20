@@ -1686,9 +1686,12 @@ class Brain(Extras):
         if self.bubble and self.bubble.get('stream'):
             self.bubble['text'] = reply or self.bubble['text']
             self.bubble.pop('stream', None)
-            # let her finish speaking and keep the line on screen a little
+            # let her finish speaking and keep the line on screen a little;
+            # TTS is prepared and played asynchronously, so keep the bubble alive
+            # well past the typing time or the last segment can be dropped
             typed = self._stream_typed
-            self.bubble['until'] = self.now + typed + 2.2 + 0.04 * len(reply)
+            self.bubble['until'] = max(self.now + typed + 2.2 + 0.04 * len(reply),
+                                       self.now + 60)
             self.talk_until = self.now + typed
         if not reply:
             self.chat_history.pop()     # the question got no answer: do not confuse her later
@@ -1714,7 +1717,8 @@ class Brain(Extras):
             self.chat_history.append({'role': 'assistant', 'content': reply})
             if self.bubble:
                 typed = self._stream_typed
-                self.bubble['until'] = self.now + typed + 2.2 + 0.04 * len(reply)
+                self.bubble['until'] = max(self.now + typed + 2.2 + 0.04 * len(reply),
+                                           self.now + 60)
                 self.talk_until = self.now + typed
             self.requests.append(('chat_reply_done', reply))
         else:
