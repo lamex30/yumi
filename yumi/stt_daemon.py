@@ -1850,7 +1850,13 @@ class Ears:
                         if rec.AcceptWaveform(chunk):
                             words = ' '.join(json.loads(
                                 rec.FinalResult() or '{}').get('text', '').split())
-                            self.tap.note(words)    # the tap's diary takes the wake's phrases
+                            if words and not woken:
+                                # SLEEP: the tap's diary takes the passing phrases
+                                # (the tap thread pauses while the wake owns the mic).
+                                # LISTENING: the phrase after the name is read from
+                                # the tape and noted once as the final wake result —
+                                # logging the small ear's segments too would double it
+                                self.tap.note(words)
                             if words:               # the small ear's readings stand by
                                 vosk_said.append(   # when the big ear reads nothing
                                     (time.monotonic(), words))
@@ -1859,6 +1865,11 @@ class Ears:
                             words = json.loads(rec.PartialResult() or '{}').get('partial', '')
                         if stop_at(words) or stop_mush(words, spellings):
                             if not woken or stop_shout(words, spellings):
+                                if woken and words:
+                                    # the stop ear finalised a segment while we were
+                                    # listening for a phrase: the early return skips
+                                    # wake_result, so keep that segment in the diary
+                                    self.tap.note(' '.join(words.split()))
                                 return stop_result(words, 'LISTENING' if woken else 'SLEEP')
                     else:
                         words = ''
