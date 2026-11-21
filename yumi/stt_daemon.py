@@ -74,7 +74,10 @@ MODELS = {                              # lang: size: (zip on alphacephei.com, f
 }
 WHISPER_SIZE = {'small': 'small',       # faster-whisper's own names for the sizes
                 'big': 'large-v3'}
-VERSION = 29                            # bumped when the protocol changes: stale twins are restarted
+VERSION = 30                            # bumped when the protocol changes: stale twins are restarted
+                                        # (30: a medium-confidence OpenWakeWord name is confirmed by
+                                        #     reading the tape: the name or a command must be heard,
+                                        #     otherwise the moment is background talk and no wake)
                                         # (29: the phrase after the name is read from the tape first —
                                         #     Nemotron, whisper as its fallback, the small ear last;
                                         #     the stop ear's passing final no longer stands in for
@@ -117,6 +120,14 @@ OWW_HOLD = 0.35              # hysteresis: a believed candidate stays believed w
                              # dip between the syllables, to close the door again
 OWW_SPIKE = 2                # frames in a row above the threshold before a candidate is
                              # believed: one spike is a knock, a stretch is a name
+OWW_POSITIVE_MS = 160.0      # ms the believed stretch must stand over the activation line:
+                             # one loud frame alone is never enough, even with oww_spike 1
+OWW_CONFIRM = True           # a medium-confidence name is checked against the tape: the
+                             # phrase ear must hear the name or a command meant for her
+OWW_CONFIRM_BELOW = 0.8      # scores below this line need that confirmation; a louder name
+                             # is believed at once (the fast path keeps its latency)
+OWW_REJECT_COOLDOWN = 5.0    # s of quiet after a rejected candidate: the same music must not
+                             # be read over and over
 OWW_MS = 80.0                # ms of sound one frame of the trained ear stands for
 JUDGE_TAPE = 5.0             # s of tape the judge reads: some sound before the name,
                              # the name, what follows — not the whole 8 s shelf
@@ -242,7 +253,10 @@ def _wake_tuning():
     Every dial keeps a safe default: an old settings.json wakes just as before."""
     t = {'oww_threshold': OWW_THRESHOLD, 'oww_sure': OWW_SURE, 'oww_hold': OWW_HOLD,
          'oww_veto': OWW_VETO, 'oww_window': 3.0, 'oww_spike': OWW_SPIKE,
-         'oww_positive_ms': 240.0, 'judge_tape': JUDGE_TAPE, 'judge_rate': WAKE_REJUDGE,
+         'oww_positive_ms': OWW_POSITIVE_MS, 'oww_confirm': OWW_CONFIRM,
+         'oww_confirm_below': OWW_CONFIRM_BELOW,
+         'oww_reject_cooldown': OWW_REJECT_COOLDOWN,
+         'judge_tape': JUDGE_TAPE, 'judge_rate': WAKE_REJUDGE,
          'judge_ttl': JUDGE_TTL, 'wake_phonetic': True,
          'stt_diag_wav': False, 'oww_cooldown': OWW_COOLDOWN,
          'wake_lead_ms': WAKE_LEAD_MS, 'wake_listen': WAKE_LISTEN,
@@ -263,6 +277,8 @@ def _wake_tuning():
     clamp('oww_window', 1.0, 10.0)
     clamp('oww_spike', 1.0, 6.0)
     clamp('oww_positive_ms', 0.0, 3000.0)
+    clamp('oww_confirm_below', 0.0, 1.0)
+    clamp('oww_reject_cooldown', 0.0, 60.0)
     clamp('judge_tape', 2.0, 8.0)
     clamp('judge_rate', 1.0, 30.0)
     clamp('judge_ttl', 2.0, 60.0)
@@ -272,7 +288,7 @@ def _wake_tuning():
     clamp('wake_read_s', 2.0, 10.0)
     clamp('wake_vosk_fallback', 0.0, 10.0)
     t['oww_spike'] = int(t['oww_spike'])
-    for key in ('wake_phonetic', 'stt_diag_wav'):
+    for key in ('wake_phonetic', 'stt_diag_wav', 'oww_confirm'):
         try:
             t[key] = bool(st[key])
         except (TypeError, ValueError, KeyError):
@@ -280,7 +296,15 @@ def _wake_tuning():
     return t
 
 
-TUNE = _wake_tuning()                   # the wake's dials, read once at the start
+TUNE = _wake_tuning()                   # the wake's dials, read at the start and
+                                        # refreshed before every /wake: the browser
+                                        # panel may change them while we are warm
+
+
+def refresh_tune():
+    """pick up the panel's changes to the wake dials without restarting the
+    daemon: the settings file is the one source the app and the panel share"""
+    TUNE.update(_wake_tuning())
 
 
 def _default_sink():
@@ -768,8 +792,12 @@ def oww_wake_decision(stat):
     her when the current frame stands on the sure line, or when the stretch's best
     stands over the threshold line — OpenWakeWord alone decides, no judge, no Vosk
     (разделы 2 и 6 ТЗ). The belief itself (a stretch of frames with its hold
-    hysteresis) is EarStat's work: one loud spike alone never wakes her."""
+    hysteresis) is EarStat's work: one loud spike alone never wakes her. The
+    stretch must also last oww_positive_ms: a single frame at 0.9 is a knock on
+    the desk or a cymbal, not a name."""
     if not stat or not stat.get('active'):
+        return False
+    if stat.get('streak', 0) * OWW_MS < TUNE['oww_positive_ms']:
         return False
     return stat['cur'] >= TUNE['oww_sure'] or stat['hi'] >= TUNE['oww_threshold']
 
@@ -1081,6 +1109,38 @@ def phon_candidate(text, spellings):
                 continue
             return ' '.join(toks[i + n:]), said
     return None, None
+
+
+def confirmed_wake(text, score, fallback, spellings, hints=(), ear='',
+                   confirm=None, below=None):
+    """True when a wake the trained ear half-believed is worth waking for.
+
+    A loud name (score at or above oww_confirm_below) is believed at once: the
+    fast path keeps its latency.  A medium one (0.5–0.8) is checked against the
+    tape the phrase ear already read: the name itself, a command, or a phrase
+    clearly meant for her must be there.  Background music that made the ear
+    ring without a word meant for Yumi stays a dream.  The weakest reader (vosk
+    on the tape) must hear the name itself — its command-shaped readings of the
+    room are exactly what used to wake her for nothing.  A fallback wake already
+    came from vosk's own name and routed tail, so it is trusted as before."""
+    if fallback:
+        return True
+    if confirm is None:
+        confirm = TUNE['oww_confirm']
+    if below is None:
+        below = TUNE['oww_confirm_below']
+    if not confirm or score >= below:
+        return True
+    if not text:
+        return False
+    named = wake_at(text, spellings, 1)[0] is not None \
+        or name_exact(text, spellings) \
+        or phon_candidate(text, spellings)[0] is not None
+    if named:
+        return True
+    if ear == 'vosk':
+        return False
+    return fallback_route(text, hints) != 'ignore'
 
 
 class Arbiter:
@@ -1634,12 +1694,17 @@ class Ears:
             ear's fresh final holds the phrase the name stood at the end of.
             That final is the weakest source the wake has: over music it reads the
             room, so only words meant for her stand in (fallback_route) — anything
-            else is background talk and she asks what you wanted instead"""
+            else is background talk and she asks what you wanted instead.
+            A medium-confidence trained ear is not believed on a greeting alone:
+            None says the caller must read the tape and confirm first."""
             text = vosk_fallback()
             if text and fallback_route(text, hints) != 'ignore':
                 judge_note(f'WAKE vosk fallback ({text!r})')
                 return wake_result(text, 'vosk_fallback', wake_score)
-            return wake_result('', why, wake_score)
+            if fallback_wake or not TUNE['oww_confirm'] \
+                    or wake_score >= TUNE['oww_confirm_below']:
+                return wake_result('', why, wake_score)
+            return None
 
         def stop_result(text, state):
             """the stop's answer and its diary line: «стоп» overrides everything,
@@ -1710,7 +1775,80 @@ class Ears:
                 utt = None                  # the phrase on tape, LISTENING only
                 ear_note = [0.0]            # when the ear's last loud frame was noted
                 cool_note = [False]         # the cooldown logged once a window, not a storm
+                reject_until = [0.0]        # the same rejected sound must not ring again at once
                 judge_note(f'WAKE open {secs:.0f} s (OpenWakeWord only)')
+
+                def read_and_confirm():
+                    """read the phrase tape and check a medium-confidence name.
+                    Returns the wake answer, or None when the moment was background
+                    talk: the caller resets the ears and keeps listening in the same
+                    window (no recorder restart, no fresh model load)."""
+                    nonlocal utt
+                    said = utt.take() if utt is not None else b''
+                    window = said[:int(TUNE['wake_read_s'] * RATE * 2)]
+                    text, ear = '', ''
+                    if len(window) >= RATE // 2:      # under half a second is a breath
+                        diag.event(arbitration='STT', reason='phrase_end', stt_start=True,
+                                   judge_called=False, final_wake=False,
+                                   **diag_base('LISTENING', voiced))
+                        text, ear = self.read_tape(window, lang, size, engine)
+                        if text and ear == 'vosk' and fallback_route(text, hints) == 'ignore':
+                            # the weakest ear read the background: an honest «не расслышала»
+                            # (she asks what you wanted) beats a confident wrong command
+                            judge_note(f'WAKE {ear} stays out ({text!r})')
+                            text, ear = '', ''
+                        diag.event(arbitration='STT', reason='stt_done', stt_text=text,
+                                   stt_by=ear, judge_called=False, final_wake=False,
+                                   **diag_base('LISTENING', voiced))
+                    if not text and heard_after and (fallback_wake or ear_oww is None):
+                        # the wake came from the small ear's own words: the tape may be
+                        # empty (the phrase ended before the wake) — its tail is the
+                        # phrase, and fallback_route already let it through when it was
+                        # not the trained ear that woke
+                        text = heard_after
+                        judge_note(f'WAKE vosk name tail ({text!r})')
+                    # a vosk-only wake (no trained ear at all) already came from
+                    # that ear's own name and a routed tail: it is trusted as the
+                    # fallback it is, not re-judged by the tape
+                    if not confirmed_wake(text, wake_score,
+                                          fallback_wake or ear_oww is None,
+                                          spellings, hints, ear):
+                        diag.event(arbitration='REJECT', reason='unconfirmed',
+                                   stt_text=text, stt_by=ear,
+                                   wake_score=round(wake_score, 4),
+                                   judge_called=False, final_wake=False,
+                                   **diag_base('LISTENING', voiced))
+                        judge_note(f'WAKE rejected (score={wake_score:.2f}, text={text!r})')
+                        return None
+                    return wake_result(text, 'phrase_after_name' if text else 'name_alone',
+                                       wake_score)
+
+                def reset_candidate():
+                    """forget the rejected moment and listen on: the ears start clean,
+                    the ring and the stop ear's finals speak no more of that sound."""
+                    nonlocal woken, fallback_wake, wake_t, wake_score, heard_after
+                    nonlocal utt, det, phrase_ms, last_voice_t, voice_t0, was_voiced
+                    woken, fallback_wake = False, False
+                    wake_t, wake_score, heard_after = 0.0, 0.0, ''
+                    utt, det, phrase_ms = None, Detector(), 0.0
+                    last_voice_t = voice_t0 = 0.0
+                    was_voiced = False
+                    vosk_said.clear()
+                    del ring[:]
+                    cool_note[0] = False
+                    ear_stat.reset()
+                    if ear_oww is not None:
+                        oww_ear_score(ear_oww, b'', reset=True)
+                    _last_wake[0] = time.monotonic()
+                    reject_until[0] = time.monotonic() + TUNE['oww_reject_cooldown']
+
+                def finish_phrase():
+                    """the phrase ended (or the window did): answer, or reject and
+                    keep the same wake window alive."""
+                    answer = read_and_confirm()
+                    if answer is None:
+                        reset_candidate()
+                    return answer
 
                 def wake_from_vosk(words, fallback=False):
                     """the small ear's own reading of the name and the phrase: its
@@ -1754,13 +1892,20 @@ class Ears:
                             if verdict == 'greet':
                                 # the name passed by, nothing followed it: her turn
                                 # to greet — unless the small ear just finalised
-                                # the phrase the name stood at the end of
-                                return greet_or_fallback('name_alone')
+                                # the phrase the name stood at the end of. A medium
+                                # trained ear must be confirmed from the tape first.
+                                answer = greet_or_fallback('name_alone')
+                                if answer is not None:
+                                    return answer
+                                break   # the tape goes to confirmation below
                             if verdict in ('end', 'ceiling'):
                                 if verdict == 'ceiling':
                                     judge_note('woken: listen ran out after %.1f s'
                                                % (now - wake_t))
-                                break       # hand out what has gathered
+                                answer = finish_phrase()
+                                if answer is not None:
+                                    return answer
+                                continue    # background talk: the same window listens on
                         # the recorder went dumb mid-window (a source yanked away, a
                         # driver's sulks): the ears must not wait out the whole wake
                         # deaf — the recorder starts over, the stop ear and the
@@ -1890,9 +2035,14 @@ class Ears:
                             judge_note(f'EAR {score:.2f}')
                         stat = ear_stat.feed(score, time.monotonic())
                         if stat['active']:
+                            # a rejected moment just passed: the same music must not
+                            # be read over and over; a real name waits out this short
+                            # quiet (oww_reject_cooldown)
+                            if time.monotonic() < reject_until[0]:
+                                pass
                             # a wake just handed over: the same name still ringing on
                             # the air must not wake her twice (cooldown, configurable)
-                            if time.monotonic() - _last_wake[0] < TUNE['oww_cooldown']:
+                            elif time.monotonic() - _last_wake[0] < TUNE['oww_cooldown']:
                                 if not cool_note[0]:
                                     cool_note[0] = True
                                     judge_note(f'WAKE held by cooldown (hi={stat["hi"]:.2f})')
@@ -1947,58 +2097,49 @@ class Ears:
                         verdict = after_name(phrase_ms, now - max(last_voice_t, wake_t),
                                              now - wake_t, TUNE['wake_listen'])
                         if verdict == 'end':
-                            break           # the voice died down: the phrase is over
+                            # the voice died down: the phrase is over — read it and
+                            # confirm a medium name; background talk keeps listening
+                            answer = finish_phrase()
+                            if answer is not None:
+                                return answer
+                            continue
                         if verdict == 'greet':
                             # the name alone: her turn to greet, unless the small
-                            # ear's fresh final holds the phrase
-                            return greet_or_fallback('name_alone')
+                            # ear's fresh final holds the phrase; a medium ear is
+                            # confirmed from the tape first
+                            answer = greet_or_fallback('name_alone')
+                            if answer is not None:
+                                return answer
+                            break       # the tape goes to confirmation below
                         if verdict == 'ceiling':
                             judge_note('woken: listen ran out after %.1f s'
                                        % (now - wake_t))
-                            break           # hand out what has gathered
+                            answer = finish_phrase()
+                            if answer is not None:
+                                return answer
+                            break       # the window is over: no more listening to do
                 if not woken:
                     diag.event(arbitration='TIMEOUT',
                                reason='aborted' if self.abort else 'no_wake',
                                judge_called=False, final_wake=False,
                                **diag_base('SLEEP', voiced))
                     return {'woke': False, 'text': None}
-                # the name was heard: the phrase after it is read from the tape the
-                # LISTENING gathered — the configured ear first (Nemotron when the
-                # settings name it), whisper as its fallback, the small ear last
-                # (раздел 7 ТЗ). The stop ear's passing final is no longer the
-                # command: it read the air the whole time and over music it reads
-                # the room better than the user («я ведь», «июне включи музыку»),
-                # so a wrong reading would reach the mind instead of the right one
-                # (tmp/verdict.txt). Only a wake that came from that ear keeps its
-                # tail: there the phrase was over before the wake and the tape is
-                # empty, so those words are the phrase (and fallback_route let them
-                # through already). The read is bounded by wake_read_s: a command is
-                # short, and a longer window buys latency, not words.
-                said = utt.take() if utt is not None else b''
-                window = said[:int(TUNE['wake_read_s'] * RATE * 2)]
-                text, ear = '', ''
-                if len(window) >= RATE // 2:      # under half a second is a breath
-                    diag.event(arbitration='STT', reason='phrase_end', stt_start=True,
-                               judge_called=False, final_wake=False,
-                               **diag_base('LISTENING', voiced))
-                    text, ear = self.read_tape(window, lang, size, engine)
-                    if text and ear == 'vosk' and fallback_route(text, hints) == 'ignore':
-                        # the weakest ear read the background: an honest «не расслышала»
-                        # (she asks what you wanted) beats a confident wrong command
-                        judge_note(f'WAKE {ear} stays out ({text!r})')
-                        text, ear = '', ''
-                    diag.event(arbitration='STT', reason='stt_done', stt_text=text,
-                               stt_by=ear, judge_called=False, final_wake=False,
-                               **diag_base('LISTENING', voiced))
-                if not text and heard_after and (fallback_wake or ear_oww is None):
-                    # the wake came from the small ear's own words: the tape may be
-                    # empty (the phrase ended before the wake) — its tail is the
-                    # phrase, and fallback_route already let it through when it was
-                    # not the trained ear that woke
-                    text = heard_after
-                    judge_note(f'WAKE vosk name tail ({text!r})')
-                return wake_result(text, 'phrase_after_name' if text else 'name_alone',
-                                   wake_score)
+                # the name was heard and the window is over (a timeout or /stop):
+                # read what the tape holds and let a medium name be confirmed.
+                # The read is the same one the phrase-end path uses: the configured
+                # ear first (Nemotron when the settings name it), whisper as its
+                # fallback, the small ear last (раздел 7 ТЗ). The stop ear's passing
+                # final is no longer the command: it read the air the whole time and
+                # over music it reads the room better than the user («я ведь»,
+                # «июне включи музыку»), so a wrong reading would reach the mind
+                # instead of the right one (tmp/verdict.txt). Only a wake that came
+                # from that ear keeps its tail: there the phrase was over before the
+                # wake and the tape is empty, so those words are the phrase (and
+                # fallback_route let them through already).
+                answer = read_and_confirm()
+                if answer is not None:
+                    return answer
+                return {'woke': False, 'text': None}
             finally:
                 if diag_wav and ear_tape:
                     wake_feed_wav(ear_tape)     # what the ear heard, for the shelf
@@ -2291,6 +2432,7 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(hints, list):
                 hints = []
             hints = [str(h) for h in hints if str(h).strip()][:64]
+            refresh_tune()                  # the panel's dials are live, not a restart away
             try:
                 res = self.ears.wake(lang, word, secs, size=size, mic=mic,
                                      sensitivity=sensitivity, confirm=confirm,

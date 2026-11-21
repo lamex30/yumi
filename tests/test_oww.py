@@ -25,6 +25,8 @@ spec.loader.exec_module(stt)
 # fixed dials for the tests
 stt.TUNE.update({'oww_threshold': 0.5, 'oww_sure': 0.7, 'oww_hold': 0.35,
                  'oww_veto': 0.2, 'oww_window': 3.0, 'oww_spike': 2,
+                 'oww_positive_ms': 160.0, 'oww_confirm': True,
+                 'oww_confirm_below': 0.8, 'oww_reject_cooldown': 5.0,
                  'oww_cooldown': 2.0, 'wake_lead_ms': 1000.0, 'wake_listen': 15.0,
                  'wake_ear': 'oww'})
 
@@ -90,6 +92,41 @@ assert not stt.oww_wake_decision(stat.feed(0.1, now + 0.24))
 # неактивная статистика никогда не будит
 assert not stt.oww_wake_decision({'active': False, 'cur': 0.9, 'hi': 0.9})
 assert not stt.oww_wake_decision(None)
+
+# ---- oww_positive_ms: даже при oww_spike=1 одного кадра мало ----
+# один кадр 0.9 — это стук/тарелка, а не имя: растяжка должна продержаться
+# oww_positive_ms (160 мс = два кадра)
+_saved_spike = stt.TUNE['oww_spike']
+stt.TUNE['oww_spike'] = 1
+stat = stt.EarStat(spike=1)
+assert not stt.oww_wake_decision(stat.feed(0.9, now + 1.0)), \
+    'one 80 ms frame above the sure line must not wake her'
+assert stt.oww_wake_decision(stat.feed(0.9, now + 1.08)), \
+    'two frames (160 ms) are a name'
+stt.TUNE['oww_spike'] = _saved_spike
+
+# ---- подтверждение среднего имени по ленте (oww_confirm) ----
+# громкое имя верит сразу, без чтения ленты
+assert stt.confirmed_wake('', 0.9, False, spellings)
+assert stt.confirmed_wake('', 0.8, False, spellings)       # ровно на линии
+# среднее имя без текста — не будим (музыка/удар)
+assert not stt.confirmed_wake('', 0.6, False, spellings)
+# среднее имя, но ухо фраз услышало само имя — будим
+assert stt.confirmed_wake('юми включи музыку', 0.6, False, spellings)
+assert stt.confirmed_wake('включи музыку, юми', 0.6, False, spellings)
+# среднее имя и явная команда/вопрос — тоже будим
+assert stt.confirmed_wake('включи музыку', 0.6, False, spellings)
+assert stt.confirmed_wake('как дела?', 0.6, False, spellings)
+# фоновая болтовня без имени и без команды — не будим
+assert not stt.confirmed_wake('я ведь или чем ведомость и семь', 0.6, False, spellings)
+assert not stt.confirmed_wake('терминал', 0.6, False, spellings)
+# самое слабое ухо (vosk) должно услышать само имя: его команда из фона не в счёт
+assert not stt.confirmed_wake('включи музыку', 0.6, False, spellings, ear='vosk')
+assert stt.confirmed_wake('юми включи музыку', 0.6, False, spellings, ear='vosk')
+# фолбэк уже пришёл из имени и хвоста vosk — ему верим
+assert stt.confirmed_wake('', 0.4, True, spellings)
+# выключенная проверка возвращает старое поведение
+assert stt.confirmed_wake('', 0.6, False, spellings, confirm=False)
 
 # ---- Utterance: лид больше LEAD сохраняется (голова фразы после имени, §7) ----
 u = stt.Utterance()
@@ -222,6 +259,18 @@ assert wake_src.index('read_tape(') < \
     'the tape is read first: the small ear keeps only a wake that came from it'
 assert 'fallback_route(text, hints)' in wake_src, \
     'a weak (vosk) reading of the room must not become a command'
+# ---- среднее имя подтверждается лентой, фон не будит ----
+assert 'def read_and_confirm' in wake_src, 'the wake lost the tape confirmation'
+assert 'confirmed_wake(text, wake_score' in wake_src, \
+    'the wake must check a medium name against the tape'
+assert "arbitration='REJECT'" in wake_src, 'a rejected candidate must leave a diary line'
+assert 'def reset_candidate' in wake_src, 'a rejected candidate must reset the ears'
+assert 'finish_phrase()' in wake_src, 'the phrase end must go through the confirmation'
+assert 'reject_until' in wake_src, 'the same rejected sound must not ring again at once'
+# новые ручки должны подхватываться панелью без перезапуска демона
+assert 'def refresh_tune' in src_stt, 'the wake dials must be reloadable'
+assert 'refresh_tune()' in src_stt.split('if u.path == \'/wake\'', 1)[1].split(
+    'self.ears.wake(', 1)[0], 'the /wake route must pick up the panel settings'
 tape_src = src_stt.split('def read_tape(self', 1)[1].split('def transcribe_said', 1)[0]
 assert tape_src.index('transcribe_nemo_model') < tape_src.index("engine != 'whisper'") \
     < tape_src.index('vosk_read'), \

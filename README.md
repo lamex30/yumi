@@ -444,13 +444,27 @@ the name**). A command is short, so a longer window adds latency, not words. Whe
 Nemotron nor whisper read anything and the lite ear only caught the background, Yumi asks you
 to repeat instead of carrying out a random command.
 
+The name «Yumi» is caught by the trained OpenWakeWord ear. A loud name (from
+`oww_confirm_below`, 0.8) wakes her at once; a quiet one (0.5–0.8) is first checked against
+the same tape the phrase ear reads for the command anyway: Nemotron (or whisper) must hear
+the name itself **or** a clear command / question. If it does not, the sound was music or
+someone else's video, and Yumi keeps waiting without showing a wake. A single loud frame is
+not enough either: the stretch must last `oww_positive_ms` (160 ms). The knobs live in
+**Settings → Her ears**: «Confirm a quiet name with the phrase ear» (`oww_confirm`),
+«Confirmation line» (`oww_confirm_below`), «Name stretch length» (`oww_positive_ms`),
+«Frames before the name is believed» (`oww_spike`) and «Quiet after a rejected name»
+(`oww_reject_cooldown`). The panel's changes are picked up before the next wake, no restart
+of Yumi needed.
+
 The browser panel's **Ears & voice** page puts the two choices beside each other and can test
 them without leaving the browser: **1. Activation** picks the ear that hears «Yumi» —
 openWakeWord (the trained `yumi.onnx` model) or vosk — and **Test the name** holds the
 microphone for a few seconds and answers «heard / silence». **2. Judge** picks who reads the
 phrase after the name — Whisper or Nemotron — and **Test the judge** shows the text that
 engine actually read. A missing openWakeWord model or Nemotron model is shown as «missing»
-with the reason, so a broken setup is not mistaken for a quiet microphone.
+with the reason, so a broken setup is not mistaken for a quiet microphone. The name-accuracy
+knobs sit beside them: the tape check for a quiet name, its line, the stretch length, the
+frames before the name is believed and the quiet after a rejected candidate.
 
 **The time and the weather.** «Который час» and «what time is it» she answers by herself,
 no mind involved — she just reads the clock. «Какая погода» and «what's the weather» make her
@@ -500,9 +514,10 @@ catches it properly at first try more often than not. Said with a phrase
 whole; a pause after the name — she asks "Yes? What is it?" right away and listens on. The idle
 waiting goes on while enabled (off in **Settings → Her ears → Wake on «Yumi»**) and it is not an
 eavesdrop: while she is in DND, talking an answer or listening on request, her name is ignored.
-The name is not taken at the first word's say-so: when vosk's letters seem to spell it, the tape
-of the last seconds goes to whisper for a yes or a no — a name half-heard in a video's stream
-stays a dream (the confirmation costs a moment; vosk keeps listening while whisper reads).
+The name is not taken at the first word's say-so: the trained OpenWakeWord ear catches a loud
+name, while a quiet one (0.5–0.8) is checked against the tape the phrase ear reads anyway —
+Nemotron (or whisper) must hear the name itself or a clear command. If it does not, a name
+half-heard in a video's stream stays a dream and she keeps waiting.
 If the trained ear missed the name but vosk heard both the name and a tail, the tail is routed
 again: a command («play music», your own button, a note) runs, a question or a phrase addressed
 to her goes to her mind, and background talk stays unanswered — she simply keeps quiet.

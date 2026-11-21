@@ -74,6 +74,13 @@ DEFAULT_SETTINGS = {
                             # openWakeWord ear when its model is here, vosk
                             # otherwise) / oww / vosk; vosk guessed the name by
                             # ear, the trained one learned it
+    'oww_spike': 2,           # frames in a row over the line before the name is
+                              # believed: one loud frame is a knock, not a name
+    'oww_positive_ms': 160,   # ms the believed stretch must last over the line
+    'oww_confirm': True,      # a medium-confidence name is checked against the
+                              # tape: the phrase ear must hear the name or a command
+    'oww_confirm_below': 0.8, # scores below this line need that confirmation
+    'oww_reject_cooldown': 5.0,  # s of quiet after a rejected candidate
     'wake_judge_log': True,    # write what the judge hears into /tmp/yumi/judge.log
     'name_duck': False,        # when her name is heard, the sounds duck so she can
                                # hear the phrase; the old loudness returns after it,
