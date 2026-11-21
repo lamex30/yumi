@@ -8,6 +8,12 @@
    "phrases": ["найди в интернете", "поищи в интернете", "поищи в сети", "search the web", "google"],
    "keywords": ["погугли", "погуглить", "интернет", "internet"],
    "speak": "Ищу {query}"},
+  {"label": "Reminder", "label_ru": "Напоминание", "icon": "clock",
+   "command": "notify-send Напоминание",
+   "phrases": ["напомни завтра вечером"],
+   "speak": "Напомню {date} в {time}",
+   "entities": {"date": true, "time": true},
+   "id": "remind_tomorrow", "priority": 2, "requires_confirmation": true},
   {"label": "Notes", "label_ru": "Заметки", "icon": "doc", "command": "gnome-text-editor"},
   {"label": "Play / pause", "label_ru": "Пауза", "icon": "play", "command": "playerctl play-pause"}
 ]

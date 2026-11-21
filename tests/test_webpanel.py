@@ -229,13 +229,22 @@ try:
     assert entries['stt_echo']['type'] == 'switch'
     assert entries['voice_vol']['type'] == 'range'
     assert entries['tts_pitch']['type'] == 'range'
+    assert entries['nlu_confidence']['type'] == 'range', entries.get('nlu_confidence')
+    assert (entries['nlu_confidence']['min'], entries['nlu_confidence']['max'],
+            entries['nlu_confidence']['step']) == (0.5, 1.0, 0.05)
     assert entries['tts_ru_speaker']['type'] == 'select'
     assert entries['tts_en_speaker']['choices'][0] == 'en_0'
     assert entries['tts_ru_model']['type'] == 'select'
     assert catalog.validate_settings_patch({'tts_pitch': '1.3'}) == {'tts_pitch': 1.3}
+    assert catalog.validate_settings_patch({'nlu_confidence': '0.9'}) == {'nlu_confidence': 0.9}
     try:
         catalog.validate_settings_patch({'tts_pitch': 3})
         raise AssertionError('bad pitch accepted')
+    except ValueError:
+        pass
+    try:
+        catalog.validate_settings_patch({'nlu_confidence': 2})
+        raise AssertionError('bad confidence accepted')
     except ValueError:
         pass
     assert catalog.redact({'polza_api_key': 'secret', 'music_jellyfin_password': 'x'})['polza_api_key'] == catalog.MASK
@@ -251,6 +260,19 @@ try:
         raise AssertionError('bad port accepted')
     except ValueError:
         pass
+
+    # ---- actions: a browser save keeps the declarative voice fields; bad ones
+    # are dropped or coerced instead of spoiling the button
+    cleaned = PanelMixin._clean_actions(None, [{
+        'command': 'open', 'label': 'Open', 'phrases': ['открой'],
+        'id': 'open_browser', 'priority': '7', 'requires_confirmation': True,
+        'entities': {'volume': True, 'nonsense': True, 'time': False},
+        'speak': 'Готово', 'url': 'https://example.org/?q={query}',
+    }])
+    assert cleaned[0]['id'] == 'open_browser' and cleaned[0]['priority'] == 7
+    assert cleaned[0]['requires_confirmation'] is True
+    assert cleaned[0]['entities'] == {'volume': True}, cleaned[0]['entities']
+    assert cleaned[0]['phrases'] == ['открой'] and cleaned[0]['url'].endswith('{query}')
 
     # ---- auth: signed sessions, CSRF, token rotation keeps sessions, rate limit
     store = tmp / 'auth.json'
@@ -288,6 +310,25 @@ try:
     assert code == 200 and data['version'] and data['pages']
     code, data, _ = call('GET', '/api/actions')
     assert code == 200 and data['icon_patterns']['folder']
+
+    # a browser save of a button keeps its declarative voice metadata
+    full = {'label': 'Term', 'label_ru': 'Терм', 'icon': 'terminal', 'command': 'foot',
+            'phrases': ['открой терминал'], 'speak': 'Ок', 'id': 'open_term',
+            'priority': 3, 'requires_confirmation': True, 'entities': {'volume': True}}
+    code, data, _ = call('PUT', '/api/actions', {'actions': [full]})
+    assert code == 403, 'actions without CSRF must fail'
+    code, data, _ = call('PUT', '/api/actions', {'actions': [full]}, csrf=csrf)
+    assert code == 200 and data['saved'] == 1, (code, data)
+    code, data, _ = call('GET', '/api/actions')
+    assert code == 200 and data['actions'][0]['id'] == 'open_term'
+    assert data['actions'][0]['requires_confirmation'] is True
+    assert data['actions'][0]['entities'] == {'volume': True}
+
+    # the pending requires_confirmation command can be answered from the browser
+    code, data, _ = call('POST', '/api/nlu/confirm', {'ok': True})
+    assert code == 403, 'a confirmation without CSRF must fail'
+    code, data, _ = call('POST', '/api/nlu/confirm', {'ok': True}, csrf=csrf)
+    assert code == 200 and data['ok'] is True, (code, data)
 
     code, data, _ = call('PATCH', '/api/settings', {'patch': {'chatter': False}})
     assert code == 403, 'a mutation without CSRF must fail'

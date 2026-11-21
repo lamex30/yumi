@@ -40,7 +40,9 @@ bin/yumi               флаг --web
 yumi/ui/app.py         жизненный цикл панели
 yumi/ui/bridge.py      WebBridge — контракт HTTP ↔ приложение
 yumi/config.py         настройки web_panel_* и строки интерфейса
-yumi/brain.py          пункты меню и действия в мире
+yumi/brain.py          пункты меню, голосовые команды и подтверждение
+yumi/nlu.py            распознавание фраз: IntentResult, recognize(), match()
+yumi/entities.py       общие сущности фразы: громкость, время, дата
 yumi/memory.py         хелперы дневника для страницы «Память»
 yumi/notes.py          заметки: sqlite + векторы, голосовые команды, страница «Заметки»
 tests/test_webpanel.py интеграционный тест API и безопасности
@@ -129,8 +131,9 @@ ctx.navigate(id)
 | POST | `/api/settings/reset` | `{key}` или `{all:true}` |
 | GET | `/api/configs` | список JSON-файлов |
 | GET/PUT | `/api/config/<name>` | чтение/запись с бэкапом |
-| GET/PUT | `/api/actions` | свои кнопки |
+| GET/PUT | `/api/actions` | свои кнопки; PUT сохраняет и поля `id`, `priority`, `requires_confirmation`, `entities` |
 | POST | `/api/actions/<i>/run` | нажать свою кнопку |
+| POST | `/api/nlu/confirm` | `{ok:true|false}` — ответить на отложенную команду с `requires_confirmation`; то же, что «да» / «нет» голосом |
 | POST | `/api/state/<action>` | toggle/show/hide/home/monitor/pipette/recent/shelf/sleep |
 | GET | `/api/files/recent`, `/api/files/shelf` | списки файлов |
 | POST | `/api/files/shelf` | `{path, add}` |
@@ -168,9 +171,17 @@ ctx.navigate(id)
 Важно: `/api/security/link` намеренно **не** отдаёт токен по GET, чтобы он не попал в
 историю, referer или кэш. Фронтенд показывает его только после явного нажатия.
 
+Голосовые команды в снимке: `runtime.nlu` — `{last_intent, last_confidence, confirm}`.
+`confirm: true` означает, что Юми ждёт ответа на «Запустить?»; страница «Кнопки» показывает
+в этом случае две кнопки и вызывает `/api/nlu/confirm`. Настройка `nlu_confidence`
+(тип `range`, 0.5–1.0, шаг 0.05, по умолчанию 0.6) живёт в секции `mind` и применяется
+на каждой фразе без перезапуска. Новые поля кнопки (`id`, `priority`,
+`requires_confirmation`, `entities`) проходят через `_clean_actions()` в `ui/webpanel.py` —
+он же используется и при записи `actions.json` из конфигов, и при PUT `/api/actions`.
+
 `WebBridge` (см. `yumi/ui/bridge.py`) — контракт между HTTP и приложением:
 `snapshot, configs, config_get, config_save, actions_get, actions_save, action_run,
-apply_settings, state_action, files_recent, files_shelf, shelf_change, files_open,
+confirm_action, apply_settings, state_action, files_recent, files_shelf, shelf_change, files_open,
 job_add, jobs_cancel, timer_get, timer, ask, chat, chat_history, chat_clear,
 memory_recent, memory_search, memory_clear, notes_list, notes_search, notes_get,
 notes_add, notes_update, notes_delete, notes_clear, music_status, music_search,

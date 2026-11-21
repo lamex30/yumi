@@ -80,6 +80,45 @@ if nlu._lemmatizer():
     hit = nlu.match('открой терминалом', ACTIONS)
     assert hit and hit[0] is TERMINAL and hit[1] == nlu.SCORE_PHRASE, hit
 
+# ---- the structured answer: the same choice, with the rest of the meaning
+VOLUME_BUTTON = {'id': 'set_volume', 'label': 'Volume', 'command': 'vol',
+                 'phrases': ['громкость половина'], 'keywords': ['громкость']}
+READ = [VOLUME_BUTTON, TERMINAL]
+result = nlu.recognize('громкость половина', READ)
+assert result is not None
+assert result.action is VOLUME_BUTTON and result.intent == 'set_volume'
+assert result.confidence == nlu.SCORE_PHRASE and result.slots == {}
+assert result.entities['volume']['value'] == 50
+assert result.as_tuple() == nlu.match('громкость половина', READ)
+
+# the also-rans are kept for the log, but never promoted over the winner
+MANY = [{'command': 'a', 'keywords': ['терминал']},
+        {'command': 'b', 'phrases': ['открой терминал']},
+        {'command': 'c', 'keywords': ['терминал']}]
+many = nlu.recognize('открой терминал', MANY)
+assert many.action['command'] == 'b'
+assert [a['command'] for a, _score in many.alternatives] == ['a', 'c']
+
+# a button's priority breaks a tie; a higher score never loses to priority
+TIED = [{'command': 'a', 'phrases': ['открой терминал']},
+        {'command': 'b', 'phrases': ['открой терминал'], 'priority': 5}]
+assert nlu.recognize('открой терминал', TIED).action['command'] == 'b'
+TIED[1]['priority'] = 0
+assert nlu.recognize('открой терминал', TIED).action['command'] == 'a'
+TIED[1]['keywords'] = ['терминал']
+TIED[1]['phrases'] = []
+assert nlu.recognize('открой терминал', TIED).action['command'] == 'a'
+
+# the panel's line: a bent word or a keyword can be left to the chat
+assert nlu.match('открой терминай', ACTIONS, min_confidence=0.9) is None
+assert nlu.match('терминал', ACTIONS, min_confidence=0.9) is None
+assert nlu.match('открой терминал', ACTIONS, min_confidence=0.9) is not None
+assert nlu.recognize('не открывай терминал', ACTIONS, min_confidence=0.5) is None
+
+# a bad priority is just zero, and a button without an id gets a stable one
+assert nlu.recognize('открой терминал', [{'command': 'x', 'phrases': ['открой терминал'],
+                                          'priority': 'many'}]).intent == 'custom:x'
+
 # ---- the search: a url entry with {query}, the words said beside the trigger
 SEARCH = {'command': 'xdg-open https://yandex.ru', 'url': 'https://yandex.ru/search/?text={query}',
           'phrases': ['найди в интернете', 'поищи в интернете', 'search the web'],
@@ -124,7 +163,11 @@ assert 'открой терминал' in loaded[0]['phrases']
 assert 'терминал' in loaded[0]['keywords']
 assert loaded[0]['speak'] == 'Открываю терминал'
 assert loaded[1]['url'] == 'https://yandex.ru/search/?text={query}'   # the search is kept
-assert loaded[2]['phrases'] == [] and loaded[2]['speak'] == ''   # no voice, still a button
+assert loaded[2]['id'] == 'remind_tomorrow' and loaded[2]['priority'] == 2
+assert loaded[2]['requires_confirmation'] is True
+assert loaded[2]['entities'] == {'date': True, 'time': True}
+assert '{date}' in loaded[2]['speak']
+assert loaded[3]['phrases'] == [] and loaded[3]['speak'] == ''   # no voice, still a button
 assert nlu.match('открой терминал', loaded)[0]['command'] == 'foot'
 hit = nlu.match('найди в интернете юми мотылёк', loaded)
 assert hit[0]['url'].endswith('{query}') and hit[2] == {'query': 'юми мотылёк'}, hit

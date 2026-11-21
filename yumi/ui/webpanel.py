@@ -262,6 +262,9 @@ class PanelMixin:
                 'palette': palette,
                 'ui_colors': ui,
                 'music': {'now_playing': self._web_music, 'volume': self._web_volume},
+                'nlu': {'last_intent': getattr(b, 'last_intent', ''),
+                        'last_confidence': round(float(getattr(b, 'last_confidence', 0.0)), 3),
+                        'confirm': bool(getattr(b, 'intent_confirm', None))},
                 'wake_on': bool(self.wake_on),
                 'tap_ears': bool(s.get('tap_ears')),
                 'voice': dict(engines.status(s), tts_error=tts.last_error),
@@ -306,6 +309,9 @@ class PanelMixin:
             b.chat_history = []
             threading.Thread(target=memory.clear_tag, args=(memory.TAG_SASSY,),
                              daemon=True).start()
+        if 'nlu' in patch and not self.settings.get('nlu'):
+            b.intent_confirm = None         # voice commands switched off: no pending answer
+        # nlu_confidence is read from settings on every phrase, so it applies at once
         if 'chat_provider' in patch:
             b.chat_models = []
             b.requests.append(('chat_models',))
@@ -495,7 +501,13 @@ class PanelMixin:
             label_ru = str(raw.get('label_ru') or label)[:18]
             item = {'label': label, 'label_ru': label_ru,
                     'icon': str(raw.get('icon') or 'star')[:120],
-                    'command': command[:2000]}
+                    'command': command[:2000],
+                    # the same optional fields config.load_actions keeps: saving
+                    # from the browser must not erase what the in-world form wrote
+                    'id': str(raw.get('id') or '').strip()[:64],
+                    'priority': config._as_int(raw.get('priority')),
+                    'requires_confirmation': config._as_bool(raw.get('requires_confirmation')),
+                    'entities': config._as_entities(raw.get('entities'))}
             phrases = [str(p)[:200] for p in (raw.get('phrases') or []) if str(p).strip()]
             keywords = [str(k)[:80] for k in (raw.get('keywords') or []) if str(k).strip()]
             if phrases:

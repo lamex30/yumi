@@ -17,6 +17,7 @@ from pathlib import Path
 from . import jobs as J
 from . import addressing
 from . import chat
+from . import entities
 from . import nlu
 from . import notes
 from .config import RING_SLOTS, UI, tr
@@ -273,6 +274,9 @@ class Brain(Extras):
         self.thinking = False           # the question is away at Ollama
         self.chat_streaming = False     # the mind is answering in a stream right now
         self.note_pending = False       # she asked «what should I write down?»: the next phrase is a note
+        self.intent_confirm = None      # a command with requires_confirmation waits for «да» / «yes»
+        self.last_intent = ''           # the last voice command's id, for the browser panel
+        self.last_confidence = 0.0      # and how sure the match was
         self.chat_models = []           # installed Ollama models, for the settings row
         self.mics = []                  # microphones her ears can hear, for the settings row
         self.radial = False             # the ring of round buttons around her
@@ -1288,6 +1292,18 @@ class Brain(Extras):
         if stop_command(text):             # «стоп» overrides everything, even her own voice
             self.stop_all()
             return
+        if self.intent_confirm:            # the next word answers «Run it?»
+            said = nlu.normalize(text)
+            if any(t in CONFIRM_YES for t in said):
+                pending = self.intent_confirm
+                self.intent_confirm = None
+                self._voice_run(pending['action'], pending['slots'])
+                return
+            if any(t in CONFIRM_NO for t in said):
+                self.intent_confirm = None
+                self.say_text(tr(self.settings, 'confirm_no'))
+                return
+            self.intent_confirm = None     # an unrelated phrase: ask it anew below
         if self.note_pending:              # she just asked what to write down
             self.note_pending = False
             if self.settings.get('notes_voice', True):
@@ -1416,39 +1432,85 @@ class Brain(Extras):
                 f'{mind}. Rephrased voice commands '
                 f'{"are on" if intents else "are off"}. {voice}.')
 
+    def _voice_slots(self, hit):
+        """the words and entities a button's {query} / {volume} / {time} need"""
+        slots = dict(hit.slots or {})
+        for key, ent in (hit.entities or {}).items():
+            if isinstance(ent, dict) and ent.get('value') is not None:
+                slots.setdefault(key, ent['value'])
+        return slots
+
+    def _voice_run(self, action, slots):
+        """a button's last mile: a url opens (the slots quoted), a command runs,
+        and «speak» is said. Commands themselves are never built from heard
+        words — only the address and the reply are."""
+        speak = str(action.get('speak') or '')
+        url = str(action.get('url') or '')
+        for key, value in slots.items():
+            if not isinstance(value, (str, int, float)):
+                continue
+            marker = '{' + str(key) + '}'
+            speak = speak.replace(marker, str(value))
+            if marker in url:
+                url = url.replace(marker, urllib.parse.quote(str(value), safe=''))
+        if url:
+            self.requests.append(('url', url))
+        else:
+            self.requests.append(('run', action['command']))
+        if speak:
+            self.say_text(speak)
+
+    def _voice_confirm_web(self, ok):
+        """the browser panel answering «Run it?» — the same pending command as
+        the spoken «да» / «нет»; True when something was really decided"""
+        if not self.intent_confirm:
+            return False
+        pending = self.intent_confirm
+        self.intent_confirm = None
+        if ok:
+            self._voice_run(pending['action'], pending['slots'])
+            self.say_text(tr(self.settings, 'confirm_yes'))
+        else:
+            self.say_text(tr(self.settings, 'confirm_no'))
+        return True
+
     def voice_intent(self, text, alt=''):
         """the user's own voice commands: the «phrases» and «keywords» written
         into actions.json (see nlu.py), matched on the words alone, no mind
         needed — a button's command runs (or its url opens in the browser, the
         {query} filled with the words said beside the trigger) and, when
         «speak» is written, she says so; True when one fired. `alt` is the
-        other ear's reading of the phrase"""
+        other ear's reading of the phrase. A button marked
+        requires_confirmation asks first and waits for the next phrase."""
         if not self.settings.get('nlu', True):
             return False
         self.actions_check()            # actions.json edited by hand: no restart needed
         if not self.custom:
             return False
-        hit = nlu.match(text, self.custom,
-                        use_intents=self.settings.get('intents', True))
+        try:
+            line = max(0.0, min(1.0, float(self.settings.get('nlu_confidence', 0.6))))
+        except (TypeError, ValueError):
+            line = 0.6
+        use_mind = bool(self.settings.get('intents', True))
+        hit = nlu.recognize(text, self.custom, use_intents=use_mind, min_confidence=line)
         if not hit and alt and alt != text:
-            hit = nlu.match(alt, self.custom,
-                            use_intents=self.settings.get('intents', True))
+            hit = nlu.recognize(alt, self.custom, use_intents=use_mind, min_confidence=line)
         if not hit:
             return False
-        action, score, slots = hit
-        _mind_log(f'intent {action.get("url") or action["command"]!r} (score {score:.2f})')
+        action = hit.action
+        self.last_intent, self.last_confidence = hit.intent, hit.confidence
+        _mind_log(f'intent {hit.intent} '
+                  f'{action.get("url") or action.get("command")!r} '
+                  f'(score {hit.confidence:.2f})')
         self.set_face('happy', 1.5)
-        speak = str(action.get('speak') or '')
-        query = slots.get('query') or ''
-        if '{query}' in speak:
-            speak = speak.replace('{query}', query)
-        if action.get('url'):
-            url = str(action['url']).replace('{query}', urllib.parse.quote(query, safe=''))
-            self.requests.append(('url', url))
-        else:
-            self.requests.append(('run', action['command']))
-        if speak:
-            self.say_text(speak)
+        slots = self._voice_slots(hit)
+        if action.get('requires_confirmation') and not self.intent_confirm:
+            self.intent_confirm = {'action': action, 'slots': slots, 'text': text}
+            self.say_text(tr(self.settings, 'confirm_ask'))
+            self.listening = True
+            self.requests.append(('listen', 15))
+            return True
+        self._voice_run(action, slots)
         return True
 
     def said_now_playing(self, playing):
@@ -1799,6 +1861,7 @@ class Brain(Extras):
         self._stream_spoken = ''
         self.listening = False
         self.note_pending = False
+        self.intent_confirm = None
         self.timer = None
         self.kb_hover = False
         self.requests.clear()              # nothing queued may keep running past the stop
@@ -2917,18 +2980,9 @@ MUSIC_ARTIST_W = ('исполнителя', 'исполнитель', 'испо�
 MUSIC_ALBUM_W = frozenset(('альбом', 'альбома', 'album'))
 VOLUME_UP = frozenset(('громче', 'повысь', 'повысить', 'louder', 'up'))
 VOLUME_DOWN = frozenset(('тише', 'тихо', 'quieter', 'softer', 'lower'))
-VOLUME_WORD = frozenset(('громкость', 'звук', 'volume', 'sound'))
-VOLUME_NUMBERS = {'десять': 10, 'двадцать': 20, 'тридцать': 30, 'сорок': 40,
-                  'пятьдесят': 50, 'шестьдесят': 60, 'семьдесят': 70,
-                  'восемьдесят': 80, 'девяносто': 90, 'сто': 100,
-                  'ten': 10, 'twenty': 20, 'thirty': 30, 'forty': 40,
-                  'fifty': 50, 'sixty': 60, 'seventy': 70, 'eighty': 80,
-                  'ninety': 90}
-VOLUME_ONES = {'один': 10, 'одна': 10, 'два': 20, 'две': 20, 'три': 30,
-               'четыре': 40, 'пять': 50, 'шесть': 60, 'семь': 70,
-               'восемь': 80, 'девять': 90, 'one': 10, 'two': 20, 'three': 30,
-               'four': 40, 'five': 50, 'six': 60, 'seven': 70, 'eight': 80,
-               'nine': 90}   # «громкость пять» means fifty: only the tens she obeys
+VOLUME_WORD = entities.VOLUME_WORD         # one dictionary for the rules and the skills
+VOLUME_NUMBERS = entities.VOLUME_NUMBERS
+VOLUME_ONES = entities.VOLUME_ONES
 MUSIC_KNOWN = (MUSIC_WORDS | MUSIC_FILLERS | MUSIC_PLAY | MUSIC_PAUSE
                | MUSIC_STOP_ANY | MUSIC_STOP_MUSIC | set(MUSIC_NEXT)
                | VOLUME_UP | VOLUME_DOWN | VOLUME_WORD | set(VOLUME_NUMBERS)
@@ -2939,6 +2993,12 @@ VERB_ALL = (MUSIC_PLAY | MUSIC_PAUSE | MUSIC_STOP_MUSIC
 # the words of a phrase the way the skills read them: lower case, punctuation gone,
 # ё folded into е — one normalization for everything (nlu.py keeps it)
 volume_tokens = nlu.normalize
+
+CONFIRM_YES = frozenset(('да', 'давай', 'ага', 'ок', 'окей', 'ладно', 'конечно',
+                         'запускай', 'запусти', 'yes', 'yeah', 'yep', 'sure',
+                         'ok', 'okay', 'go', 'run'))
+CONFIRM_NO = frozenset(('нет', 'не', 'не надо', 'отмена', 'отмени', 'откажись',
+                        'no', 'nope', 'cancel', 'dont', "don't", 'stop'))
 
 
 def drop_name(text, word='юми'):
@@ -3015,28 +3075,8 @@ def _mind_log(what):
         pass
 
 
-def spoken_number(t):
-    """the level a word or a digit stands for: «50», «50%», «пятьдесят», «fifty»;
-    a lone one («пять», «5») is read as a ten, the tens are all she obeys"""
-    if t.rstrip('%').isdigit():
-        n = int(t.rstrip('%'))
-    else:
-        n = VOLUME_NUMBERS.get(t) or VOLUME_ONES.get(t)
-    if n is not None and 0 < n < 10:
-        n *= 10
-    return n
-
-
-def bare_volume(text):
-    """one lone number said to her (the ears kept «30» and dropped the rest):
-    the volume level that most likely was meant (10..100), or None"""
-    toks = volume_tokens(text)
-    if len(toks) != 1:
-        return None
-    n = spoken_number(toks[0])
-    if n is None or n <= 0:
-        return None
-    return min(100, max(10, n))
+spoken_number = entities.spoken_number     # kept here: the music skill and the tests call it
+bare_volume = entities.bare_volume
 
 
 def _music_query(toks):

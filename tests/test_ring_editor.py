@@ -134,7 +134,11 @@ assert b.form['cmd'] == 'zoo' and b.form['pos'] == 2
 b.key('Escape')
 assert b.form is None and b.custom[0]['command'] == 'foot' and b.ring_edit
 b.do('ring_add', None)
-assert b.form == {'old': None, 'cmd': '', 'pos': 0, 'field': 'cmd', 'name': '', 'icon': 'star'}
+assert all(b.form[k] == v for k, v in {
+    'old': None, 'cmd': '', 'pos': 0, 'field': 'cmd', 'page': 0, 'name': '',
+    'icon': 'star', 'phrases': '', 'keywords': '', 'speak': '', 'url': '',
+    'id': '', 'priority': '0', 'confirm': False,
+}.items())
 b.key('Return')
 b.scene()
 assert b.form and not any(a == 'form_save' for _r, a, _g in b.buttons)
@@ -153,7 +157,31 @@ b.release_at(1, x, y)
 assert b.form['field'] == 'cmd' and b.form['pos'] == 5
 b.key('Return')
 assert b.form is None and b.custom[-1]['command'] == 'mpv x' and b.custom[-1]['icon'] == 'cup'
+# the other pages of the form carry the voice fields into actions.json
 b.do('ring_add', None)
+b.form_text('mpv x')
+b.key('Tab')
+b.form_text('Voice')
+b.do('form_page', 1)
+assert b.form['field'] == 'phrases'
+b.form_text('открой терминал')
+b.key('Tab')
+b.form_text('терминал')
+b.do('form_page', 1)                                           # one page forward: speak / url
+b.form_text('Открываю терминал')
+b.key('Tab')
+b.form_text('https://example.org/?q={query}')
+b.do('form_page', 1)                                           # id / priority
+b.form_text('voice_open')
+b.key('Tab')
+b.form_text('7')
+b.do('form_confirm', None)
+b.key('Return')
+saved = b.custom[-1]
+assert saved['phrases'] == ['открой терминал'] and saved['keywords'] == ['терминал']
+assert saved['speak'] == 'Открываю терминал' and saved['url'].endswith('{query}'), saved
+assert saved['id'] == 'voice_open' and saved['priority'] == 7
+assert saved['requires_confirmation'] is True
 b.close_radial()                                               # the hotkey, sleep...: the form goes too
 assert b.form is None
 b.do('ring_edit', None)

@@ -300,6 +300,41 @@ Intents mind**.
 ]
 ```
 
+### Structured commands
+
+A button can describe itself a little more precisely. All of these fields are optional, so an
+old `actions.json` keeps working unchanged — the same fields are editable on the ring and in the
+browser panel's **Buttons** page:
+
+- `"id"` — a stable name for the log and the panel (`"intent": "open_terminal"` in `/api/status`).
+  Without one she falls back to `custom:<command>`.
+- `"priority"` — a small whole number (−100..100). It only breaks a tie between two equally good
+  matches: a whole saying (score 1.00) still beats any keyword (0.80) no matter the priority.
+- `"requires_confirmation": true` — she repeats «Run it?» and waits for your next word: «да» /
+  «yes» runs it, «нет» / «no» cancels, «стоп» drops the waiting command. The browser panel has the
+  same two buttons on the **Buttons** page (or `POST /api/nlu/confirm` with `{"ok": true}`).
+- `"entities": {"volume": true, "time": true, "date": true}` — the values she picks out of the
+  phrase: `volume` (a level — «громкость половина» → `50`, a step — «тише» → `-10`), `time`
+  («утром» → `08:00`) and `date` («завтра» → tomorrow's ISO date). Their normal values, along
+  with `{query}`, can be written into `"speak"` and `"url"` as `{volume}`, `{time}`, `{date}`.
+  Only the reply and the address are filled this way — a command is never built from heard words.
+
+```json
+[
+  {"label": "Reminder", "label_ru": "Напоминание", "icon": "clock",
+   "command": "notify-send Напоминание",
+   "phrases": ["напомни завтра вечером"],
+   "speak": "Напомню {date} в {time}",
+   "entities": {"date": true, "time": true},
+   "id": "remind_tomorrow", "priority": 2, "requires_confirmation": true}
+]
+```
+
+**Settings → Her mind → Command confidence line** (`nlu_confidence`, 0.5–1.0, default 0.6) is
+the cut-off: a keyword or a misheard word scored below it is left to the chat instead of running
+a command. At `1.0` only whole sayings fire. It applies to the tiny mind too, and it is read on
+every phrase, so the browser panel changes it live.
+
 ## Outfits
 
 Settings → Look → Outfit: **auto** follows the calendar (Halloween Oct 24 – Nov 2, New Year Dec 15 –

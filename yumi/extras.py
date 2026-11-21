@@ -9,7 +9,7 @@ actions 'custom', 'tour_next', 'tour_skip', 'tour_again' through extras_do.
 import math
 import random
 
-from .config import RING_SLOTS, ACTIONS_FILE, load_actions, tr
+from .config import RING_SLOTS, ACTIONS_FILE, _as_bool, _as_int, load_actions, tr
 from .pixui import ICONS
 
 PET_WINDOW = 1.6        # s: strokes counted within this long
@@ -28,6 +28,15 @@ RING_BUILTIN = {'recent': ('pile', 'recent', 'box', 'recent'), 'shelf': ('pile',
 RING_ALPHA = 0.55
 RING_ALPHA_OFF = 0.22
 FORM_NAME_MAX = 18
+
+# the button editor is a pixel window: four short pages of two lines each, so
+# every voice field has a home in the world as well as in the browser panel
+FORM_PAGES = (
+    (('cmd', 'ring_cmd'), ('name', 'ring_name')),
+    (('phrases', 'ring_phrases'), ('keywords', 'ring_keywords')),
+    (('speak', 'ring_speak'), ('url', 'ring_url')),
+    (('id', 'ring_id'), ('priority', 'ring_priority')),
+)
 
 
 def inside_rect(r, p):
@@ -348,6 +357,13 @@ class Extras:
         if action == 'form_field':
             self.form.update(field=arg, pos=len(self.form[arg]))
             return True
+        if action == 'form_page':
+            page = (int(self.form['page']) + int(arg)) % len(FORM_PAGES)
+            self.form.update(page=page, field=FORM_PAGES[page][0][0], pos=0)
+            return True
+        if action == 'form_confirm':
+            self.form['confirm'] = not self.form['confirm']
+            return True
         if action == 'form_icon':
             self.form['icon'] = arg
             return True
@@ -429,12 +445,22 @@ class Extras:
         self.custom = [a for a in self.custom if 'cmd:' + a['command'] != i]
         self.requests.append(('save_actions',))
 
-    def ring_add(self, command, label, icon, old=None):
+    def ring_add(self, command, label, icon, old=None, voice=None):
         """from the button window: `old` is the command of the button being edited, which keeps
-        its place; a command that another button already has replaces that button"""
+        its place; a command that another button already has replaces that button.
+        `voice` carries the optional fields from the other form pages."""
         prev = next((a for a in self.custom if a['command'] == old), None)
         entry = dict(prev or {})
         entry.update({'icon': icon, 'command': command})
+        if voice is not None:
+            split = lambda value: [p.strip() for p in str(value or '').split(',') if p.strip()]
+            entry.update({'phrases': split(voice.get('phrases', '')),
+                          'keywords': split(voice.get('keywords', '')),
+                          'speak': str(voice.get('speak') or '').strip()[:300],
+                          'url': str(voice.get('url') or '').strip()[:2000],
+                          'id': str(voice.get('id') or '').strip()[:64],
+                          'priority': _as_int(voice.get('priority')),
+                          'requires_confirmation': _as_bool(voice.get('confirm'))})
         if entry.get('label') == entry.get('label_ru'):              # one name for both languages
             entry.update(label=label, label_ru=label)
         else:                                                        # the other language's name stays
@@ -527,8 +553,15 @@ class Extras:
         old = next((a for a in self.custom if a['command'] == command), None) or {}
         icon = old.get('icon', 'star')
         cmd = old.get('command', '')
-        self.form = {'old': command, 'cmd': cmd, 'pos': len(cmd), 'field': 'cmd',
+        self.form = {'old': command, 'cmd': cmd, 'pos': len(cmd), 'field': 'cmd', 'page': 0,
                      'name': old.get('label_ru' if self.settings.get('ui_lang') == 'ru' else 'label', ''),
+                     'phrases': ', '.join(str(p) for p in (old.get('phrases') or [])),
+                     'keywords': ', '.join(str(k) for k in (old.get('keywords') or [])),
+                     'speak': str(old.get('speak') or ''),
+                     'url': str(old.get('url') or ''),
+                     'id': str(old.get('id') or ''),
+                     'priority': str(old.get('priority') or 0),
+                     'confirm': bool(old.get('requires_confirmation')),
                      'icon': icon if icon in ICONS or icon.startswith('/') and self.exists(icon) else 'star'}
 
     def form_can_save(self):
@@ -537,7 +570,8 @@ class Extras:
     def form_save(self):
         f = self.form
         if self.form_can_save():
-            self.ring_add(f['cmd'].strip(), f['name'].strip(), f['icon'], old=f['old'])
+            self.ring_add(f['cmd'].strip(), f['name'].strip(), f['icon'],
+                          old=f['old'], voice=f)
             self.form = None
 
     def form_text(self, text):
@@ -559,7 +593,10 @@ class Extras:
         elif name in ('Return', 'KP_Enter'):
             self.form_save()
         elif name in ('Tab', 'ISO_Left_Tab'):
-            field = 'name' if f['field'] == 'cmd' else 'cmd'
+            fields = [name for name, _key in FORM_PAGES[int(f.get('page', 0))]]
+            at = fields.index(f['field']) if f['field'] in fields else -1
+            step = -1 if name == 'ISO_Left_Tab' else 1
+            field = fields[(at + step) % len(fields)]
             f.update(field=field, pos=len(f[field]))
         elif name == 'BackSpace':
             if pos:
@@ -618,7 +655,7 @@ class Extras:
         lh = self.text_size('Ag')[1]
         bh = 15 * P
         w = cols * cell + 14 * P
-        h = 5 * P + lh + 2 * P + 2 * (lh + 13 * P + 2 * P) + lh + rows * cell + 3 * P + bh + 3 * P + bh + 5 * P
+        h = 5 * P + lh + 2 * P + 2 * (lh + 13 * P + 2 * P) + lh + rows * cell + 3 * P + bh + 3 * P + bh + 3 * P + bh + 5 * P
         ring = self.hits.get('radial')
         if ring:
             x = ring[0] - w - 4 * P if self.ring_left else ring[0] + ring[2] + 4 * P
@@ -629,11 +666,14 @@ class Extras:
         y = min(max(y, 4 * P), self.H - h - 4 * P)
         inner = w - 14 * P
         lx = x + 7 * P
+        page = int(f.get('page', 0)) % len(FORM_PAGES)
         ops = [('panel', x, y, w, h, 'window'),
                ('text', lx, y + 5 * P, t('ring_change' if f['old'] else 'ring_new'), 'muted')]
+        count = f'{page + 1}/{len(FORM_PAGES)}'
+        ops.append(('text', x + w - 7 * P - self.text_size(count)[0], y + 5 * P, count, 'muted'))
         self.hits['form'] = (x, y, w, h)
         ry = y + 5 * P + lh + 2 * P
-        for field, key in (('cmd', 'ring_cmd'), ('name', 'ring_name')):
+        for field, key in FORM_PAGES[page]:
             ops.append(('text', lx, ry, t(key), 'acc_hi' if f['field'] == field else 'fg'))
             ry += lh
             ops += self.form_field_ops(field, lx, ry, inner)
@@ -661,10 +701,27 @@ class Extras:
                 self.buttons.append((r, action, None))
             return r
 
-        r = button(lx, t('ring_file'), 'form_pick')
+        r = button(lx, t('ring_file'), 'form_pick', inner * 0.32)
         if f['icon'].startswith('/'):
             ops.append(('thumb', f['icon'], r[0] + r[2] + 4 * P, ry, bh, bh))
+
+        def small(rx, label, action, arg, rw):
+            sr = (rx, ry, rw, bh)
+            hot = self.pointer is not None and inside_rect(sr, self.pointer)
+            ops.append(('panel', *sr, 'button_hot' if hot else 'button'))
+            tw = self.text_size(label)[0]
+            ops.append(('text', sr[0] + (rw - tw) / 2,
+                        ry + (bh - P - self.text_size(label)[1]) / 2, label, 'fg'))
+            self.buttons.append((sr, action, arg))
+
+        nav_x = lx + inner * 0.34
+        small(nav_x, '‹', 'form_page', -1, inner * 0.1)
+        small(nav_x + inner * 0.12, '›', 'form_page', 1, inner * 0.1)
         ry += bh + 3 * P
+        if page == len(FORM_PAGES) - 1:
+            state = t('on') if f['confirm'] else t('off')
+            small(lx, f"{t('ring_confirm')}: {state}", 'form_confirm', None, inner)
+            ry += bh + 3 * P
         half = (inner - 4 * P) / 2
         button(lx, t('cancel'), 'form_cancel', half)
         button(lx + half + 4 * P, t('ring_save' if f['old'] else 'ring_add'), 'form_save', half, self.form_can_save())

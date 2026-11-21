@@ -40,6 +40,11 @@ class WebBridge:
         self._on(lambda: b.extras_do('custom', int(index)))
         return {'ran': int(index)}
 
+    def confirm_action(self, ok):
+        """answer the pending requires_confirmation command from the browser"""
+        b = self.app.brain
+        return self._on(lambda: {'confirmed': bool(b._voice_confirm_web(bool(ok)))})
+
     def apply_settings(self, patch):
         return self._on(lambda: self.app._web_apply_settings(patch), 60)
 

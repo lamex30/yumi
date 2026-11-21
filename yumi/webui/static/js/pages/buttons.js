@@ -15,6 +15,45 @@ export function render(view, ctx) {
       : 'The ring around Yumi and your own commands. Order and hidden buttons live in her settings.' }),
   );
 
+  // a command with requires_confirmation waits for a word or for a click here
+  const confirmBox = el('div', { class: 'card', style: { marginBottom: '16px' } });
+  view.append(confirmBox);
+
+  function drawConfirm() {
+    const nlu = ctx.status?.runtime?.nlu || {};
+    if (!nlu.confirm) {
+      confirmBox.replaceChildren();
+      confirmBox.hidden = true;
+      return;
+    }
+    confirmBox.hidden = false;
+    const answer = async (ok) => {
+      try {
+        await api.nluConfirm(ok);
+        toast(ok ? (lang() === 'ru' ? 'Запустила' : 'Ran')
+          : (lang() === 'ru' ? 'Отменила' : 'Cancelled'), 'good');
+        await ctx.refreshStatus();
+      } catch (err) { errToast(err); }
+    };
+    confirmBox.replaceChildren(
+      el('h3', { text: lang() === 'ru' ? 'Подтверди команду' : 'Confirm the command' }),
+      el('p', { class: 'card-hint', text: nlu.last_intent || '' }),
+      el('div', { class: 'row' },
+        el('button', {
+          class: 'btn btn-small btn-primary', type: 'button',
+          text: lang() === 'ru' ? 'Запустить' : 'Run',
+          onclick: () => answer(true),
+        }),
+        el('button', {
+          class: 'btn btn-small', type: 'button',
+          text: lang() === 'ru' ? 'Отменить' : 'Cancel',
+          onclick: () => answer(false),
+        })));
+  }
+
+  const offStatus = ctx.onStatus ? ctx.onStatus(drawConfirm) : null;
+  drawConfirm();
+
   const ringBox = el('div', { class: 'ring-list' });
   const ringCard = el('div', { class: 'card' },
     el('div', { class: 'row between' },
@@ -129,6 +168,20 @@ export function render(view, ctx) {
           data.ring_off?.includes(`cmd:${action.command}`) ? badge('off', 'red') : null),
         el('div', { class: 'cmd', text: action.command, title: action.command }),
         action.url ? el('div', { class: 'card-hint', text: `URL: ${action.url}` }) : null,
+        (action.id || action.priority || action.requires_confirmation
+          || Object.keys(action.entities || {}).length)
+          ? el('div', {
+            class: 'card-hint',
+            text: [
+              action.id ? `id: ${action.id}` : '',
+              action.priority ? `priority: ${action.priority}` : '',
+              action.requires_confirmation
+                ? (lang() === 'ru' ? 'спрашивает перед запуском' : 'asks first') : '',
+              Object.keys(action.entities || {}).length
+                ? `entities: ${Object.keys(action.entities).join(', ')}` : '',
+            ].filter(Boolean).join(' · '),
+          })
+          : null,
         el('div', { class: 'row', style: { marginTop: 'auto', paddingTop: '8px' } },
           el('button', {
             class: 'btn btn-small btn-primary', type: 'button', text: lang() === 'ru' ? 'Запустить' : 'Run',
@@ -154,7 +207,8 @@ export function render(view, ctx) {
   function editAction(index) {
     const original = index == null ? null : data.actions[index];
     const draft = original ? JSON.parse(JSON.stringify(original)) : {
-      label: '', label_ru: '', icon: 'star', command: '', phrases: [], keywords: [], speak: '', url: '',
+      label: '', label_ru: '', icon: 'star', command: '', phrases: [], keywords: [], speak: '',
+      url: '', id: '', priority: 0, requires_confirmation: false, entities: {},
     };
     if (!draft.label_ru) draft.label_ru = draft.label || '';
     let chosenIcon = draft.icon || 'star';
@@ -180,6 +234,13 @@ export function render(view, ctx) {
     const phrases = el('input', { type: 'text', value: (draft.phrases || []).join(', '), placeholder: lang() === 'ru' ? 'скажи «…»' : 'say “…”' });
     const keywords = el('input', { type: 'text', value: (draft.keywords || []).join(', '), placeholder: lang() === 'ru' ? 'ключевые слова' : 'keywords' });
     const speak = el('input', { type: 'text', value: draft.speak || '', placeholder: lang() === 'ru' ? 'что сказать после запуска' : 'what to say afterwards' });
+    const id = el('input', { type: 'text', value: draft.id || '', maxlength: 64, spellcheck: 'false', placeholder: 'open_browser' });
+    const priority = el('input', { type: 'number', value: String(draft.priority ?? 0), min: '-100', max: '100', step: '1' });
+    const confirmFirst = el('input', { type: 'checkbox', checked: Boolean(draft.requires_confirmation) });
+    const entities = el('input', {
+      type: 'text', value: Object.keys(draft.entities || {}).join(', '),
+      placeholder: 'volume, time, date', spellcheck: 'false',
+    });
 
     const body = el('div', { class: 'stack' },
       el('div', { class: 'form-grid' },
@@ -189,7 +250,13 @@ export function render(view, ctx) {
         el('div', { class: 'full' }, field('URL', url)),
         el('div', { class: 'full' }, field(lang() === 'ru' ? 'Фразы' : 'Phrases', phrases)),
         el('div', { class: 'full' }, field(lang() === 'ru' ? 'Ключевые слова' : 'Keywords', keywords)),
-        el('div', { class: 'full' }, field(lang() === 'ru' ? 'Реплика' : 'Say', speak))),
+        el('div', { class: 'full' }, field(lang() === 'ru' ? 'Реплика' : 'Say', speak)),
+        field(lang() === 'ru' ? 'ID команды' : 'Command id', id),
+        field(lang() === 'ru' ? 'Приоритет' : 'Priority', priority),
+        field(lang() === 'ru' ? 'Сущности' : 'Entities', entities),
+        el('div', { class: 'full' }, el('label', { class: 'row' },
+          confirmFirst,
+          el('span', { text: lang() === 'ru' ? 'Спрашивать перед запуском' : 'Ask before running' })))),
       el('div', { class: 'field' }, el('span', { text: lang() === 'ru' ? 'Иконка' : 'Icon' }), iconGrid));
 
     modal({
@@ -217,6 +284,15 @@ export function render(view, ctx) {
               speak: speak.value.trim(),
               phrases: phrases.value.split(',').map((v) => v.trim()).filter(Boolean),
               keywords: keywords.value.split(',').map((v) => v.trim()).filter(Boolean),
+              id: id.value.trim(),
+              priority: Number.parseInt(priority.value, 10) || 0,
+              requires_confirmation: confirmFirst.checked,
+              entities: entities.value.split(',')
+                .map((v) => v.trim().toLowerCase()).filter(Boolean)
+                .reduce((acc, key) => {
+                  if (['volume', 'time', 'date'].includes(key)) acc[key] = true;
+                  return acc;
+                }, {}),
             };
             if (index == null) next.push(entry);
             else next[index] = entry;
@@ -249,5 +325,5 @@ export function render(view, ctx) {
   }
 
   load();
-  return () => {};
+  return () => { if (offStatus) offStatus(); };
 }

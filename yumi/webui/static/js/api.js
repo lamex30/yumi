@@ -89,6 +89,8 @@ export const api = {
   status: () => api.get('/api/status'),
   schema: () => api.get('/api/schema'),
 
+  nluConfirm: (ok) => api.post('/api/nlu/confirm', { ok: Boolean(ok) }),
+
   notesList: (params = '') => api.get(`/api/notes${params ? `?${params}` : ''}`),
   noteAdd: (text, title) => api.post('/api/notes', { text, title }),
   noteUpdate: (id, text, title) => api.patch(`/api/notes/${id}`, { text, title }),

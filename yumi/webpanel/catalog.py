@@ -96,7 +96,8 @@ KEY_SECTION = {
     'chat_provider': 'mind', 'chat_model': 'mind', 'chat_think': 'mind',
     'chat_stream': 'mind', 'sassy': 'mind', 'chat_history_n': 'mind', 'chat_memory': 'mind',
     'notes_voice': 'mind',
-    'embed_model': 'mind', 'nlu': 'mind', 'intents': 'mind', 'ollama_url': 'mind',
+    'embed_model': 'mind', 'nlu': 'mind', 'nlu_confidence': 'mind',
+    'intents': 'mind', 'ollama_url': 'mind',
     'polza_url': 'mind', 'polza_api_key': 'mind',
     'wake_ears': 'ears', 'wake_word': 'ears', 'wake_sensitivity': 'ears',
     'wake_confirm': 'ears', 'wake_model_size': 'ears', 'wake_ear': 'ears',
@@ -180,6 +181,7 @@ TYPES = {
     'music_jellyfin_password': 'password', 'polza_api_key': 'password',
     'music_jellyfin_key': 'password', 'music_dirs': 'text',
     'web_panel': 'switch', 'web_panel_open': 'switch',
+    'nlu_confidence': 'range',
 }
 
 RANGES = {
@@ -192,6 +194,7 @@ RANGES = {
     'oww_confirm_below': (0.5, 1.0, 0.01),
     'oww_reject_cooldown': (0, 30, 0.5),
     'tts_pitch': (0.7, 1.5, 0.01),
+    'nlu_confidence': (0.5, 1.0, 0.05),
 }
 
 TITLES = {
@@ -225,6 +228,8 @@ TITLES = {
     'embed_model': {'en': 'Embedding model', 'ru': 'Модель векторов'},
     'notes_voice': {'en': 'Notes by voice', 'ru': 'Заметки голосом'},
     'nlu': {'en': 'Voice commands', 'ru': 'Голосовые команды'},
+    'nlu_confidence': {'en': 'Command confidence line',
+                       'ru': 'Порог уверенности команды'},
     'intents': {'en': 'Intents mind', 'ru': 'Распознавание фраз'},
     'ollama_url': {'en': 'Ollama address', 'ru': 'Адрес Ollama'},
     'polza_url': {'en': 'Polza.ai address', 'ru': 'Адрес Polza.ai'},
@@ -308,6 +313,8 @@ HINTS = {
                     'ru': 'Дневник sqlite в ~/.local/state/yumi/yumi.db.'},
     'notes_voice': {'en': 'Say «запиши заметку …» to write one and «найди заметку про …» to search them.',
                     'ru': 'Скажи «запиши заметку …», чтобы записать, и «найди заметку про …», чтобы искать.'},
+    'nlu_confidence': {'en': 'A fuzzy or keyword match under this line is left to the chat. 1.0 = whole phrases only.',
+                       'ru': 'Нечёткое совпадение или keyword ниже порога уходит в чат. 1.0 = только целые фразы.'},
     'wake_word': {'en': 'Say it, then the question. «Юми» by default.',
                   'ru': 'Скажи его, потом вопрос. По умолчанию «Юми».'},
     'oww_spike': {'en': 'A single loud frame is a knock or a cymbal; a name holds for a stretch. 2 is calmer than 1.',

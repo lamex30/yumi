@@ -25,7 +25,9 @@ said beside the trigger fill it in, and the browser opens at the address
 carry {query} too («Ищу котиков»).
 """
 import re
+from dataclasses import dataclass, field
 
+from . import entities
 from .stt_daemon import near
 
 SCORE_PHRASE = 1.0        # the phrase said whole
@@ -34,6 +36,40 @@ SCORE_FUZZY = 0.6         # the same, one bent letter here and there
 MIN_SCORE = SCORE_FUZZY   # the line under which an intent is no intent
 
 NEGATERS = frozenset(('не', 'not', "don't", 'dont', 'никогда', 'never'))
+
+
+@dataclass
+class IntentResult:
+    """what a phrase meant: the button, how sure the match was, the words cut
+    out for a search, the built-in entities found in it and the also-rans.
+    match() still hands out the old (action, score, slots) triple; the skills
+    that want the rest call recognize() instead."""
+    action: dict | None
+    confidence: float
+    slots: dict
+    entities: dict = field(default_factory=dict)
+    alternatives: list = field(default_factory=list)
+    intent: str = ''
+
+    def as_tuple(self):
+        """the old contract: (action, score, slots)"""
+        return self.action, self.confidence, self.slots
+
+
+def _intent_name(action):
+    """a stable name for the log and the panel: the button's id, or its command"""
+    ident = str(action.get('id') or '').strip()
+    if ident:
+        return ident[:64]
+    return 'custom:' + str(action.get('url') or action.get('command') or '')[:64]
+
+
+def _as_int(value):
+    """a button's priority is a small whole number; a bad one counts as zero"""
+    try:
+        return max(-100, min(100, int(value or 0)))
+    except (TypeError, ValueError):
+        return 0
 
 # the polite words and the search verbs that are neither the trigger nor the
 # subject of a search: they go when the query is cut out of the phrase
@@ -177,32 +213,52 @@ def _slots(entry, text, toks, forms_list):
     return {'query': ' '.join(query)}
 
 
-def match(text, actions, use_intents=True):
-    """(action, score, slots) of the best intent for the phrase, or None when
-    nothing earns its keep; actions are the entries actions.json gives (those
-    with a command or a url); a tie goes to the button written first. slots
-    carries {'query': '...'} for an url entry, the words said beside the
-    trigger — an entry whose query came out empty does not fire: «найди в
-    интернете» said alone is a wish with no subject, the chat takes it.
+def recognize(text, actions, use_intents=True, min_confidence=None):
+    """the best intent as an IntentResult, or None when nothing earns its keep.
+    The rules keep their old order: a whole phrase (1.00) beats a keyword
+    (0.80), which beats the ears' bent word (0.60); a tie goes to the button
+    written first. `min_confidence` is the line from the settings: under it the
+    phrase is left to the chat, even when a keyword was heard.
 
     When the rules end with nothing, the tiny mind (yumi/intents.py, if it was
     trained: tools/intents_setup.sh) gets one look at the phrase; it answers
-    with a probability, and only a sure answer counts"""
+    with a probability, and only a sure answer counts. Its own threshold is
+    stricter, and the panel's line applies to it too."""
     toks = normalize(text)
     if not toks or any(t in NEGATERS for t in toks):
         return None
     forms_list = [forms(t) for t in toks]
-    best = None
+    hits = []
     for a in actions or []:
         if not isinstance(a, dict) or not (a.get('command') or a.get('url')):
             continue
         score = _score(a, toks, forms_list)
-        if score is not None and (best is None or score > best[1]):
-            best = (a, score)
-    if not best:
-        from . import intents
-        if use_intents:
-            return intents.classify(text, actions)
+        if score is not None:
+            hits.append((a, score))
+    if not hits:
+        if not use_intents:
+            return None
+        from . import intents                 # lazy: the classifier reads nlu.normalize
+        hit = intents.classify(text, actions)
+        if not hit:
+            return None
+        action, score, slots = hit
+        if min_confidence is not None and score < min_confidence:
+            return None
+        return IntentResult(action, score, slots, entities.extract(text),
+                            [], _intent_name(action))
+
+    def rank(hit):
+        """the score first; `priority` from a button only breaks a tie, so a
+        louder keyword never pushes out a phrase said whole"""
+        action, score = hit
+        return score, _as_int(action.get('priority'))
+
+    best = hits[0]
+    for hit in hits[1:]:
+        if rank(hit) > rank(best):           # strictly greater: the first wins a tie
+            best = hit
+    if min_confidence is not None and best[1] < min_confidence:
         return None
     slots = _slots(best[0], text, toks, forms_list)
     if '{query}' in str(best[0].get('url') or ''):
@@ -211,4 +267,16 @@ def match(text, actions, use_intents=True):
         if best[1] != SCORE_PHRASE and not any(
                 t.startswith(SEARCH_VERB) for t in toks):
             return None                      # a keyword alone is somebody talking
-    return best[0], best[1], slots
+    alternatives = [(a, score) for a, score in sorted(hits, key=lambda h: -h[1])
+                    if a is not best[0]][:3]
+    return IntentResult(best[0], best[1], slots, entities.extract(text),
+                        alternatives, _intent_name(best[0]))
+
+
+def match(text, actions, use_intents=True, min_confidence=None):
+    """(action, score, slots) of the best intent for the phrase, or None when
+    nothing earns its keep — the contract the button runner has always used.
+    See recognize() for the same answer with entities and alternatives."""
+    hit = recognize(text, actions, use_intents=use_intents,
+                    min_confidence=min_confidence)
+    return hit.as_tuple() if hit else None

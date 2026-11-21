@@ -62,6 +62,7 @@ DEFAULT_SETTINGS = {
     'wake_ears': True,        # she starts listening the moment you say the wake word
     'music_skill': True,      # music control via voice commands
     'nlu': True,              # her own voice commands: the phrases in actions.json
+    'nlu_confidence': 0.6,    # a match under this line is left to the chat (0..1)
     'intents': True,          # the tiny trained mind (yumi/intents.py) hears the
                               # phrases the sayings miss; tools/intents_setup.sh
     'wake_word': 'юми',       # the wake word itself (say it, then the question);
@@ -207,6 +208,39 @@ def load_settings():
 
 RING_SLOTS = 10            # places on her ring in the button editor
 
+# the entities a button may say it understands (yumi/entities.py); kept here as
+# a plain list so this low-level file needs no import of the NLU
+ACTION_ENTITIES = frozenset(('volume', 'time', 'date'))
+
+
+def _as_int(value, default=0, low=-100, high=100):
+    try:
+        return max(low, min(high, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on', 'да')
+    return default
+
+
+def _as_entities(value):
+    """the known entity names of a button, as {'volume': True, ...}; a bad
+    spelling is dropped instead of spoiling the whole entry"""
+    if isinstance(value, dict):
+        names = [k for k, v in value.items() if v]
+    elif isinstance(value, (list, tuple, set)):
+        names = list(value)
+    else:
+        names = []
+    return {str(k): True for k in names[:8] if str(k) in ACTION_ENTITIES}
+
 
 def load_actions(path=None):
     """her own round buttons from ~/.config/yumi/actions.json:
@@ -235,7 +269,13 @@ def load_actions(path=None):
                         'keywords': [str(k) for k in (a.get('keywords') or []) if str(k).strip()],
                         'speak': str(a.get('speak') or '').strip(),
                         # a web address instead of a command ({query} = the words said beside the trigger)
-                        'url': str(a.get('url') or '').strip()})
+                        'url': str(a.get('url') or '').strip(),
+                        # the declarative side of a voice command (all optional:
+                        # old buttons keep working with the defaults below)
+                        'id': str(a.get('id') or '').strip()[:64],
+                        'priority': _as_int(a.get('priority')),
+                        'requires_confirmation': _as_bool(a.get('requires_confirmation')),
+                        'entities': _as_entities(a.get('entities'))})
     return out
 
 
@@ -315,6 +355,11 @@ UI = {
         'o_valentine': 'Valentine', 'o_spring': 'March 8', 'min': 'min', 'monitor': 'Screen',
         'cat_ring': 'Buttons', 'ring_done': 'Done', 'ring_new': 'New button', 'ring_change': 'Edit button', 'ring_save': 'Save',
         'ring_cmd': 'Command', 'ring_name': 'Button name', 'ring_icon': 'Icon', 'ring_file': 'Your own picture...',
+        'ring_phrases': 'Say', 'ring_keywords': 'Keywords', 'ring_speak': 'Reply',
+        'ring_url': 'URL ({query} = words)', 'ring_id': 'Command id',
+        'ring_priority': 'Priority', 'ring_confirm': 'Ask first',
+        'confirm_ask': 'Run it?', 'confirm_yes': 'Okay, running it.',
+        'confirm_no': 'Okay, cancelled.',
         'ring_add': 'Add', 'images': 'Pictures',
         'restart': 'Restart', 'tour_again': 'Show the tour', 'tour_next': 'Next', 'tour_skip': 'Skip', 'tour_done': 'Got it!',
         'tour_title': 'Hello!',
@@ -383,6 +428,11 @@ UI = {
         'o_valentine': 'Валентинка', 'o_spring': '8 Марта', 'min': 'мин', 'monitor': 'Экран',
         'cat_ring': 'Кнопки', 'ring_done': 'Готово', 'ring_new': 'Новая кнопка', 'ring_change': 'Изменить кнопку', 'ring_save': 'Сохранить',
         'ring_cmd': 'Команда', 'ring_name': 'Название кнопки', 'ring_icon': 'Иконка', 'ring_file': 'Своя картинка...',
+        'ring_phrases': 'Фразы', 'ring_keywords': 'Ключевые слова', 'ring_speak': 'Ответ',
+        'ring_url': 'Адрес ({query} = слова)', 'ring_id': 'ID команды',
+        'ring_priority': 'Приоритет', 'ring_confirm': 'Спрашивать',
+        'confirm_ask': 'Запустить?', 'confirm_yes': 'Ладно, запускаю.',
+        'confirm_no': 'Ладно, отменила.',
         'ring_add': 'Добавить', 'images': 'Картинки',
         'restart': 'Перезапустить', 'tour_again': 'Показать знакомство', 'tour_next': 'Дальше', 'tour_skip': 'Пропустить', 'tour_done': 'Поняла!',
         'tour_title': 'Привет!',

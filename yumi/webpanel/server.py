@@ -377,6 +377,7 @@ def _make_handler(panel):
                 ('GET', '/api/configs'): self._configs,
                 ('GET', '/api/actions'): self._actions_get,
                 ('PUT', '/api/actions'): self._actions_put,
+                ('POST', '/api/nlu/confirm'): self._nlu_confirm,
                 ('GET', '/api/files/recent'): self._recent,
                 ('GET', '/api/files/shelf'): self._shelf,
                 ('POST', '/api/files/shelf'): self._shelf_change,
@@ -571,6 +572,14 @@ def _make_handler(panel):
             result = panel.bridge.action_run(index)
             panel.audit(self._ip(), 'action-run', str(index))
             panel.publish('actions', {'ran': index})
+            return self._json(200, {'ok': True, **result})
+
+        def _nlu_confirm(self, _q):
+            body = self._body()
+            ok = bool(body.get('ok', True))
+            result = panel.bridge.confirm_action(ok)
+            panel.audit(self._ip(), 'nlu-confirm', 'yes' if ok else 'no')
+            panel.publish('actions', {'confirm': ok, **result})
             return self._json(200, {'ok': True, **result})
 
         def _state(self, name):
